@@ -233,10 +233,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &cancellables)
 
         Publishers.CombineLatest3(
-            appState.$preferences,
-            appState.permissions.$snapshot,
-            appState.$runtimeState
+            appState.$preferences.removeDuplicates(),
+            appState.permissions.$snapshot.removeDuplicates(),
+            appState.$runtimeState.removeDuplicates()
         )
+        .dropFirst()
         .debounce(for: .milliseconds(75), scheduler: RunLoop.main)
         .sink { [weak self] _ in
             self?.rebuildStatusMenu()
