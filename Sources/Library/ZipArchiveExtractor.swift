@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 struct ZipExtractionLimits: Equatable, Sendable {
@@ -29,14 +30,16 @@ struct ZipArchiveInspection: Equatable, Sendable {
 
 struct ZipArchiveExtractor: Sendable {
     let limits: ZipExtractionLimits
-    let unzipExecutableURL: URL
+    let extractorExecutableURL: URL
 
     init(
         limits: ZipExtractionLimits = .default,
-        unzipExecutableURL: URL = URL(fileURLWithPath: "/usr/bin/unzip")
+        extractorExecutableURL: URL = URL(
+            fileURLWithPath: "/usr/bin/ditto"
+        )
     ) {
         self.limits = limits
-        self.unzipExecutableURL = unzipExecutableURL
+        self.extractorExecutableURL = extractorExecutableURL
     }
 
     func inspect(archiveAt archiveURL: URL) throws -> ZipArchiveInspection {
@@ -244,14 +247,35 @@ struct ZipArchiveExtractor: Sendable {
         archiveAt archiveURL: URL,
         to destinationURL: URL
     ) throws -> ZipArchiveInspection {
-        let inspection = try inspect(archiveAt: archiveURL)
         let fileManager = FileManager.default
         guard !fileManager.fileExists(atPath: destinationURL.path) else {
             throw ZipArchiveError.destinationAlreadyExists
         }
-        guard fileManager.isExecutableFile(atPath: unzipExecutableURL.path) else {
-            throw ZipArchiveError.unzipUnavailable
+        guard fileManager.isExecutableFile(
+            atPath: extractorExecutableURL.path
+        ) else {
+            throw ZipArchiveError.extractorUnavailable
         }
+
+        let snapshotDirectory = try makePrivateSnapshotDirectory(
+            fileManager: fileManager
+        )
+        defer {
+            try? fileManager.removeItem(at: snapshotDirectory)
+        }
+        let snapshotURL = snapshotDirectory.appendingPathComponent(
+            "archive.zip",
+            isDirectory: false
+        )
+        try copyBoundedSnapshot(
+            from: archiveURL,
+            to: snapshotURL
+        )
+        let inspection = try inspect(archiveAt: snapshotURL)
+        try fileManager.setAttributes(
+            [.posixPermissions: 0o400],
+            ofItemAtPath: snapshotURL.path
+        )
 
         try fileManager.createDirectory(
             at: destinationURL,
@@ -266,10 +290,40 @@ struct ZipArchiveExtractor: Sendable {
         }
 
         let process = Process()
-        process.executableURL = unzipExecutableURL
-        process.arguments = ["-qq", archiveURL.path, "-d", destinationURL.path]
+        process.executableURL = extractorExecutableURL
+        process.arguments = [
+            "-x",
+            "-k",
+            "--norsrc",
+            "--noextattr",
+            "--noqtn",
+            "--noacl",
+            "--nopersistRootless",
+            "--nopreserveHFSCompression",
+            snapshotURL.path,
+            destinationURL.path
+        ]
+        process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
-        let standardError = Pipe()
+        let standardErrorURL = snapshotDirectory.appendingPathComponent(
+            "extractor-stderr",
+            isDirectory: false
+        )
+        guard fileManager.createFile(
+            atPath: standardErrorURL.path,
+            contents: nil,
+            attributes: [.posixPermissions: 0o600]
+        ) else {
+            throw ZipArchiveError.extractionFailed(
+                "Could not create a private extractor diagnostics file."
+            )
+        }
+        let standardError = try FileHandle(
+            forWritingTo: standardErrorURL
+        )
+        defer {
+            try? standardError.close()
+        }
         process.standardError = standardError
         do {
             try process.run()
@@ -277,11 +331,19 @@ struct ZipArchiveExtractor: Sendable {
             throw ZipArchiveError.extractionFailed(error.localizedDescription)
         }
         process.waitUntilExit()
+        try? standardError.synchronize()
+        try? standardError.close()
 
-        let errorData = standardError.fileHandleForReading.readDataToEndOfFile()
         guard process.terminationReason == .exit, process.terminationStatus == 0 else {
+            let errorHandle = try? FileHandle(
+                forReadingFrom: standardErrorURL
+            )
+            let errorData = (
+                try? errorHandle?.read(upToCount: 4_096)
+            ) ?? Data()
+            try? errorHandle?.close()
             let message = String(data: errorData.prefix(4_096), encoding: .utf8)
-                ?? "unzip exited with status \(process.terminationStatus)"
+                ?? "extractor exited with status \(process.terminationStatus)"
             throw ZipArchiveError.extractionFailed(message)
         }
 
@@ -292,6 +354,157 @@ struct ZipArchiveExtractor: Sendable {
         )
         shouldCleanUp = false
         return inspection
+    }
+
+    private func copyBoundedSnapshot(
+        from sourceURL: URL,
+        to destinationURL: URL
+    ) throws {
+        let sourceDescriptor = Darwin.open(
+            sourceURL.path,
+            O_RDONLY | O_NOFOLLOW | O_CLOEXEC
+        )
+        guard sourceDescriptor >= 0 else {
+            throw ZipArchiveError.notARegularFile
+        }
+        defer {
+            Darwin.close(sourceDescriptor)
+        }
+
+        var initialMetadata = stat()
+        guard
+            fstat(sourceDescriptor, &initialMetadata) == 0,
+            (initialMetadata.st_mode & S_IFMT) == S_IFREG
+        else {
+            throw ZipArchiveError.notARegularFile
+        }
+        let initialSize = Int64(initialMetadata.st_size)
+        guard initialSize > 0,
+              initialSize <= limits.maximumArchiveBytes else {
+            throw ZipArchiveError.archiveTooLarge(
+                actual: initialSize,
+                limit: limits.maximumArchiveBytes
+            )
+        }
+
+        let destinationDescriptor = Darwin.open(
+            destinationURL.path,
+            O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+            mode_t(0o600)
+        )
+        guard destinationDescriptor >= 0 else {
+            throw ZipArchiveError.snapshotFailed(
+                String(cString: strerror(errno))
+            )
+        }
+        defer {
+            Darwin.close(destinationDescriptor)
+        }
+
+        var copiedBytes: Int64 = 0
+        var buffer = [UInt8](
+            repeating: 0,
+            count: 64 * 1_024
+        )
+        while true {
+            let readCount: Int = buffer.withUnsafeMutableBytes {
+                guard let address = $0.baseAddress else {
+                    return -1
+                }
+                return Darwin.read(
+                    sourceDescriptor,
+                    address,
+                    $0.count
+                )
+            }
+            if readCount < 0 {
+                if errno == EINTR {
+                    continue
+                }
+                throw ZipArchiveError.snapshotFailed(
+                    String(cString: strerror(errno))
+                )
+            }
+            if readCount == 0 {
+                break
+            }
+            copiedBytes += Int64(readCount)
+            guard copiedBytes <= limits.maximumArchiveBytes else {
+                throw ZipArchiveError.archiveTooLarge(
+                    actual: copiedBytes,
+                    limit: limits.maximumArchiveBytes
+                )
+            }
+
+            var written = 0
+            while written < readCount {
+                let writeCount: Int = buffer.withUnsafeBytes {
+                    guard let address = $0.baseAddress else {
+                        return -1
+                    }
+                    return Darwin.write(
+                        destinationDescriptor,
+                        address.advanced(by: written),
+                        readCount - written
+                    )
+                }
+                if writeCount < 0 {
+                    if errno == EINTR {
+                        continue
+                    }
+                    throw ZipArchiveError.snapshotFailed(
+                        String(cString: strerror(errno))
+                    )
+                }
+                guard writeCount > 0 else {
+                    throw ZipArchiveError.snapshotFailed(
+                        "Snapshot write made no progress."
+                    )
+                }
+                written += writeCount
+            }
+        }
+
+        var finalMetadata = stat()
+        guard
+            fstat(sourceDescriptor, &finalMetadata) == 0,
+            Int64(finalMetadata.st_size) == initialSize,
+            copiedBytes == initialSize
+        else {
+            throw ZipArchiveError.snapshotFailed(
+                "The selected ZIP changed while it was being copied."
+            )
+        }
+    }
+
+    private func makePrivateSnapshotDirectory(
+        fileManager: FileManager
+    ) throws -> URL {
+        let temporaryRoot = fileManager.temporaryDirectory
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+        let values = try temporaryRoot.resourceValues(forKeys: [
+            .isDirectoryKey,
+            .isSymbolicLinkKey
+        ])
+        guard values.isDirectory == true, values.isSymbolicLink != true else {
+            throw ZipArchiveError.unsafeSnapshotDirectory
+        }
+
+        let directory = temporaryRoot.appendingPathComponent(
+            ".mojipond-zip-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        do {
+            try fileManager.createDirectory(
+                at: directory,
+                withIntermediateDirectories: false,
+                attributes: [.posixPermissions: 0o700]
+            )
+        } catch {
+            throw ZipArchiveError.snapshotFailed(error.localizedDescription)
+        }
+        return directory
     }
 
     private func findEndOfCentralDirectory(in data: Data) -> Int? {
@@ -524,7 +737,9 @@ enum ZipArchiveError: Error, Equatable, LocalizedError, Sendable {
     case localSizeMismatch
     case overlappingEntries
     case destinationAlreadyExists
-    case unzipUnavailable
+    case extractorUnavailable
+    case unsafeSnapshotDirectory
+    case snapshotFailed(String)
     case extractionFailed(String)
     case extractedTreeInvalid
     case extractedPathEscapedRoot
@@ -583,8 +798,12 @@ enum ZipArchiveError: Error, Equatable, LocalizedError, Sendable {
             "ZIP entries overlap."
         case .destinationAlreadyExists:
             "ZIP extraction destination already exists."
-        case .unzipUnavailable:
-            "The system unzip utility is unavailable."
+        case .extractorUnavailable:
+            "The system archive extractor is unavailable."
+        case .unsafeSnapshotDirectory:
+            "The private ZIP staging directory is unavailable."
+        case let .snapshotFailed(message):
+            "Could not create an immutable ZIP snapshot: \(message)"
         case let .extractionFailed(message):
             "ZIP extraction failed: \(message)"
         case .extractedTreeInvalid:

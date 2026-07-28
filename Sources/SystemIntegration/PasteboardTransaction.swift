@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import ImageIO
 import UniformTypeIdentifiers
 
 struct PasteboardRepresentation: Equatable, Sendable {
@@ -40,10 +41,29 @@ struct PasteboardItemPayload: Equatable, Sendable {
                 data: originalData
             )
         ]
+        let limits = AssetValidationLimits.default
         guard
             includeCompatibilityFallbacks,
-            let image = NSImage(data: originalData),
-            let tiffData = image.tiffRepresentation
+            (try? AssetValidator(limits: limits).validate(
+                data: originalData
+            )) != nil,
+            let source = CGImageSourceCreateWithData(
+                originalData as CFData,
+                [kCGImageSourceShouldCache: false] as CFDictionary
+            ),
+            let thumbnail = CGImageSourceCreateThumbnailAtIndex(
+                source,
+                0,
+                [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceThumbnailMaxPixelSize: 1_024,
+                    kCGImageSourceShouldCacheImmediately: true
+                ] as CFDictionary
+            ),
+            let tiffData = NSBitmapImageRep(
+                cgImage: thumbnail
+            ).tiffRepresentation
         else {
             return PasteboardItemPayload(representations: representations)
         }
@@ -132,22 +152,32 @@ final class MacPasteboardAccess: PasteboardAccessing {
 
     @discardableResult
     func replaceContents(with items: [PasteboardItemPayload]) -> Bool {
-        pasteboard.clearContents()
-        guard !items.isEmpty else {
-            return true
-        }
-
-        let pasteboardItems = items.map { payload in
+        var pasteboardItems: [NSPasteboardItem] = []
+        pasteboardItems.reserveCapacity(items.count)
+        for payload in items {
             let item = NSPasteboardItem()
             for representation in payload.representations {
-                item.setData(
-                    representation.data,
-                    forType: NSPasteboard.PasteboardType(
-                        representation.typeIdentifier
+                let typeIdentifier = representation.typeIdentifier
+                guard
+                    !typeIdentifier.isEmpty,
+                    typeIdentifier.utf8.count <= 255,
+                    typeIdentifier.unicodeScalars.allSatisfy({
+                        !CharacterSet.controlCharacters.contains($0)
+                    }),
+                    item.setData(
+                        representation.data,
+                        forType: NSPasteboard.PasteboardType(typeIdentifier)
                     )
-                )
+                else {
+                    return false
+                }
             }
-            return item
+            pasteboardItems.append(item)
+        }
+
+        pasteboard.clearContents()
+        guard !pasteboardItems.isEmpty else {
+            return true
         }
         return pasteboard.writeObjects(pasteboardItems)
     }
@@ -158,11 +188,18 @@ final class MacPasteboardAccess: PasteboardAccessing {
 @MainActor
 final class PasteboardTransactionCoordinator {
     static let defaultMemoryLimit = 32 * 1_024 * 1_024
+    private static let ownershipTypeIdentifier =
+        "com.rajjoshi.MojiPond.temporary-pasteboard-owner"
+
+    private struct TransactionWaiter {
+        let id: UUID
+        let continuation: CheckedContinuation<Void, Error>
+    }
 
     private let pasteboard: PasteboardAccessing
     private let memoryLimit: Int
     private var transactionInProgress = false
-    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var waiters: [TransactionWaiter] = []
 
     init(
         pasteboard: PasteboardAccessing = MacPasteboardAccess(),
@@ -229,16 +266,25 @@ final class PasteboardTransactionCoordinator {
         restorationDelay: Duration = .milliseconds(180),
         action: @MainActor () async throws -> Void
     ) async throws -> PasteboardRestoreOutcome {
-        await acquireTransaction()
+        try await acquireTransaction()
         defer {
             releaseTransaction()
         }
 
+        try Task.checkCancellation()
         // Capture must succeed completely before MojiPond changes the clipboard.
         let snapshot = try captureSnapshot()
-        guard pasteboard.replaceContents(with: items) else {
-            let failedWriteChangeCount = pasteboard.changeCount
-            if pasteboard.changeCount == failedWriteChangeCount {
+        try Task.checkCancellation()
+        let ownershipToken = UUID().uuidString
+        let temporaryItems = addingOwnershipMarker(
+            to: items,
+            token: ownershipToken
+        )
+        guard pasteboard.replaceContents(with: temporaryItems) else {
+            if
+                pasteboardContainsOwnershipToken(ownershipToken)
+                    || pasteboardReflectsOwnedClear(after: snapshot)
+            {
                 _ = pasteboard.replaceContents(with: snapshot.items)
             }
             throw PasteboardTransactionError.unableToWriteTemporaryItems
@@ -246,14 +292,19 @@ final class PasteboardTransactionCoordinator {
         let transactionChangeCount = pasteboard.changeCount
 
         var capturedActionError: Error?
+        var actionCompleted = false
         do {
+            try Task.checkCancellation()
             try await action()
+            actionCompleted = true
         } catch {
             capturedActionError = error
         }
 
-        if restorationDelay > .zero {
-            try? await Task.sleep(for: restorationDelay)
+        if actionCompleted, restorationDelay > .zero {
+            await Self.waitWithoutInheritingCancellation(
+                for: restorationDelay
+            )
         }
 
         let restoreOutcome: PasteboardRestoreOutcome
@@ -271,31 +322,114 @@ final class PasteboardTransactionCoordinator {
         return restoreOutcome
     }
 
+    private static func waitWithoutInheritingCancellation(
+        for duration: Duration
+    ) async {
+        let sleeper = Task.detached(priority: .userInitiated) {
+            try? await Task.sleep(for: duration)
+        }
+        await sleeper.value
+    }
+
     /// Used by the explicit "Copy image instead" fallback.
     @discardableResult
     func writePermanently(_ items: [PasteboardItemPayload]) async -> Bool {
-        await acquireTransaction()
+        do {
+            try await acquireTransaction()
+        } catch {
+            return false
+        }
         defer {
             releaseTransaction()
+        }
+        guard !Task.isCancelled else {
+            return false
         }
         return pasteboard.replaceContents(with: items)
     }
 
-    private func acquireTransaction() async {
+    private func addingOwnershipMarker(
+        to items: [PasteboardItemPayload],
+        token: String
+    ) -> [PasteboardItemPayload] {
+        let marker = PasteboardRepresentation(
+            typeIdentifier: Self.ownershipTypeIdentifier,
+            data: Data(token.utf8)
+        )
+        guard let first = items.first else {
+            return [PasteboardItemPayload(representations: [marker])]
+        }
+        var marked = items
+        marked[0] = PasteboardItemPayload(
+            representations: first.representations + [marker]
+        )
+        return marked
+    }
+
+    private func pasteboardContainsOwnershipToken(_ token: String) -> Bool {
+        guard
+            pasteboard.itemCount > 0,
+            pasteboard.types(forItemAt: 0).contains(
+                Self.ownershipTypeIdentifier
+            ),
+            pasteboard.data(
+                forType: Self.ownershipTypeIdentifier,
+                itemAt: 0
+            ) == Data(token.utf8)
+        else {
+            return false
+        }
+        return true
+    }
+
+    private func pasteboardReflectsOwnedClear(
+        after snapshot: PasteboardSnapshot
+    ) -> Bool {
+        pasteboard.itemCount == 0
+            && pasteboard.changeCount == snapshot.changeCount + 1
+    }
+
+    private func acquireTransaction() async throws {
+        try Task.checkCancellation()
         if !transactionInProgress {
             transactionInProgress = true
             return
         }
-        await withCheckedContinuation { continuation in
-            waiters.append(continuation)
+        let waiterID = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation {
+                (continuation: CheckedContinuation<Void, Error>) in
+                guard !Task.isCancelled else {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                waiters.append(
+                    TransactionWaiter(
+                        id: waiterID,
+                        continuation: continuation
+                    )
+                )
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.cancelWaiter(waiterID)
+            }
         }
+    }
+
+    private func cancelWaiter(_ id: UUID) {
+        guard let index = waiters.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        let waiter = waiters.remove(at: index)
+        waiter.continuation.resume(throwing: CancellationError())
     }
 
     private func releaseTransaction() {
         if waiters.isEmpty {
             transactionInProgress = false
         } else {
-            waiters.removeFirst().resume()
+            waiters.removeFirst().continuation.resume()
         }
     }
 }

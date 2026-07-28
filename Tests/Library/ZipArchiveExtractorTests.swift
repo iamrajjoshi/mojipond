@@ -53,6 +53,39 @@ final class ZipArchiveExtractorTests: XCTestCase {
         XCTAssertEqual(permissions?.intValue, 0o600)
     }
 
+    func testExtractsUTF8FilenameUsedByBufo() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let archiveURL = root.appendingPathComponent("bufo.zip")
+        try TestZipBuilder.archive(
+            entries: [
+                .init(
+                    path: "pack/bufo-fußball.png",
+                    data: Data("bufo".utf8)
+                )
+            ]
+        ).write(to: archiveURL)
+        let destination = root.appendingPathComponent(
+            "expanded",
+            isDirectory: true
+        )
+
+        _ = try ZipArchiveExtractor().extract(
+            archiveAt: archiveURL,
+            to: destination
+        )
+
+        XCTAssertEqual(
+            try String(
+                contentsOf: destination.appendingPathComponent(
+                    "pack/bufo-fußball.png"
+                ),
+                encoding: .utf8
+            ),
+            "bufo"
+        )
+    }
+
     func testRejectsTraversalAbsoluteBackslashAndColonPaths() throws {
         let unsafePaths = [
             "../outside.png",
@@ -205,6 +238,153 @@ final class ZipArchiveExtractorTests: XCTestCase {
         ) {
             XCTAssertEqual($0 as? ZipArchiveError, .destinationAlreadyExists)
         }
+    }
+
+    func testExtractsOnlyFromPrivateImmutableSnapshot() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let archiveURL = root.appendingPathComponent("selected.zip")
+        try TestZipBuilder.archive(
+            entries: [.init(path: "frog.txt", data: Data("frog".utf8))]
+        ).write(to: archiveURL)
+        let recordedArchiveURL = root.appendingPathComponent("archive-path.txt")
+        let wrapperURL = root.appendingPathComponent("extractor-wrapper")
+        let wrapper = """
+        #!/bin/sh
+        printf '%s\\n' "${9}" > "\(recordedArchiveURL.path)"
+        /usr/bin/stat -f '%Lp' "${9}" >> "\(recordedArchiveURL.path)"
+        /usr/bin/stat -f '%Lp' "$(dirname "${9}")" >> "\(recordedArchiveURL.path)"
+        printf 'corrupt' > "\(archiveURL.path)"
+        exec /usr/bin/ditto "$@"
+        """
+        try Data(wrapper.utf8).write(to: wrapperURL)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: wrapperURL.path
+        )
+
+        let destination = root.appendingPathComponent(
+            "expanded",
+            isDirectory: true
+        )
+        _ = try ZipArchiveExtractor(
+            extractorExecutableURL: wrapperURL
+        ).extract(
+            archiveAt: archiveURL,
+            to: destination
+        )
+
+        let snapshotDetails = try String(
+            contentsOf: recordedArchiveURL,
+            encoding: .utf8
+        ).split(separator: "\n").map(String.init)
+        XCTAssertEqual(snapshotDetails.count, 3)
+        let extractedFrom = snapshotDetails[0]
+        XCTAssertNotEqual(extractedFrom, archiveURL.path)
+        XCTAssertTrue(
+            URL(fileURLWithPath: extractedFrom)
+                .deletingLastPathComponent()
+                .lastPathComponent
+                .hasPrefix(".mojipond-zip-")
+        )
+        XCTAssertEqual(snapshotDetails[1], "400")
+        XCTAssertEqual(snapshotDetails[2], "700")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: extractedFrom))
+        XCTAssertEqual(
+            try String(contentsOf: archiveURL, encoding: .utf8),
+            "corrupt"
+        )
+        XCTAssertEqual(
+            try String(
+                contentsOf: destination.appendingPathComponent("frog.txt"),
+                encoding: .utf8
+            ),
+            "frog"
+        )
+    }
+
+    func testLargeExtractorDiagnosticsCannotDeadlockExtraction() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let archiveURL = root.appendingPathComponent("pack.zip")
+        try TestZipBuilder.archive(
+            entries: [.init(path: "frog.txt", data: Data("frog".utf8))]
+        ).write(to: archiveURL)
+        let wrapperURL = root.appendingPathComponent("noisy-extractor")
+        let wrapper = """
+        #!/bin/sh
+        index=0
+        while [ "$index" -lt 4096 ]; do
+          printf 'bounded extraction diagnostic %s\\n' "$index" >&2
+          index=$((index + 1))
+        done
+        exec /usr/bin/ditto "$@"
+        """
+        try Data(wrapper.utf8).write(to: wrapperURL)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: wrapperURL.path
+        )
+
+        let destination = root.appendingPathComponent(
+            "expanded",
+            isDirectory: true
+        )
+        _ = try ZipArchiveExtractor(
+            extractorExecutableURL: wrapperURL
+        ).extract(
+            archiveAt: archiveURL,
+            to: destination
+        )
+
+        XCTAssertEqual(
+            try String(
+                contentsOf: destination.appendingPathComponent("frog.txt"),
+                encoding: .utf8
+            ),
+            "frog"
+        )
+    }
+
+    func testRejectsOversizedArchiveBeforeSnapshotCopy() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let archiveURL = root.appendingPathComponent("large.zip")
+        let archive = TestZipBuilder.archive(
+            entries: [
+                .init(
+                    path: "frog.txt",
+                    data: Data(repeating: 1, count: 512)
+                )
+            ]
+        )
+        try archive.write(to: archiveURL)
+        var limits = ZipExtractionLimits.default
+        limits.maximumArchiveBytes = Int64(archive.count - 1)
+        let destination = root.appendingPathComponent(
+            "expanded",
+            isDirectory: true
+        )
+
+        XCTAssertThrowsError(
+            try ZipArchiveExtractor(limits: limits).extract(
+                archiveAt: archiveURL,
+                to: destination
+            )
+        ) {
+            XCTAssertEqual(
+                $0 as? ZipArchiveError,
+                .archiveTooLarge(
+                    actual: Int64(archive.count),
+                    limit: Int64(archive.count - 1)
+                )
+            )
+        }
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: destination.path
+            )
+        )
     }
 
     private func writeArchive(_ data: Data) throws -> URL {

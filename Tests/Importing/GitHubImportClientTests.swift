@@ -4,6 +4,37 @@ import XCTest
 
 @MainActor
 final class GitHubImportClientTests: XCTestCase {
+    func testRevisionCheckDoesNotDownloadArchive() async throws {
+        let transport = MockImportHTTPTransport()
+        let sha = String(repeating: "b", count: 40)
+        await transport.enqueue(
+            host: "api.github.com",
+            outcome: .response(
+                try ImportingTestSupport.response(
+                    url:
+                        "https://api.github.com/repos/knobiknows/all-the-bufo/commits/main",
+                    data: Data(#"{"sha":"\#(sha)"}"#.utf8),
+                    headers: ["ETag": "\"revision-etag\""]
+                )
+            )
+        )
+
+        let revision = try await GitHubImportClient(
+            transport: transport
+        ).resolveRevision(
+            from: ImportingTestSupport.unwrappedURL(
+                "https://github.com/knobiknows/all-the-bufo"
+            ),
+            ref: "main"
+        )
+
+        XCTAssertEqual(revision.commitSHA, sha)
+        XCTAssertEqual(revision.sourceETag, "\"revision-etag\"")
+        let calls = await transport.recordedCalls()
+        XCTAssertEqual(calls.count, 1)
+        XCTAssertEqual(calls[0].policy, .githubAPI)
+    }
+
     func testResolvesCommitBeforeDownloadingPinnedArchive() async throws {
         let transport = MockImportHTTPTransport()
         let sha = String(repeating: "a", count: 40)

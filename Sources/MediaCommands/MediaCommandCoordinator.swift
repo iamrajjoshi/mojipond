@@ -234,9 +234,10 @@ actor MediaCommandCoordinator {
         do {
             let items = try await gifSearcher.search(query, limit: limit)
             try Task.checkCancellation()
+            let boundedItems = items.prefix(limit).map { $0 }
             return completedState(
                 request: request,
-                items: items.map {
+                items: boundedItems.map {
                     MediaCommandResult(media: $0, origin: .remote)
                 },
                 isOffline: false
@@ -281,7 +282,7 @@ actor MediaCommandCoordinator {
                 return .failed(request, .invalidQuery)
             case .statusCode(429):
                 return .rateLimited(request)
-            case .unsupportedContentType:
+            case .unsupportedContentType, .unsafeImage:
                 return .failed(request, .unsupportedMedia)
             case .invalidRequest, .invalidResponse, .insecureURL,
                  .responseTooLarge, .statusCode:

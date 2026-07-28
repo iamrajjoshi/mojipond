@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import ImageIO
 import UniformTypeIdentifiers
 
 enum RuntimeManagedMediaError: Error, Equatable, LocalizedError, Sendable {
@@ -12,6 +13,7 @@ enum RuntimeManagedMediaError: Error, Equatable, LocalizedError, Sendable {
     case fileTooLarge(limit: Int)
     case digestMismatch
     case contentTypeMismatch
+    case webPDecodeUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -33,14 +35,22 @@ enum RuntimeManagedMediaError: Error, Equatable, LocalizedError, Sendable {
             "The media file no longer matches its imported integrity digest."
         case .contentTypeMismatch:
             "The media file does not match its declared image type."
+        case .webPDecodeUnavailable:
+            "This Mac cannot safely decode the WebP media file."
         }
     }
+}
+
+enum RuntimeManagedMediaInsertionPolicy: Equatable, Sendable {
+    case automatic
+    case copyOnlyAnimatedWebPExperimental
 }
 
 struct RuntimeResolvedManagedMedia: Equatable, Sendable {
     let originalData: Data
     let uniformType: UTType
     let suggestedFilename: String
+    let insertionPolicy: RuntimeManagedMediaInsertionPolicy
 
     var pasteboardPayload: PasteboardItemPayload {
         .image(
@@ -166,6 +176,17 @@ struct RuntimeManagedMediaResolver:
         guard Self.matchesMagic(data, mediaType: media.mediaType) else {
             throw RuntimeManagedMediaError.contentTypeMismatch
         }
+        let insertionPolicy: RuntimeManagedMediaInsertionPolicy
+        if media.mediaType == .webP {
+            guard Self.canDecodeWebP(data) else {
+                throw RuntimeManagedMediaError.webPDecodeUnavailable
+            }
+            insertionPolicy = media.isAnimated
+                ? .copyOnlyAnimatedWebPExperimental
+                : .automatic
+        } else {
+            insertionPolicy = .automatic
+        }
 
         return RuntimeResolvedManagedMedia(
             originalData: data,
@@ -174,7 +195,8 @@ struct RuntimeManagedMediaResolver:
                 media.originalFilename,
                 fallbackPath: media.relativePath,
                 mediaType: media.mediaType
-            )
+            ),
+            insertionPolicy: insertionPolicy
         )
     }
 
@@ -248,6 +270,32 @@ struct RuntimeManagedMediaResolver:
                 && data.prefix(4) == Data("RIFF".utf8)
                 && data.dropFirst(8).prefix(4) == Data("WEBP".utf8)
         }
+    }
+
+    private static func canDecodeWebP(_ data: Data) -> Bool {
+        guard
+            let source = CGImageSourceCreateWithData(
+                data as CFData,
+                [kCGImageSourceShouldCache: false] as CFDictionary
+            ),
+            CGImageSourceGetStatus(source) == .statusComplete,
+            CGImageSourceGetCount(source) > 0,
+            let identifier = CGImageSourceGetType(source),
+            let type = UTType(identifier as String),
+            type.conforms(to: .webP)
+        else {
+            return false
+        }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: 128,
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(
+            source,
+            0,
+            options as CFDictionary
+        ) != nil
     }
 
     private static func safeFilename(

@@ -55,6 +55,49 @@ final class RuntimeManagedMediaTests: XCTestCase {
         XCTAssertEqual(original?.data, gif)
     }
 
+    func testWebPCapabilityAndAnimatedExperimentalPolicy() throws {
+        let webP = try XCTUnwrap(
+            Data(
+                base64Encoded:
+                    "UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADMDOJaQAA3AA/v89WAAAAA=="
+            )
+        )
+        let fixture = try makeFixture(
+            data: webP,
+            filename: "frog.webp"
+        )
+        let resolver = RuntimeManagedMediaResolver()
+
+        let staticResult = try resolver.resolve(
+            media(
+                type: .webP,
+                path: fixture.relativePath,
+                data: webP
+            ),
+            beneath: fixture.root
+        )
+        XCTAssertEqual(staticResult.insertionPolicy, .automatic)
+        XCTAssertNotNil(
+            staticResult.pasteboardPayload.representations.first {
+                $0.typeIdentifier == UTType.png.identifier
+            }
+        )
+
+        let animatedResult = try resolver.resolve(
+            media(
+                type: .webP,
+                path: fixture.relativePath,
+                data: webP,
+                isAnimated: true
+            ),
+            beneath: fixture.root
+        )
+        XCTAssertEqual(
+            animatedResult.insertionPolicy,
+            .copyOnlyAnimatedWebPExperimental
+        )
+    }
+
     func testRejectsTraversalSymlinkDigestMismatchAndOversize() throws {
         let gif = Data("GIF89a-safe".utf8)
         let fixture = try makeFixture(data: gif, filename: "safe.gif")
@@ -161,6 +204,10 @@ final class RuntimeManagedMediaTests: XCTestCase {
     }
 
     func testDownloadedGIFAndPNGPayloadsRetainOriginalBytes() throws {
+        let root = try makeTemporaryRoot()
+        let pngURL = try TestSupport.writeImage(
+            to: root.appendingPathComponent("download.png")
+        )
         let downloads: [(Data, String, String)] = [
             (
                 validGIFData,
@@ -168,11 +215,7 @@ final class RuntimeManagedMediaTests: XCTestCase {
                 UTType.gif.identifier
             ),
             (
-                Data([
-                    0x89, 0x50, 0x4E, 0x47,
-                    0x0D, 0x0A, 0x1A, 0x0A,
-                    0x01
-                ]),
+                try Data(contentsOf: pngURL),
                 "image/png",
                 UTType.png.identifier
             )

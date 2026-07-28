@@ -60,6 +60,71 @@ final class ImportOrchestratorTests: XCTestCase {
         XCTAssertEqual(duplicate.existingItems[0].itemID, existingItemID)
     }
 
+    func testDuplicateAssetAnalysisDeliberatelySkipsUnicodeEntries() async throws {
+        let workspace = try ImportingTestSupport.makeWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace.root) }
+        let packURL = workspace.root.appendingPathComponent(
+            "UnicodePack",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: packURL,
+            withIntermediateDirectories: false
+        )
+        let manifest = PortablePackManifest(
+            id: try PackIdentifier(validating: "example.unicode"),
+            name: "Unicode",
+            version: "1.0.0",
+            emoji: [
+                PortablePackEmoji(
+                    shortcode: try Shortcode(validating: "frog_one"),
+                    unicode: "🐸"
+                ),
+                PortablePackEmoji(
+                    shortcode: try Shortcode(validating: "frog_two"),
+                    unicode: "🐸"
+                )
+            ]
+        )
+        try JSONEncoder().encode(manifest).write(
+            to: packURL.appendingPathComponent(
+                MojiPondLibrary.manifestFilename
+            )
+        )
+        let existingLibrary = MojiPondLibrary(
+            packs: [
+                EmojiPack(
+                    name: "Existing",
+                    source: PackSource(kind: .individualFiles),
+                    items: [
+                        LibraryEmoji(
+                            shortcode: try Shortcode(
+                                validating: "existing_frog"
+                            ),
+                            payload: .unicode("🐸")
+                        )
+                    ]
+                )
+            ]
+        )
+
+        let preparation = try await ImportOrchestrator(
+            temporaryRootURL: workspace.temporaryRoot
+        ).prepare(
+            .folder(packURL),
+            against: existingLibrary
+        )
+
+        XCTAssertEqual(preparation.preview.items.count, 2)
+        XCTAssertTrue(
+            preparation.preview.items.allSatisfy {
+                $0.unicode == "🐸" && $0.format == nil
+            }
+        )
+        XCTAssertTrue(preparation.duplicateContent.isEmpty)
+        try await preparation.discard()
+    }
+
     func testZIPPreparationOwnsExtractedFilesUntilDiscarded() async throws {
         let workspace = try ImportingTestSupport.makeWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace.root) }

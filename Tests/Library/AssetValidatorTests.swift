@@ -103,4 +103,79 @@ final class AssetValidatorTests: XCTestCase {
             try AssetValidator(limits: byteLimits).validate(fileAt: png)
         )
     }
+
+    func testRejectsUnreasonableAnimationFrameAndTotalDuration()
+        throws
+    {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let gif = try TestSupport.writeImage(
+            to: root.appendingPathComponent("slow.gif"),
+            format: .gif,
+            frameCount: 2,
+            frameDuration: 6
+        )
+
+        var frameLimits = AssetValidationLimits.default
+        frameLimits.maximumFrameDurationSeconds = 5
+        XCTAssertThrowsError(
+            try AssetValidator(limits: frameLimits).validate(fileAt: gif)
+        ) {
+            guard case .invalidFrameDuration =
+                $0 as? AssetValidationError else {
+                return XCTFail("Expected invalidFrameDuration, got \($0)")
+            }
+        }
+
+        var totalLimits = AssetValidationLimits.default
+        totalLimits.maximumFrameDurationSeconds = 10
+        totalLimits.maximumAnimationDurationSeconds = 10
+        XCTAssertThrowsError(
+            try AssetValidator(limits: totalLimits).validate(fileAt: gif)
+        ) {
+            XCTAssertEqual(
+                $0 as? AssetValidationError,
+                .animationDurationExceeded(limit: 10)
+            )
+        }
+    }
+
+    func testDataValidationEnforcesDetectedTypeAndPixelLimits()
+        throws
+    {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = try TestSupport.writeImage(
+            to: root.appendingPathComponent("large.png"),
+            width: 4,
+            height: 3
+        )
+        let data = try Data(contentsOf: url)
+
+        XCTAssertThrowsError(
+            try AssetValidator().validate(
+                data: data,
+                expectedFormat: .gif
+            )
+        ) {
+            XCTAssertEqual(
+                $0 as? AssetValidationError,
+                .dataTypeMismatch(expected: .gif, detected: .png)
+            )
+        }
+
+        var limits = AssetValidationLimits.default
+        limits.maximumPixelWidth = 3
+        XCTAssertThrowsError(
+            try AssetValidator(limits: limits).validate(
+                data: data,
+                expectedFormat: .png
+            )
+        ) {
+            guard case .dimensionsTooLarge =
+                $0 as? AssetValidationError else {
+                return XCTFail("Expected dimensionsTooLarge, got \($0)")
+            }
+        }
+    }
 }

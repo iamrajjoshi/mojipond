@@ -6,15 +6,26 @@ struct SettingsRootView: View {
     @ObservedObject var appState: AppState
     @ObservedObject private var permissions: SystemPermissionCenter
     @ObservedObject private var updates: AppUpdateController
-    @StateObject private var giphyKey = GiphyKeySettingsModel()
+    @StateObject private var giphyKey: GiphyKeySettingsModel
 
     @State private var domainDraft = ""
     @State private var exclusionError: String?
+    @State private var showsManualUpdateConfirmation = false
+    @State private var showsNativeUpdateConfirmation = false
 
-    init(appState: AppState) {
+    init(
+        appState: AppState,
+        giphyKeyStore: any GiphyAPIKeyStoring =
+            KeychainGiphyAPIKeyStore()
+    ) {
         self.appState = appState
         permissions = appState.permissions
         updates = appState.updates
+        _giphyKey = StateObject(
+            wrappedValue: GiphyKeySettingsModel(
+                store: giphyKeyStore
+            )
+        )
     }
 
     var body: some View {
@@ -31,7 +42,12 @@ struct SettingsRootView: View {
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
         .padding(14)
-        .frame(width: 680, height: 540)
+        .frame(
+            minWidth: 620,
+            idealWidth: 680,
+            minHeight: 500,
+            idealHeight: 540
+        )
     }
 
     private var general: some View {
@@ -77,7 +93,10 @@ struct SettingsRootView: View {
                 )
                 Text(
                     "Online features are independent and off by default. "
-                        + "Only an explicit pack URL or media query is sent."
+                        + "GitHub imports send the requested repository URL; "
+                        + "Noto sticker queries stay local after a fixed "
+                        + "manifest download; GIPHY and update traffic are "
+                        + "described in Privacy."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -128,8 +147,11 @@ struct SettingsRootView: View {
 
                 Text(
                     "Used only for explicit /gif searches in Messages. "
-                        + "MojiPond sends the query directly to GIPHY and "
-                        + "does not persist GIPHY media."
+                        + "When GIF search is enabled, MojiPond sends the "
+                        + "exact query and this key to GIPHY. Preview "
+                        + "renditions for displayed results and the selected "
+                        + "original are requested directly and are not persisted. "
+                        + "MojiPond does not invoke GIPHY action analytics."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -149,6 +171,17 @@ struct SettingsRootView: View {
             ) {
                 ForEach(ShortcodeTrigger.allCases, id: \.self) { trigger in
                     Text(trigger.rawValue).tag(trigger)
+                }
+            }
+
+            Picker(
+                "Default skin tone",
+                selection: preference(\.defaultSkinTone)
+            ) {
+                Text("Automatic").tag(EmojiSkinTone?.none)
+                ForEach(EmojiSkinTone.allCases, id: \.self) { tone in
+                    Text("\(tone.modifier) \(tone.displayName)")
+                        .tag(Optional(tone))
                 }
             }
 
@@ -338,22 +371,113 @@ struct SettingsRootView: View {
                     .font(.caption)
                     .foregroundStyle(.red)
             }
-            if case let .available(metadata) = updates.state,
+            if let metadata = updates.availableMetadata,
                let releaseNotesURL = metadata.releaseNotesURL {
                 Link(
                     "Read release notes for \(metadata.version)",
                     destination: releaseNotesURL
                 )
             }
+            if case let .available(metadata) = updates.state {
+                Button(
+                    "Download & Verify MojiPond \(metadata.version)…"
+                ) {
+                    updates.stageAvailableUpdate()
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityHint(
+                    "Downloads the signed archive and verifies its digest, Developer ID signature, Team ID, hardened runtime, timestamp, and Gatekeeper status."
+                )
+            }
+            if case let .staging(metadata) = updates.state {
+                HStack {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(
+                        "Downloading and verifying MojiPond \(metadata.version)…"
+                    )
+                }
+            }
+            if case let .revalidating(metadata) = updates.state {
+                HStack {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(
+                        "Revalidating MojiPond \(metadata.version)…"
+                    )
+                }
+            }
+            if case let .launchingInstaller(metadata) = updates.state {
+                HStack {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(
+                        "Starting the verified MojiPond \(metadata.version) installer…"
+                    )
+                }
+            }
+            if case let .staged(metadata, plan) = updates.state {
+                Label(
+                    "MojiPond \(metadata.version) passed every available verification.",
+                    systemImage: "checkmark.shield.fill"
+                )
+                .foregroundStyle(PondDesign.lily)
+                if let installationStatusMessage =
+                    updates.installationStatusMessage {
+                    Text(installationStatusMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    switch updates.nativeInstallAvailability {
+                    case .available:
+                        Button("Install & Relaunch…") {
+                            showsNativeUpdateConfirmation = true
+                        }
+                        .buttonStyle(.borderedProminent)
+                    case let .manualInstallRequired(reason):
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(
+                                reason
+                                    + " Destination: "
+                                    + plan.destinationApplicationURL.path
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            Button("Show Verified App in Finder…") {
+                                showsManualUpdateConfirmation = true
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                    case let .unavailable(reason):
+                        Text(reason)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    case .none:
+                        EmptyView()
+                    }
+                    Button("Discard Download", role: .destructive) {
+                        updates.discardStagedUpdate()
+                    }
+                }
+            }
             Button(
                 updates.isChecking ? "Checking…" : "Check for Updates…"
             ) {
                 updates.checkManually(
                     automaticChecksEnabled:
-                        appState.preferences.network.allowsUpdateChecks
+                    appState.preferences.network.allowsUpdateChecks
                 )
             }
-            .disabled(updates.isChecking)
+            .disabled(updates.isBusy)
+            Text(
+                "Production updates require a trusted signed feed and must "
+                    + "be Developer ID signed, hardened, securely timestamped, "
+                    + "and accepted by Gatekeeper. This local ad-hoc build "
+                    + "intentionally cannot pass that policy."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
             Link(
                 "View private source repository",
                 destination: URL(
@@ -367,6 +491,46 @@ struct SettingsRootView: View {
             .foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
+        .confirmationDialog(
+            "Install the verified update and relaunch?",
+            isPresented: $showsNativeUpdateConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Install & Relaunch") {
+                Task {
+                    if await updates.installAndRelaunch() {
+                        NSApp.terminate(nil)
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(
+                "MojiPond will revalidate the signed ZIP and both app identities, quit, perform a locked atomic replacement, verify the installed app, and relaunch it. If any post-replacement step fails, the previous app is restored."
+            )
+        }
+        .confirmationDialog(
+            "Prepare the verified app for manual installation?",
+            isPresented: $showsManualUpdateConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Revalidate and Show in Finder") {
+                Task {
+                    guard let plan =
+                        await updates.revalidateInstallation() else {
+                        return
+                    }
+                    NSWorkspace.shared.activateFileViewerSelecting([
+                        plan.stagedApplicationURL
+                    ])
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(
+                "MojiPond will verify the signed ZIP and both app identities again. Then quit MojiPond, replace the installed copy at its existing location, and relaunch it."
+            )
+        }
     }
 
     private var triggerText: String {

@@ -29,6 +29,10 @@ struct EmojiSearchResult: Equatable, Sendable {
 struct EmojiSearchIndex: Sendable {
     private let entries: [IndexedEntry]
 
+    var count: Int {
+        entries.count
+    }
+
     init(items: [EmojiItem]) {
         entries = items
             .map(IndexedEntry.init)
@@ -132,6 +136,12 @@ struct EmojiSearchIndex: Sendable {
         }
         if lhs.item.packPriority != rhs.item.packPriority {
             return lhs.item.packPriority > rhs.item.packPriority
+        }
+
+        let lhsFavorite = usage.isFavorite(lhs.item.id)
+        let rhsFavorite = usage.isFavorite(rhs.item.id)
+        if lhsFavorite != rhsFavorite {
+            return lhsFavorite
         }
 
         let lhsStatistics = usage.statistics(for: lhs.item.id)

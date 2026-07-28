@@ -393,11 +393,85 @@ struct EmojiPayload: Codable, Equatable, Sendable {
             guard let unicode, !unicode.isEmpty, asset == nil else {
                 throw LibraryModelError.invalidPayload
             }
+            try UnicodeEmojiValueValidator.validate(unicode)
         case .asset:
             guard unicode == nil, let asset else {
                 throw LibraryModelError.invalidPayload
             }
             try asset.validate()
+        }
+    }
+}
+
+enum UnicodeEmojiValueValidator {
+    static let maximumUTF8ByteCount = 256
+
+    static func validate(_ value: String) throws {
+        guard !value.isEmpty else {
+            throw UnicodeEmojiValidationError.empty
+        }
+        guard value.utf8.count <= maximumUTF8ByteCount else {
+            throw UnicodeEmojiValidationError.tooLarge(
+                maximumBytes: maximumUTF8ByteCount
+            )
+        }
+        guard value.count == 1 else {
+            throw UnicodeEmojiValidationError.mustBeSingleEmoji
+        }
+
+        let scalars = Array(value.unicodeScalars)
+        guard !scalars.contains(where: {
+            let isAllowedEmojiFormatting =
+                $0.value == 0x200D
+                    || (0xFE0E...0xFE0F).contains($0.value)
+                    || (0xE0020...0xE007F).contains($0.value)
+                    || (0xE0100...0xE01EF).contains($0.value)
+            return !isAllowedEmojiFormatting
+                && (
+                    CharacterSet.controlCharacters.contains($0)
+                        || CharacterSet.whitespacesAndNewlines.contains($0)
+                        || CharacterSet.illegalCharacters.contains($0)
+                )
+        }) else {
+            throw UnicodeEmojiValidationError.unsafeScalar
+        }
+
+        let hasVariationSelector = scalars.contains { $0.value == 0xFE0F }
+        let hasKeycap = scalars.contains { $0.value == 0x20E3 }
+        let hasEmojiBase = scalars.contains { scalar in
+            scalar.properties.isEmoji
+                && !(0x1F3FB...0x1F3FF).contains(scalar.value)
+        }
+        let hasEmojiPresentationBase = scalars.contains { scalar in
+            scalar.properties.isEmojiPresentation
+                && !(0x1F3FB...0x1F3FF).contains(scalar.value)
+        }
+        guard hasEmojiPresentationBase
+                || (hasEmojiBase && (hasVariationSelector || hasKeycap)) else {
+            throw UnicodeEmojiValidationError.notEmoji
+        }
+    }
+}
+
+enum UnicodeEmojiValidationError: Error, Equatable, LocalizedError, Sendable {
+    case empty
+    case tooLarge(maximumBytes: Int)
+    case mustBeSingleEmoji
+    case unsafeScalar
+    case notEmoji
+
+    var errorDescription: String? {
+        switch self {
+        case .empty:
+            "Unicode emoji cannot be empty."
+        case let .tooLarge(maximumBytes):
+            "Unicode emoji must be at most \(maximumBytes) UTF-8 bytes."
+        case .mustBeSingleEmoji:
+            "Unicode content must be exactly one emoji grapheme."
+        case .unsafeScalar:
+            "Unicode emoji cannot contain control, whitespace, or illegal characters."
+        case .notEmoji:
+            "Unicode content must be an emoji, not plain text or a shortcode."
         }
     }
 }

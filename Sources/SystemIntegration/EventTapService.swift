@@ -7,6 +7,23 @@ struct KeyboardEventSnapshot: Equatable, Sendable {
     let flagsRawValue: UInt64
     let timestamp: UInt64
     let characters: String?
+    let interceptionOutcome: EventInterceptionOutcome?
+
+    init(
+        typeRawValue: UInt32,
+        keyCode: CGKeyCode,
+        flagsRawValue: UInt64,
+        timestamp: UInt64,
+        characters: String?,
+        interceptionOutcome: EventInterceptionOutcome? = nil
+    ) {
+        self.typeRawValue = typeRawValue
+        self.keyCode = keyCode
+        self.flagsRawValue = flagsRawValue
+        self.timestamp = timestamp
+        self.characters = characters
+        self.interceptionOutcome = interceptionOutcome
+    }
 
     var type: CGEventType? {
         CGEventType(rawValue: typeRawValue)
@@ -15,11 +32,44 @@ struct KeyboardEventSnapshot: Equatable, Sendable {
     var flags: CGEventFlags {
         CGEventFlags(rawValue: flagsRawValue)
     }
+
+    func delivered(
+        with outcome: EventInterceptionOutcome
+    ) -> Self {
+        Self(
+            typeRawValue: typeRawValue,
+            keyCode: keyCode,
+            flagsRawValue: flagsRawValue,
+            timestamp: timestamp,
+            characters: characters,
+            interceptionOutcome: outcome
+        )
+    }
 }
 
 enum EventInterceptionDecision: Equatable, Sendable {
     case passThrough
     case intercept
+}
+
+struct EventInterceptionOutcome: Equatable, Sendable {
+    let decision: EventInterceptionDecision
+    let mode: RuntimeInterceptionMode?
+
+    static let passThrough = Self(
+        decision: .passThrough,
+        mode: nil
+    )
+    static let intercept = Self(
+        decision: .intercept,
+        mode: nil
+    )
+
+    static func intercepting(
+        _ mode: RuntimeInterceptionMode
+    ) -> Self {
+        Self(decision: .intercept, mode: mode)
+    }
 }
 
 enum EventTapDiagnostic: Equatable, Sendable {
@@ -50,7 +100,7 @@ enum EventTapServiceError: Error, Equatable {
 /// media decoding, and UI work belong in work enqueued by that handler.
 final class SessionEventTapService: @unchecked Sendable {
     typealias InterceptionPolicy =
-        @Sendable (KeyboardEventSnapshot) -> EventInterceptionDecision
+        @Sendable (KeyboardEventSnapshot) -> EventInterceptionOutcome
     typealias EventHandler = @Sendable (KeyboardEventSnapshot) -> Void
     typealias DiagnosticHandler = @Sendable (EventTapDiagnostic) -> Void
 
@@ -299,16 +349,17 @@ final class SessionEventTapService: @unchecked Sendable {
     func interceptionDecision(
         for snapshot: KeyboardEventSnapshot
     ) -> EventInterceptionDecision {
-        interceptionPolicy(snapshot)
+        interceptionPolicy(snapshot).decision
     }
 
     @discardableResult
     func process(_ snapshot: KeyboardEventSnapshot) -> EventInterceptionDecision {
-        let decision = interceptionDecision(for: snapshot)
+        let outcome = interceptionPolicy(snapshot)
+        let deliveredSnapshot = snapshot.delivered(with: outcome)
         handlerQueue.async { [eventHandler] in
-            eventHandler(snapshot)
+            eventHandler(deliveredSnapshot)
         }
-        return decision
+        return outcome.decision
     }
 
     func simulateDisablementForTesting(timedOut: Bool) {

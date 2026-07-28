@@ -1,0 +1,69 @@
+MojiPond Third-Party Notices
+============================
+
+gemoji
+------
+
+Dataset source: https://github.com/github/gemoji
+Pinned revision: 0eca75db9301421efc8710baf7a7576793ae452a
+License: MIT
+
+Copyright (c) 2019 GitHub, Inc.
+
+Permission is hereby granted, free of charge, to any person
+obtaining a copy of this software and associated documentation
+files (the "Software"), to deal in the Software without
+restriction, including without limitation the rights to use,
+copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+
+
+Noto Animated Emoji
+-------------------
+
+The animated emoji GIFs bundled with MojiPond are unmodified works from
+Noto Animated Emoji by Google.
+
+Project and attribution source:
+https://googlefonts.github.io/noto-emoji-animation/
+
+Original asset pattern:
+https://fonts.gstatic.com/s/e/notoemoji/latest/{codepoint}/512.gif
+
+License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+License summary: https://creativecommons.org/licenses/by/4.0/
+Canonical legal code: https://creativecommons.org/licenses/by/4.0/legalcode
+Retrieved: 2026-07-27
+Modifications: None
+
+The license permits sharing and adaptation subject to its attribution
+requirements and other terms. The canonical legal code governs. The exact
+source codepoint, byte count, and SHA-256 digest for every bundled asset are
+recorded in noto-offline-manifest.json.
+
+
+GIPHY attribution mark
+----------------------
+
+PoweredByGIPHY.png is the unmodified Powered by GIPHY mark from GIPHY's
+official attribution archive:
+https://media.giphy.com/giphy-attribution-marks.zip
+
+It is displayed only where MojiPond presents GIPHY API results, under GIPHY's
+API Terms and branding requirements. GIPHY and the GIPHY logo are trademarks
+of GIPHY, Inc. Their inclusion does not imply sponsorship or endorsement of
+MojiPond.

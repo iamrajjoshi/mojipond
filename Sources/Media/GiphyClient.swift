@@ -127,32 +127,19 @@ struct KeychainError: Error, Equatable, LocalizedError, Sendable {
 }
 
 final class GiphyClient: @unchecked Sendable {
-    enum AnalyticsEvent: Sendable {
-        case load
-        case click
-        case sent
-    }
-
-    private let session: URLSession
+    private static let maximumSearchResponseBytes = 2 * 1_024 * 1_024
+    private let responseLoader: BoundedHTTPSResponseLoader
     private let keyProvider: any GiphyAPIKeyProviding
     private let baseURL: URL
-    private let customerID: @Sendable () -> String
-    private let now: @Sendable () -> Date
 
     init(
         session: URLSession = .shared,
         keyProvider: any GiphyAPIKeyProviding = KeychainGiphyAPIKeyStore(),
-        baseURL: URL = URL(string: "https://api.giphy.com")!,
-        customerID: @escaping @Sendable () -> String = {
-            GiphyCustomerIdentifier.value
-        },
-        now: @escaping @Sendable () -> Date = { Date() }
+        baseURL: URL = URL(string: "https://api.giphy.com")!
     ) {
-        self.session = session
+        responseLoader = BoundedHTTPSResponseLoader(session: session)
         self.keyProvider = keyProvider
         self.baseURL = baseURL
-        self.customerID = customerID
-        self.now = now
     }
 
     func search(_ query: String, limit: Int = 25) async throws -> [RemoteMediaItem] {
@@ -178,61 +165,48 @@ final class GiphyClient: @unchecked Sendable {
             URLQueryItem(name: "limit", value: String(min(max(limit, 1), 50))),
             URLQueryItem(name: "rating", value: "pg"),
             URLQueryItem(name: "lang", value: "en"),
-            URLQueryItem(name: "bundle", value: "messaging_non_clips"),
-            URLQueryItem(name: "customer_id", value: customerID())
+            URLQueryItem(name: "bundle", value: "messaging_non_clips")
         ]
         guard let url = components?.url else {
             throw RemoteMediaError.invalidRequest
         }
 
-        let (data, response) = try await session.data(from: url)
-        try Self.validate(response)
-        let payload = try JSONDecoder().decode(SearchResponse.self, from: data)
-        return payload.data.compactMap(Self.map)
-    }
-
-    func register(_ event: AnalyticsEvent, for item: RemoteMediaItem) async throws {
-        guard item.provider == .giphy, let analytics = item.analytics else {
-            return
-        }
-
-        let sourceURL: URL?
-        switch event {
-        case .load:
-            sourceURL = analytics.onLoadURL
-        case .click:
-            sourceURL = analytics.onClickURL
-        case .sent:
-            sourceURL = analytics.onSentURL
-        }
-        guard let sourceURL else {
-            return
-        }
-        guard sourceURL.scheme == "https" else {
-            throw RemoteMediaError.insecureURL
-        }
-
-        var components = URLComponents(url: sourceURL, resolvingAgainstBaseURL: false)
-        var queryItems = components?.queryItems ?? []
-        queryItems.append(URLQueryItem(name: "customer_id", value: customerID()))
-        queryItems.append(
-            URLQueryItem(
-                name: "ts",
-                value: String(Int(now().timeIntervalSince1970 * 1_000))
-            )
+        let loaded = try await load(
+            url,
+            maximumBytes: Self.maximumSearchResponseBytes
         )
-        components?.queryItems = queryItems
-        guard let url = components?.url else {
-            throw RemoteMediaError.invalidRequest
-        }
-        let (_, response) = try await session.data(from: url)
-        try Self.validate(response)
+        try Self.validate(loaded.response)
+        let payload = try JSONDecoder().decode(
+            SearchResponse.self,
+            from: loaded.data
+        )
+        let boundedLimit = min(max(limit, 1), 50)
+        return payload.data.prefix(boundedLimit).compactMap(Self.map)
     }
 
-    private static func validate(_ response: URLResponse) throws {
-        guard let response = response as? HTTPURLResponse else {
-            throw RemoteMediaError.invalidResponse
+    private func load(
+        _ url: URL,
+        maximumBytes: Int
+    ) async throws -> BoundedHTTPResponse {
+        do {
+            return try await responseLoader.load(
+                URLRequest(url: url),
+                maximumBytes: maximumBytes,
+                redirectPolicy: .sameHost
+            )
+        } catch let error as BoundedHTTPSLoadError {
+            switch error {
+            case .responseTooLarge:
+                throw RemoteMediaError.responseTooLarge(limit: maximumBytes)
+            case .insecureRequestURL, .insecureRedirectURL, .disallowedRedirectHost:
+                throw RemoteMediaError.insecureURL
+            case .invalidResponse:
+                throw RemoteMediaError.invalidResponse
+            }
         }
+    }
+
+    private static func validate(_ response: HTTPURLResponse) throws {
         guard (200..<300).contains(response.statusCode) else {
             throw RemoteMediaError.statusCode(response.statusCode)
         }
@@ -242,8 +216,8 @@ final class GiphyClient: @unchecked Sendable {
         guard
             let preview = source.images.fixedWidth?.url ?? source.images.preview?.url,
             let original = source.images.original.url,
-            preview.scheme == "https",
-            original.scheme == "https"
+            RemoteMediaURLPolicy.allows(preview, for: .giphy),
+            RemoteMediaURLPolicy.allows(original, for: .giphy)
         else {
             return nil
         }
@@ -268,20 +242,41 @@ final class GiphyClient: @unchecked Sendable {
                 onLoadURL: source.analytics?.onload?.url,
                 onClickURL: source.analytics?.onclick?.url,
                 onSentURL: source.analytics?.onsent?.url
-            )
+            ),
+            creatorAttribution: creatorAttribution(for: source),
+            sourceAttribution: sourceAttribution(for: source.source)
         )
     }
-}
 
-private enum GiphyCustomerIdentifier {
-    static var value: String {
-        let key = "com.rajjoshi.MojiPond.giphyCustomerIdentifier"
-        if let value = UserDefaults.standard.string(forKey: key) {
-            return value
+    private static func creatorAttribution(for source: GIF) -> String? {
+        let username = source.user?.username ?? source.username
+        guard
+            let username = username?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+            !username.isEmpty
+        else {
+            return nil
         }
-        let value = UUID().uuidString.lowercased()
-        UserDefaults.standard.set(value, forKey: key)
-        return value
+        return username.hasPrefix("@") ? username : "@\(username)"
+    }
+
+    private static func sourceAttribution(for value: String?) -> String? {
+        guard
+            let value = value?.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ),
+            !value.isEmpty,
+            value.utf8.count <= 2_048,
+            let components = URLComponents(string: value),
+            ["http", "https"].contains(components.scheme?.lowercased() ?? ""),
+            components.user == nil,
+            components.password == nil,
+            let host = components.host,
+            !host.isEmpty
+        else {
+            return nil
+        }
+        return host
     }
 }
 
@@ -292,8 +287,15 @@ private struct SearchResponse: Decodable {
 private struct GIF: Decodable {
     let id: String
     let title: String
+    let username: String?
+    let source: String?
+    let user: GIFUser?
     let images: GIFImages
     let analytics: GIFAnalytics?
+}
+
+private struct GIFUser: Decodable {
+    let username: String?
 }
 
 private struct GIFImages: Decodable {

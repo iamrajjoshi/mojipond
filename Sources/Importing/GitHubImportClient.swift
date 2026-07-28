@@ -24,6 +24,12 @@ struct GitHubFetchedArchive: Equatable, Sendable {
     let sourceETag: String?
 }
 
+struct GitHubResolvedRevision: Equatable, Sendable {
+    let requestedReference: GitHubRepositoryReference
+    let commitSHA: String
+    let sourceETag: String?
+}
+
 struct GitHubImportClient: Sendable {
     let transport: any ImportHTTPTransport
     let tokenProvider: any GitHubAccessTokenProviding
@@ -45,6 +51,57 @@ struct GitHubImportClient: Sendable {
         ref explicitRef: String? = nil,
         subdirectory explicitSubdirectory: String? = nil
     ) async throws -> GitHubFetchedArchive {
+        let revision = try await resolveRevision(
+            from: repositoryURL,
+            ref: explicitRef,
+            subdirectory: explicitSubdirectory
+        )
+        let reference = revision.requestedReference
+        let commitSHA = revision.commitSHA
+
+        try Task.checkCancellation()
+        let resolvedReference = try GitHubRepositoryReference(
+            owner: reference.owner,
+            repository: reference.repository,
+            ref: commitSHA,
+            subdirectory: reference.subdirectory
+        )
+        var archiveRequest = URLRequest(url: resolvedReference.archiveURL)
+        archiveRequest.httpMethod = "GET"
+        archiveRequest.setValue("application/zip", forHTTPHeaderField: "Accept")
+        archiveRequest.setValue("MojiPond/0.1", forHTTPHeaderField: "User-Agent")
+        let archiveResponse = try await transport.fetch(
+            archiveRequest,
+            policy: .githubArchive,
+            maximumBytes: limits.maximumArchiveBytes
+        )
+        try ImportURLPolicy.githubArchive.validate(archiveResponse.finalURL)
+        guard Int64(archiveResponse.data.count) <= limits.maximumArchiveBytes else {
+            throw ImportHTTPError.responseTooLarge(limit: limits.maximumArchiveBytes)
+        }
+        guard archiveResponse.statusCode == 200 else {
+            throw GitHubImportError.archiveHTTPStatus(
+                archiveResponse.statusCode
+            )
+        }
+        guard !archiveResponse.data.isEmpty else {
+            throw GitHubImportError.emptyArchive
+        }
+        try Task.checkCancellation()
+
+        return GitHubFetchedArchive(
+            requestedReference: reference,
+            commitSHA: commitSHA,
+            archiveData: archiveResponse.data,
+            sourceETag: revision.sourceETag
+        )
+    }
+
+    func resolveRevision(
+        from repositoryURL: URL,
+        ref explicitRef: String? = nil,
+        subdirectory explicitSubdirectory: String? = nil
+    ) async throws -> GitHubResolvedRevision {
         try Task.checkCancellation()
         let reference = try GitHubRepositoryReference.parse(
             repositoryURL,
@@ -109,41 +166,11 @@ struct GitHubImportClient: Sendable {
         guard Self.isValidCommitSHA(commitSHA) else {
             throw GitHubImportError.invalidCommitSHA
         }
-
-        try Task.checkCancellation()
-        let resolvedReference = try GitHubRepositoryReference(
-            owner: reference.owner,
-            repository: reference.repository,
-            ref: commitSHA,
-            subdirectory: reference.subdirectory
-        )
-        var archiveRequest = URLRequest(url: resolvedReference.archiveURL)
-        archiveRequest.httpMethod = "GET"
-        archiveRequest.setValue("application/zip", forHTTPHeaderField: "Accept")
-        archiveRequest.setValue("MojiPond/0.1", forHTTPHeaderField: "User-Agent")
-        let archiveResponse = try await transport.fetch(
-            archiveRequest,
-            policy: .githubArchive,
-            maximumBytes: limits.maximumArchiveBytes
-        )
-        try ImportURLPolicy.githubArchive.validate(archiveResponse.finalURL)
-        guard Int64(archiveResponse.data.count) <= limits.maximumArchiveBytes else {
-            throw ImportHTTPError.responseTooLarge(limit: limits.maximumArchiveBytes)
-        }
-        guard archiveResponse.statusCode == 200 else {
-            throw GitHubImportError.archiveHTTPStatus(
-                archiveResponse.statusCode
-            )
-        }
-        guard !archiveResponse.data.isEmpty else {
-            throw GitHubImportError.emptyArchive
-        }
         try Task.checkCancellation()
 
-        return GitHubFetchedArchive(
+        return GitHubResolvedRevision(
             requestedReference: reference,
             commitSHA: commitSHA,
-            archiveData: archiveResponse.data,
             sourceETag: commitResponse.header("etag")
         )
     }

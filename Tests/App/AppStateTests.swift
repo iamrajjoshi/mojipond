@@ -39,8 +39,80 @@ final class AppStateTests: XCTestCase {
         state.setRuntimeState(.running)
         XCTAssertEqual(state.statusSummary, "Ready")
 
+        state.setRuntimeState(
+            .contextSuspended(
+                .excludedApplication("com.example.private")
+            )
+        )
+        XCTAssertEqual(state.statusSummary, "Excluded here")
+
+        state.setRuntimeState(.contextSuspended(.secureField))
+        XCTAssertEqual(state.statusSummary, "Secure field")
+
+        state.setRuntimeState(.contextSuspended(.applicationUnknown))
+        XCTAssertEqual(state.statusSummary, "Unverified app")
+
+        state.setRuntimeState(.sessionLocked)
+        XCTAssertEqual(state.statusSummary, "Locked")
+
         state.setEnabled(false)
         XCTAssertEqual(state.statusSummary, "Paused")
+    }
+
+    func testUpdatePreferenceStartsAndCancelsAutomaticCheck() {
+        let configuration = SignedUpdateConfiguration(
+            feedURL: URL(
+                string: "https://updates.example.com/feed.json"
+            ),
+            publicKey: .ed25519(rawRepresentation: Data([1]))
+        )
+        let updates = AppUpdateController(
+            configuration: configuration,
+            checkerFactory: { _ in
+                SuspendingAppStateUpdateChecker()
+            }
+        )
+        let state = AppState(
+            preferencesStore: PreferencesStoreSpy(initial: .defaults),
+            updates: updates
+        )
+
+        state.updatePreferences {
+            $0.network.allowsUpdateChecks = true
+        }
+        XCTAssertEqual(updates.state, .checking)
+
+        state.updatePreferences {
+            $0.network.allowsUpdateChecks = false
+        }
+        XCTAssertEqual(updates.state, .idle)
+    }
+
+    func testLaunchAtLoginUsesInjectedController() {
+        let controller = LaunchAtLoginControllerStub()
+        let state = AppState(
+            preferencesStore: PreferencesStoreSpy(initial: .defaults),
+            launchAtLoginController: controller
+        )
+
+        XCTAssertFalse(state.launchAtLoginEnabled)
+
+        state.setLaunchAtLogin(true)
+
+        XCTAssertTrue(controller.isEnabled)
+        XCTAssertTrue(state.launchAtLoginEnabled)
+        XCTAssertTrue(state.preferences.launchAtLogin)
+        XCTAssertNil(state.launchAtLoginError)
+    }
+}
+
+private struct SuspendingAppStateUpdateChecker: SignedUpdateChecking {
+    func check(
+        for kind: UpdateCheckKind
+    ) async throws -> SignedUpdateCheckResult {
+        _ = kind
+        try await Task.sleep(for: .seconds(30))
+        throw CancellationError()
     }
 }
 
@@ -99,5 +171,15 @@ private final class AppStatePermissionHistory: PermissionHistoryStoring {
         } else {
             self.granted.remove(permission)
         }
+    }
+}
+
+private final class LaunchAtLoginControllerStub:
+    LaunchAtLoginControlling
+{
+    var isEnabled = false
+
+    func setEnabled(_ enabled: Bool) throws {
+        isEnabled = enabled
     }
 }

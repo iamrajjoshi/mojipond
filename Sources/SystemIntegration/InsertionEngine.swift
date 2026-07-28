@@ -8,7 +8,7 @@ enum SyntheticEventPostingError: Error, Equatable {
 
 protocol SyntheticEventPosting: Sendable {
     var canPostEvents: Bool { get }
-    func postPasteShortcut() throws
+    func postPasteShortcut(to processIdentifier: pid_t) throws
 }
 
 struct MacSyntheticEventPoster: SyntheticEventPosting, @unchecked Sendable {
@@ -24,7 +24,7 @@ struct MacSyntheticEventPoster: SyntheticEventPosting, @unchecked Sendable {
         permissionProvider.isGranted(.eventPosting)
     }
 
-    func postPasteShortcut() throws {
+    func postPasteShortcut(to processIdentifier: pid_t) throws {
         guard canPostEvents else {
             throw SyntheticEventPostingError.permissionUnavailable
         }
@@ -48,8 +48,8 @@ struct MacSyntheticEventPoster: SyntheticEventPosting, @unchecked Sendable {
         keyUp.flags = .maskCommand
         SessionEventTapService.tagAsSynthetic(keyDown)
         SessionEventTapService.tagAsSynthetic(keyUp)
-        keyDown.post(tap: .cghidEventTap)
-        keyUp.post(tap: .cghidEventTap)
+        keyDown.postToPid(processIdentifier)
+        keyUp.postToPid(processIdentifier)
     }
 }
 
@@ -137,7 +137,9 @@ final class InsertionEngine {
             ) { [accessibility, eventPoster] in
                 do {
                     try accessibility.selectValidatedToken(for: request)
-                    try eventPoster.postPasteShortcut()
+                    try eventPoster.postPasteShortcut(
+                        to: request.target.processIdentifier
+                    )
                 } catch {
                     accessibility.restoreExpectedSelection(for: request)
                     throw error

@@ -2,7 +2,7 @@ import CryptoKit
 import Foundation
 
 struct URLSessionUpdateFeedFetcher: UpdateFeedFetching {
-    private let session: URLSession
+    private let responseLoader: BoundedHTTPSResponseLoader
 
     init() {
         let configuration = URLSessionConfiguration.ephemeral
@@ -11,22 +11,40 @@ struct URLSessionUpdateFeedFetcher: UpdateFeedFetching {
         configuration.httpCookieStorage = nil
         configuration.timeoutIntervalForRequest = 30
         configuration.timeoutIntervalForResource = 60
-        session = URLSession(
+        let session = URLSession(
             configuration: configuration,
-            delegate: HTTPSOnlyRedirectDelegate(),
+            delegate: nil,
             delegateQueue: nil
         )
+        responseLoader = BoundedHTTPSResponseLoader(session: session)
     }
 
-    func fetchUpdateFeed(from url: URL) async throws -> UpdateFeedResponse {
-        let (data, response) = try await session.data(from: url)
-        guard let response = response as? HTTPURLResponse else {
-            throw SignedUpdateCheckError.transportFailure
+    func fetchUpdateFeed(
+        from url: URL,
+        maximumBytes: Int
+    ) async throws -> UpdateFeedResponse {
+        let loaded: BoundedHTTPResponse
+        do {
+            loaded = try await responseLoader.load(
+                URLRequest(url: url),
+                maximumBytes: maximumBytes
+            )
+        } catch let error as BoundedHTTPSLoadError {
+            switch error {
+            case .responseTooLarge:
+                throw SignedUpdateCheckError.feedTooLarge(limit: maximumBytes)
+            case .insecureRequestURL:
+                throw SignedUpdateCheckError.insecureFeedURL
+            case .insecureRedirectURL, .disallowedRedirectHost:
+                throw SignedUpdateCheckError.insecureRedirectURL
+            case .invalidResponse:
+                throw SignedUpdateCheckError.transportFailure
+            }
         }
         return UpdateFeedResponse(
-            data: data,
-            statusCode: response.statusCode,
-            finalURL: response.url ?? url
+            data: loaded.data,
+            statusCode: loaded.response.statusCode,
+            finalURL: loaded.response.url ?? url
         )
     }
 }
@@ -65,7 +83,10 @@ struct SignedUpdateChecker: Sendable {
         try Task.checkCancellation()
         let response: UpdateFeedResponse
         do {
-            response = try await fetcher.fetchUpdateFeed(from: feedURL)
+            response = try await fetcher.fetchUpdateFeed(
+                from: feedURL,
+                maximumBytes: configuration.maximumFeedByteCount
+            )
         } catch is CancellationError {
             throw CancellationError()
         } catch let error as URLError where error.code == .cancelled {
@@ -129,6 +150,7 @@ struct SignedUpdateChecker: Sendable {
             try Self.verifiedMetadata(
                 from: payload,
                 algorithm: envelope.algorithm,
+                verificationKey: publicKey,
                 signedPayload: payloadData
             )
         )
@@ -137,6 +159,7 @@ struct SignedUpdateChecker: Sendable {
     private static func verifiedMetadata(
         from payload: UpdateManifestPayload,
         algorithm: UpdateSignatureAlgorithm,
+        verificationKey: UpdateVerificationKey,
         signedPayload: Data
     ) throws -> VerifiedUpdateMetadata {
         guard payload.schemaVersion == supportedPayloadSchema else {
@@ -157,6 +180,10 @@ struct SignedUpdateChecker: Sendable {
         }
         guard payload.build > 0 else {
             throw SignedUpdateCheckError.invalidBuild
+        }
+        if let minimumSystemVersion = payload.minimumSystemVersion,
+           UpdateSystemVersion(minimumSystemVersion) == nil {
+            throw SignedUpdateCheckError.invalidMinimumSystemVersion
         }
         guard HTTPSURLValidator.isSecure(payload.downloadURL) else {
             throw SignedUpdateCheckError.invalidDownloadURL
@@ -186,33 +213,35 @@ struct SignedUpdateChecker: Sendable {
             assetSHA256: digest,
             assetByteCount: payload.assetByteCount,
             verificationAlgorithm: algorithm,
+            verificationKeySHA256: verificationKeyFingerprint(
+                verificationKey
+            ),
             signedPayloadSHA256: SHA256.hash(data: signedPayload)
                 .map { String(format: "%02x", $0) }
                 .joined(),
             verificationProof: UpdateVerificationProof()
         )
     }
+
+    private static func verificationKeyFingerprint(
+        _ key: UpdateVerificationKey
+    ) -> String {
+        var fingerprintInput = Data(
+            "mojipond-update-key-v1:\(key.algorithm.rawValue):".utf8
+        )
+        switch key {
+        case let .ed25519(rawRepresentation),
+             let .p256(rawRepresentation):
+            fingerprintInput.append(rawRepresentation)
+        }
+        return SHA256.hash(data: fingerprintInput)
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
 }
 
 struct UpdateVerificationProof: Sendable {
     fileprivate init() {}
-}
-
-private final class HTTPSOnlyRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
-    func urlSession(
-        _ session: URLSession,
-        task: URLSessionTask,
-        willPerformHTTPRedirection response: HTTPURLResponse,
-        newRequest request: URLRequest,
-        completionHandler: @escaping (URLRequest?) -> Void
-    ) {
-        _ = session
-        _ = task
-        _ = response
-        completionHandler(
-            request.url.map(HTTPSURLValidator.isSecure) == true ? request : nil
-        )
-    }
 }
 
 private struct SignedUpdateEnvelope: Decodable {

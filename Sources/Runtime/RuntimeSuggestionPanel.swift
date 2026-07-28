@@ -14,9 +14,78 @@ struct RuntimeSuggestionPanelSnapshot: Equatable, Sendable {
     let mode: RuntimeInterceptionMode
     let rows: [RuntimeSuggestionRow]
     let selectedIndex: Int
+    let query: String?
 
     var selectedRow: RuntimeSuggestionRow? {
         rows.indices.contains(selectedIndex) ? rows[selectedIndex] : nil
+    }
+}
+
+enum RuntimeVoiceOverAnnouncement {
+    static func suggestions(
+        _ snapshot: RuntimeSuggestionPanelSnapshot
+    ) -> String {
+        let selected = selectedDescription(row: snapshot.selectedRow)
+        if snapshot.mode == .browser {
+            let count = snapshot.rows.count
+            let word = count == 1 ? "result" : "results"
+            let query = snapshot.query ?? ""
+            let scope = query.isEmpty
+                ? "\(count) emoji \(word)."
+                : "\(count) \(word) for \(query)."
+            return [scope, selected]
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+        }
+        let count = snapshot.rows.count
+        let word = count == 1 ? "suggestion" : "suggestions"
+        return ["\(count) emoji \(word).", selected]
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    static func media(
+        _ snapshot: RuntimeMediaPanelSnapshot
+    ) -> String {
+        let state: String
+        switch snapshot.state {
+        case .idle:
+            state = "Media search ready."
+        case .loading:
+            state = "Searching for media."
+        case .results:
+            state = "\(snapshot.items.count) media results."
+        case .offline:
+            state = "Offline. Showing \(snapshot.items.count) bundled results."
+        case .empty:
+            state = "No matching media."
+        case .cancelled:
+            state = "Media search cancelled."
+        case .networkDisabled:
+            state = "Network GIF search is disabled."
+        case .rateLimited:
+            state = "Media provider is busy."
+        case .failed:
+            state = "Media search failed."
+        case .resolving:
+            state = "Preparing selected media."
+        }
+        guard
+            let selectedIndex = snapshot.selectedIndex,
+            snapshot.items.indices.contains(selectedIndex)
+        else {
+            return state
+        }
+        return "\(state) Selected \(snapshot.items[selectedIndex].title)."
+    }
+
+    private static func selectedDescription(
+        row: RuntimeSuggestionRow?
+    ) -> String {
+        guard let row else {
+            return ""
+        }
+        return "Selected \(row.name), colon \(row.shortcode) colon."
     }
 }
 
@@ -41,11 +110,31 @@ enum RuntimeSuggestionPanelUpdate: Equatable, Sendable {
 protocol RuntimeSuggestionPresenting: AnyObject {
     func apply(_ update: RuntimeSuggestionPanelUpdate)
     func applyMedia(_ update: RuntimeMediaPanelUpdate)
+    func applyReportingVisibility(
+        _ update: RuntimeSuggestionPanelUpdate
+    ) -> Bool
+    func applyMediaReportingVisibility(
+        _ update: RuntimeMediaPanelUpdate
+    ) -> Bool
 }
 
 extension RuntimeSuggestionPresenting {
     func applyMedia(_ update: RuntimeMediaPanelUpdate) {
         _ = update
+    }
+
+    func applyReportingVisibility(
+        _ update: RuntimeSuggestionPanelUpdate
+    ) -> Bool {
+        apply(update)
+        return true
+    }
+
+    func applyMediaReportingVisibility(
+        _ update: RuntimeMediaPanelUpdate
+    ) -> Bool {
+        applyMedia(update)
+        return true
     }
 }
 
@@ -61,6 +150,8 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
         NSHostingController<RuntimeMediaPanelView>
     private var latestRevision: UInt64 = 0
     private var latestMediaRevision: UInt64 = 0
+    private var lastSuggestionAnnouncement: String?
+    private var lastMediaAnnouncement: String?
 
     init() {
         let initial = RuntimeSuggestionPanelView(
@@ -69,7 +160,8 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
                 transactionID: ParserTransactionID(rawValue: 0),
                 mode: .hidden,
                 rows: [],
-                selectedIndex: 0
+                selectedIndex: 0,
+                query: nil
             )
         )
         hostingController = NSHostingController(rootView: initial)
@@ -88,6 +180,7 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
         panel.hasShadow = true
         panel.ignoresMouseEvents = true
         panel.setAccessibilityLabel("MojiPond emoji suggestions")
+        panel.setAccessibilityIdentifier("runtime.suggestionPanel")
 
         mediaPanel.contentViewController = mediaHostingController
         mediaPanel.backgroundColor = .clear
@@ -95,17 +188,26 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
         mediaPanel.hasShadow = true
         mediaPanel.ignoresMouseEvents = true
         mediaPanel.setAccessibilityLabel("MojiPond media search")
+        mediaPanel.setAccessibilityIdentifier("runtime.mediaPanel")
     }
 
     func applyMedia(_ update: RuntimeMediaPanelUpdate) {
+        _ = applyMediaReportingVisibility(update)
+    }
+
+    func applyMediaReportingVisibility(
+        _ update: RuntimeMediaPanelUpdate
+    ) -> Bool {
         guard update.revision >= latestMediaRevision else {
-            return
+            return false
         }
         latestMediaRevision = update.revision
 
         switch update {
         case .hide:
             mediaPanel.orderOut(nil)
+            lastMediaAnnouncement = nil
+            return false
         case let .show(snapshot, caretBounds):
             panel.orderOut(nil)
             mediaHostingController.rootView = RuntimeMediaPanelView(
@@ -119,15 +221,23 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
                 nearQuartzCaret: caretBounds
             ) != nil else {
                 mediaPanel.orderOut(nil)
-                return
+                return false
             }
             mediaPanel.orderFrontRegardless()
+            announceMedia(snapshot)
+            return true
         }
     }
 
     func apply(_ update: RuntimeSuggestionPanelUpdate) {
+        _ = applyReportingVisibility(update)
+    }
+
+    func applyReportingVisibility(
+        _ update: RuntimeSuggestionPanelUpdate
+    ) -> Bool {
         guard update.revision >= latestRevision else {
-            return
+            return false
         }
         latestRevision = update.revision
 
@@ -135,43 +245,88 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
         case let .hide(revision):
             _ = revision
             panel.orderOut(nil)
+            lastSuggestionAnnouncement = nil
+            return false
 
         case let .show(snapshot, caretBounds):
-            guard !snapshot.rows.isEmpty else {
+            guard !snapshot.rows.isEmpty || snapshot.mode == .browser else {
                 panel.orderOut(nil)
-                return
+                return false
             }
             hostingController.rootView = RuntimeSuggestionPanelView(
                 snapshot: snapshot
             )
-            let size = Self.panelSize(for: snapshot)
+            panel.title = snapshot.mode == .browser
+                ? "MojiPond Emoji Browser"
+                : "MojiPond Caret Suggestions"
+            panel.setAccessibilityLabel(
+                snapshot.mode == .browser
+                    ? "MojiPond emoji browser"
+                    : "MojiPond emoji suggestions"
+            )
+            let size = Self.preferredSize(for: snapshot)
             panel.setContentSize(size)
             guard CaretPanelPositioner.position(
                 panel,
                 nearQuartzCaret: caretBounds
             ) != nil else {
                 panel.orderOut(nil)
-                return
+                return false
             }
             panel.orderFrontRegardless()
+            announceSuggestions(snapshot)
+            return true
         }
     }
 
-    private static func panelSize(
+    private func announceSuggestions(
+        _ snapshot: RuntimeSuggestionPanelSnapshot
+    ) {
+        let announcement = RuntimeVoiceOverAnnouncement.suggestions(snapshot)
+        guard announcement != lastSuggestionAnnouncement else {
+            return
+        }
+        lastSuggestionAnnouncement = announcement
+        postAnnouncement(announcement, from: panel)
+    }
+
+    private func announceMedia(
+        _ snapshot: RuntimeMediaPanelSnapshot
+    ) {
+        let announcement = RuntimeVoiceOverAnnouncement.media(snapshot)
+        guard announcement != lastMediaAnnouncement else {
+            return
+        }
+        lastMediaAnnouncement = announcement
+        postAnnouncement(announcement, from: mediaPanel)
+    }
+
+    private func postAnnouncement(
+        _ announcement: String,
+        from element: Any
+    ) {
+        NSAccessibility.post(
+            element: element,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: announcement,
+                .priority: NSAccessibilityPriorityLevel.high.rawValue
+            ]
+        )
+    }
+
+    nonisolated static func preferredSize(
         for snapshot: RuntimeSuggestionPanelSnapshot
     ) -> CGSize {
         switch snapshot.mode {
         case .hidden:
             CGSize(width: 380, height: 1)
         case .suggestions:
-            CGSize(
-                width: 380,
-                height: CGFloat(snapshot.rows.count * 48 + 12)
-            )
+            CGSize(width: 380, height: 282)
         case .browser:
             CGSize(
                 width: 440,
-                height: CGFloat(snapshot.rows.count * 44 + 48)
+                height: CGFloat(min(max(snapshot.rows.count, 1), 8) * 44 + 48)
             )
         case .media:
             CGSize(width: 440, height: 1)
@@ -181,6 +336,9 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
 
 struct RuntimeSuggestionPanelView: View {
     let snapshot: RuntimeSuggestionPanelSnapshot
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityReduceTransparency)
+    private var reduceTransparency
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -190,6 +348,11 @@ struct RuntimeSuggestionPanelView: View {
                         .foregroundStyle(.tint)
                     Text("MojiPond")
                         .font(.headline)
+                    if let query = snapshot.query, !query.isEmpty {
+                        Text(query)
+                            .font(.body.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
                     Spacer()
                     Text("↑↓ choose  ·  ↩ insert  ·  esc close")
                         .font(.caption)
@@ -199,6 +362,72 @@ struct RuntimeSuggestionPanelView: View {
                 .frame(height: 42)
             }
 
+            if snapshot.mode == .browser {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        rows
+                    }
+                    .onAppear {
+                        if let selected = snapshot.selectedRow {
+                            proxy.scrollTo(selected.id, anchor: .center)
+                        }
+                    }
+                    .onChange(of: snapshot.selectedRow?.id) {
+                        if let selected = snapshot.selectedRow {
+                            proxy.scrollTo(selected.id, anchor: .center)
+                        }
+                    }
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    rows
+                    Spacer(minLength: 0)
+                    Divider()
+                    Text("↑↓ choose  ·  tab or ↩ insert  ·  esc close")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 12)
+                        .frame(height: 30)
+                }
+                .frame(height: 270, alignment: .top)
+            }
+        }
+        .padding(.vertical, 6)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(
+                    reduceTransparency
+                        ? AnyShapeStyle(
+                            Color(nsColor: .windowBackgroundColor)
+                        )
+                        : AnyShapeStyle(.regularMaterial)
+                )
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(
+                    .primary.opacity(
+                        contrast == .increased ? 0.5 : 0.12
+                    ),
+                    lineWidth: contrast == .increased ? 2 : 1
+                )
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(
+            snapshot.mode == .browser
+                ? "MojiPond emoji browser"
+                : "MojiPond emoji suggestions"
+        )
+    }
+
+    @ViewBuilder
+    private var rows: some View {
+        if snapshot.rows.isEmpty {
+            Text("No matching emoji")
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, minHeight: 44)
+        } else {
             ForEach(Array(snapshot.rows.enumerated()), id: \.element.id) {
                 index,
                 row in
@@ -207,21 +436,9 @@ struct RuntimeSuggestionPanelView: View {
                     isSelected: index == snapshot.selectedIndex,
                     compact: snapshot.mode == .browser
                 )
+                .id(row.id)
             }
         }
-        .padding(.vertical, 6)
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(.primary.opacity(0.12), lineWidth: 1)
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(
-            snapshot.mode == .browser
-                ? "MojiPond emoji browser"
-                : "MojiPond emoji suggestions"
-        )
     }
 }
 
@@ -247,13 +464,26 @@ private struct RuntimeSuggestionRowView: View {
                 }
             }
             Spacer(minLength: 4)
+            if isSelected {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(PondDesign.selectionForeground)
+                    .accessibilityHidden(true)
+            }
         }
         .padding(.horizontal, 10)
         .frame(height: compact ? 44 : 48)
-        .foregroundStyle(isSelected ? Color.white : Color.primary)
+        .foregroundStyle(
+            isSelected
+                ? PondDesign.selectionForeground
+                : Color.primary
+        )
         .background {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isSelected ? Color.accentColor : Color.clear)
+                .fill(
+                    isSelected
+                        ? PondDesign.selectionBackground
+                        : Color.clear
+                )
                 .padding(.horizontal, 5)
         }
         .contentShape(Rectangle())

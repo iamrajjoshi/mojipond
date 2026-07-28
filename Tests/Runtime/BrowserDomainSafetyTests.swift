@@ -172,7 +172,9 @@ final class BrowserDomainSafetyTests: XCTestCase {
         }
     }
 
-    func testContextProviderFailsOpenOnlyForDomainLookupFailure() throws {
+    func testContextProviderFailsClosedForSupportedBrowserDomainLookupFailure()
+        throws
+    {
         let textSystem = BrowserDomainTextSystem()
         let provider = RuntimeAccessibilityTextContextProvider(
             accessibility: AccessibilityTextAdapter(system: textSystem),
@@ -193,12 +195,17 @@ final class BrowserDomainSafetyTests: XCTestCase {
             )
         )
 
-        let capture = try provider.capture(
-            expectedToken: ":frog:",
-            trigger: ":"
-        )
-
-        XCTAssertEqual(capture.context.tokenRange, NSRange(location: 0, length: 6))
+        XCTAssertThrowsError(
+            try provider.capture(
+                expectedToken: ":frog:",
+                trigger: ":"
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? RuntimeTextCaptureError,
+                .denied(.domainUnknown("com.google.Chrome"))
+            )
+        }
     }
 }
 

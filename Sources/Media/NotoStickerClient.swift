@@ -1,7 +1,9 @@
 import Foundation
 
 actor NotoStickerClient {
-    private let session: URLSession
+    private static let maximumManifestBytes = 5 * 1_024 * 1_024
+
+    private let responseLoader: BoundedHTTPSResponseLoader
     private let manifestURL: URL
     private let assetRootURL: URL
     private var cachedIcons: [NotoIcon]?
@@ -15,7 +17,7 @@ actor NotoStickerClient {
             string: "https://fonts.gstatic.com/s/e/notoemoji/latest/"
         )!
     ) {
-        self.session = session
+        responseLoader = BoundedHTTPSResponseLoader(session: session)
         self.manifestURL = manifestURL
         self.assetRootURL = assetRootURL
     }
@@ -76,15 +78,34 @@ actor NotoStickerClient {
             throw RemoteMediaError.insecureURL
         }
 
-        let (data, response) = try await session.data(from: manifestURL)
-        guard let response = response as? HTTPURLResponse else {
-            throw RemoteMediaError.invalidResponse
+        let loaded: BoundedHTTPResponse
+        do {
+            loaded = try await responseLoader.load(
+                URLRequest(url: manifestURL),
+                maximumBytes: Self.maximumManifestBytes,
+                redirectPolicy: .sameHost
+            )
+        } catch let error as BoundedHTTPSLoadError {
+            switch error {
+            case .responseTooLarge:
+                throw RemoteMediaError.responseTooLarge(
+                    limit: Self.maximumManifestBytes
+                )
+            case .insecureRequestURL, .insecureRedirectURL, .disallowedRedirectHost:
+                throw RemoteMediaError.insecureURL
+            case .invalidResponse:
+                throw RemoteMediaError.invalidResponse
+            }
         }
+        let response = loaded.response
         guard (200..<300).contains(response.statusCode) else {
             throw RemoteMediaError.statusCode(response.statusCode)
         }
 
-        let payload = try JSONDecoder().decode(NotoManifest.self, from: data)
+        let payload = try JSONDecoder().decode(
+            NotoManifest.self,
+            from: loaded.data
+        )
         cachedIcons = payload.icons
         return payload.icons
     }
@@ -146,4 +167,3 @@ private struct NotoIcon: Decodable {
             .joined(separator: " ")
     }
 }
-

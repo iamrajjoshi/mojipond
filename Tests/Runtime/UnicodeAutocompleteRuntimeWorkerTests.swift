@@ -94,6 +94,127 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         XCTAssertEqual(harness.gate.mode, .browser)
     }
 
+    func testDoubleTriggerBrowserContainsTheCompleteLibrary() async throws {
+        let items = (0..<75).map {
+            emoji(shortcode: "pond_\($0)", value: "🐸")
+        }
+        let harness = try makeHarness(
+            items: items,
+            targetText: "::"
+        )
+        harness.worker.setCaptureEnabled(true)
+        type("::", into: harness.worker)
+
+        let completeBrowserShown = await eventually {
+            harness.presenter.latestShown?.mode == .browser
+                && harness.presenter.latestShown?.rows.count == items.count
+        }
+
+        XCTAssertTrue(completeBrowserShown)
+        XCTAssertEqual(
+            Set(harness.presenter.latestShown?.rows.map(\.shortcode) ?? []),
+            Set(items.map(\.shortcode.rawValue))
+        )
+    }
+
+    func testBrowserOwnsAFilteredVirtualQueryAndBackspace() async throws {
+        let harness = try makeHarness(
+            items: [
+                emoji(shortcode: "frog", value: "🐸"),
+                emoji(shortcode: "whale", value: "🐋")
+            ],
+            targetText: "::"
+        )
+        harness.worker.setCaptureEnabled(true)
+        type("::", into: harness.worker)
+        let browserShown = await eventually {
+            harness.presenter.latestShown?.mode == .browser
+        }
+        XCTAssertTrue(browserShown)
+
+        harness.worker.enqueue(
+            keySnapshot(keyCode: 3, characters: "f")
+        )
+        let filtered = await eventually {
+            harness.presenter.latestShown?.query == "f"
+        }
+        XCTAssertTrue(filtered)
+        XCTAssertEqual(
+            harness.presenter.latestShown?.rows.map(\.shortcode),
+            ["frog"]
+        )
+        XCTAssertEqual(harness.system.text, "::")
+        XCTAssertEqual(harness.gate.mode, .browser)
+
+        harness.worker.enqueue(
+            keySnapshot(keyCode: 6, characters: "z")
+        )
+        let noMatch = await eventually {
+            harness.presenter.latestShown?.query == "fz"
+                && harness.presenter.latestShown?.rows.isEmpty == true
+        }
+        XCTAssertTrue(noMatch)
+        XCTAssertEqual(harness.gate.mode, .browser)
+
+        harness.worker.enqueue(
+            keySnapshot(keyCode: RuntimeKeyboardKeyCode.delete)
+        )
+        harness.worker.enqueue(
+            keySnapshot(keyCode: RuntimeKeyboardKeyCode.delete)
+        )
+        let resetToAll = await eventually {
+            harness.presenter.latestShown?.query == ""
+                && harness.presenter.latestShown?.rows.count == 2
+        }
+        XCTAssertTrue(resetToAll)
+        XCTAssertEqual(harness.gate.mode, .browser)
+    }
+
+    func testMenuBrowserAnchorsAtCaretWithoutMutatingText() async throws {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: "hello"
+        )
+        harness.worker.setCaptureEnabled(true)
+        harness.worker.openBrowser()
+
+        let browserShown = await eventually {
+            harness.presenter.latestShown?.mode == .browser
+        }
+        XCTAssertTrue(browserShown)
+        XCTAssertEqual(harness.system.text, "hello")
+
+        harness.worker.enqueue(
+            keySnapshot(keyCode: RuntimeKeyboardKeyCode.returnKey)
+        )
+        let inserted = await eventually {
+            harness.system.text == "hello🐸"
+        }
+        XCTAssertTrue(inserted)
+    }
+
+    func testMenuBrowserFailsClosedWhenCaretCannotBeCaptured() async throws {
+        let diagnostics = RuntimeDiagnosticRecorder()
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: "hello",
+            captureError: .inaccessibleTarget,
+            diagnosticHandler: { diagnostic in
+                diagnostics.append(diagnostic)
+            }
+        )
+        harness.worker.setCaptureEnabled(true)
+        harness.worker.openBrowser()
+
+        let unsupportedReported = await eventually {
+            diagnostics.values.contains(.unsupportedTarget)
+        }
+        XCTAssertTrue(unsupportedReported)
+        XCTAssertNil(harness.presenter.latestShown)
+        XCTAssertEqual(harness.gate.mode, .hidden)
+        XCTAssertEqual(harness.system.text, "hello")
+    }
+
     func testMissingCaretBoundsFailsClosedAndNeverShowsPanel() async throws {
         let harness = try makeHarness(
             items: [emoji(shortcode: "frog", value: "🐸")],
@@ -109,6 +230,100 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         XCTAssertTrue(captureAttempted)
         try? await Task.sleep(for: .milliseconds(40))
         XCTAssertNil(harness.presenter.latestShown)
+        XCTAssertEqual(harness.gate.mode, .hidden)
+    }
+
+    func testSuggestionPositioningFailureNeverArmsInterception() async throws {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":f"
+        )
+        harness.presenter.allowsPresentation = false
+        harness.worker.setCaptureEnabled(true)
+        type(":f", into: harness.worker)
+
+        let failedClosed = await eventually {
+            let attemptedShow = harness.presenter.updates.contains {
+                if case .show = $0 {
+                    return true
+                }
+                return false
+            }
+            guard case .hide? = harness.presenter.updates.last else {
+                return false
+            }
+            return attemptedShow && harness.gate.mode == .hidden
+        }
+
+        XCTAssertTrue(failedClosed)
+        XCTAssertEqual(harness.system.text, ":f")
+        XCTAssertEqual(
+            harness.gate.decision(
+                for: keySnapshot(
+                    keyCode: RuntimeKeyboardKeyCode.downArrow
+                )
+            ),
+            .passThrough
+        )
+    }
+
+    func testPassThroughReturnBeforeSuggestionIsVisibleNeverAccepts()
+        async throws {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":f",
+            presentationDelayMilliseconds: 120
+        )
+        harness.worker.setCaptureEnabled(true)
+        type(":f", into: harness.worker)
+        let captureFinished = await eventually {
+            harness.captureProvider.captureCount > 0
+        }
+        XCTAssertTrue(captureFinished)
+
+        harness.worker.enqueue(
+            keySnapshot(
+                keyCode: RuntimeKeyboardKeyCode.returnKey,
+                interceptionOutcome: .passThrough
+            )
+        )
+        try? await Task.sleep(for: .milliseconds(180))
+
+        XCTAssertEqual(harness.system.text, ":f")
+        XCTAssertEqual(harness.gate.mode, .hidden)
+    }
+
+    func testPassThroughBrowserCharacterBeforeVisibilityNeverChangesQuery()
+        async throws {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: "::",
+            presentationDelayMilliseconds: 120
+        )
+        harness.worker.setCaptureEnabled(true)
+        type("::", into: harness.worker)
+        let captureFinished = await eventually {
+            harness.captureProvider.captureCount > 0
+        }
+        XCTAssertTrue(captureFinished)
+
+        harness.worker.enqueue(
+            keySnapshot(
+                keyCode: 7,
+                characters: "x",
+                interceptionOutcome: .passThrough
+            )
+        )
+        try? await Task.sleep(for: .milliseconds(180))
+
+        XCTAssertFalse(
+            harness.presenter.updates.contains {
+                guard case let .show(snapshot, _) = $0 else {
+                    return false
+                }
+                return snapshot.query == "x"
+            }
+        )
         XCTAssertEqual(harness.gate.mode, .hidden)
     }
 
@@ -144,6 +359,54 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         }
     }
 
+    func testSuggestionPanelExpiresWithoutAnotherKeyEvent() async throws {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":f",
+            parserTimeout: 0.1
+        )
+        harness.worker.setCaptureEnabled(true)
+        type(":f", into: harness.worker)
+        let shown = await eventually {
+            harness.gate.mode == .suggestions
+        }
+        XCTAssertTrue(shown)
+
+        let hidden = await eventually(timeout: .milliseconds(500)) {
+            harness.gate.mode == .hidden
+        }
+        XCTAssertTrue(hidden)
+    }
+
+    func testNavigationRearmsSuggestionInactivityTimeout() async throws {
+        let harness = try makeHarness(
+            items: [
+                emoji(shortcode: "frog", value: "🐸"),
+                emoji(shortcode: "fox", value: "🦊")
+            ],
+            targetText: ":f",
+            parserTimeout: 0.15
+        )
+        harness.worker.setCaptureEnabled(true)
+        type(":f", into: harness.worker)
+        let shown = await eventually {
+            harness.gate.mode == .suggestions
+        }
+        XCTAssertTrue(shown)
+
+        try? await Task.sleep(for: .milliseconds(90))
+        harness.worker.enqueue(
+            keySnapshot(keyCode: RuntimeKeyboardKeyCode.downArrow)
+        )
+        try? await Task.sleep(for: .milliseconds(90))
+        XCTAssertEqual(harness.gate.mode, .suggestions)
+
+        let eventuallyHidden = await eventually(timeout: .milliseconds(400)) {
+            harness.gate.mode == .hidden
+        }
+        XCTAssertTrue(eventuallyHidden)
+    }
+
     private func makeHarness(
         items: [EmojiItem],
         targetText: String,
@@ -154,6 +417,8 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
             height: 18
         ),
         settleDelayMilliseconds: Int = 0,
+        parserTimeout: TimeInterval = 3,
+        presentationDelayMilliseconds: Int = 0,
         captureError: RuntimeTextCaptureError? = nil,
         diagnosticHandler:
             (@Sendable (UnicodeAutocompleteRuntimeDiagnostic) -> Void)? = nil
@@ -168,6 +433,7 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         let target = try accessibility.focusedTarget()
         let captureProvider = FixedRuntimeTextCaptureProvider(
             target: target,
+            selectionLocation: targetText.utf16.count,
             caretBounds: caretBounds,
             error: captureError
         )
@@ -182,11 +448,16 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
                 ),
                 eventPoster: FakeEventPoster(),
                 restorationDelay: .zero
-            )
+            ),
+            presentationDelayMilliseconds:
+                presentationDelayMilliseconds
         )
+        var preferences = MojiPondPreferences.defaults
+        preferences.shortcode.parserTimeout = parserTimeout
         let worker = UnicodeAutocompleteRuntimeWorker(
             searchIndex: EmojiSearchIndex(items: items),
             configuration: UnicodeAutocompleteRuntimeConfiguration(
+                preferences: preferences,
                 accessibilitySettleDelayMilliseconds:
                     settleDelayMilliseconds,
                 accessibilityRetryLimit: 0
@@ -221,14 +492,16 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
 
     private func keySnapshot(
         keyCode: CGKeyCode,
-        characters: String? = nil
+        characters: String? = nil,
+        interceptionOutcome: EventInterceptionOutcome? = nil
     ) -> KeyboardEventSnapshot {
         KeyboardEventSnapshot(
             typeRawValue: CGEventType.keyDown.rawValue,
             keyCode: keyCode,
             flagsRawValue: 0,
             timestamp: 1,
-            characters: characters
+            characters: characters,
+            interceptionOutcome: interceptionOutcome
         )
     }
 
@@ -273,6 +546,7 @@ private struct RuntimeWorkerHarness {
 @MainActor
 private final class RuntimeRecordingPresenter: RuntimeSuggestionPresenting {
     private(set) var updates: [RuntimeSuggestionPanelUpdate] = []
+    var allowsPresentation = true
 
     var latestShown: RuntimeSuggestionPanelSnapshot? {
         updates.reversed().lazy.compactMap { update in
@@ -286,6 +560,13 @@ private final class RuntimeRecordingPresenter: RuntimeSuggestionPresenting {
     func apply(_ update: RuntimeSuggestionPanelUpdate) {
         updates.append(update)
     }
+
+    func applyReportingVisibility(
+        _ update: RuntimeSuggestionPanelUpdate
+    ) -> Bool {
+        apply(update)
+        return allowsPresentation
+    }
 }
 
 private final class FixedRuntimeTextCaptureProvider:
@@ -293,6 +574,7 @@ private final class FixedRuntimeTextCaptureProvider:
     @unchecked Sendable
 {
     private let target: AccessibilityTextTarget
+    private let selectionLocation: Int
     private let caretBounds: CGRect?
     private let error: RuntimeTextCaptureError?
     private let lock = NSLock()
@@ -300,10 +582,12 @@ private final class FixedRuntimeTextCaptureProvider:
 
     init(
         target: AccessibilityTextTarget,
+        selectionLocation: Int,
         caretBounds: CGRect?,
         error: RuntimeTextCaptureError?
     ) {
         self.target = target
+        self.selectionLocation = selectionLocation
         self.caretBounds = caretBounds
         self.error = error
     }
@@ -326,14 +610,27 @@ private final class FixedRuntimeTextCaptureProvider:
             throw error
         }
         let length = expectedToken.utf16.count
+        let tokenLocation = selectionLocation - length
+        guard tokenLocation >= 0 else {
+            throw RuntimeTextCaptureError.invalidTokenContext
+        }
         return RuntimeTextCapture(
             target: target,
             context: AccessibilityTextContext(
-                selection: NSRange(location: length, length: 0),
+                selection: NSRange(
+                    location: selectionLocation,
+                    length: 0
+                ),
                 caretBounds: caretBounds,
                 textFragment: expectedToken,
-                textFragmentRange: NSRange(location: 0, length: length),
-                tokenRange: NSRange(location: 0, length: length)
+                textFragmentRange: NSRange(
+                    location: tokenLocation,
+                    length: length
+                ),
+                tokenRange: NSRange(
+                    location: tokenLocation,
+                    length: length
+                )
             )
         )
     }

@@ -1,5 +1,7 @@
 import AppKit
+import ImageIO
 import SwiftUI
+import UniformTypeIdentifiers
 
 enum RuntimeMediaPanelState: Equatable, Sendable {
     case idle
@@ -12,6 +14,96 @@ enum RuntimeMediaPanelState: Equatable, Sendable {
     case rateLimited
     case failed(MediaCommandFailure)
     case resolving
+}
+
+enum RuntimeMediaPreviewPlayback: Equatable, Sendable {
+    case animated
+    case staticFrame
+
+    var animates: Bool {
+        self == .animated
+    }
+}
+
+enum RuntimeMediaPreviewPolicy {
+    static func playback(
+        isSelected: Bool,
+        reduceMotion: Bool
+    ) -> RuntimeMediaPreviewPlayback {
+        isSelected && !reduceMotion ? .animated : .staticFrame
+    }
+
+    nonisolated static func prepareImageData(
+        _ data: Data,
+        playback: RuntimeMediaPreviewPlayback,
+        limits: AssetValidationLimits
+    ) -> Data? {
+        guard
+            (try? AssetValidator(limits: limits).validate(data: data)) != nil
+        else {
+            return nil
+        }
+        guard playback == .staticFrame else {
+            return data
+        }
+        return staticThumbnailData(from: data)
+    }
+
+    nonisolated private static func staticThumbnailData(
+        from data: Data
+    ) -> Data? {
+        guard
+            let source = CGImageSourceCreateWithData(
+                data as CFData,
+                [kCGImageSourceShouldCache: false] as CFDictionary
+            ),
+            let thumbnail = CGImageSourceCreateThumbnailAtIndex(
+                source,
+                0,
+                [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceThumbnailMaxPixelSize: 256,
+                    kCGImageSourceShouldCacheImmediately: true
+                ] as CFDictionary
+            )
+        else {
+            return nil
+        }
+        let output = NSMutableData()
+        guard
+            let destination = CGImageDestinationCreateWithData(
+                output,
+                UTType.png.identifier as CFString,
+                1,
+                nil
+            )
+        else {
+            return nil
+        }
+        CGImageDestinationAddImage(destination, thumbnail, nil)
+        guard CGImageDestinationFinalize(destination) else {
+            return nil
+        }
+        return output as Data
+    }
+}
+
+enum RuntimeMediaPreviewLoadState: Equatable, Sendable {
+    case loading
+    case loaded
+    case failed
+
+    var accessibilityDescription: String? {
+        switch self {
+        case .loading:
+            "Preview loading"
+        case .loaded:
+            nil
+        case .failed:
+            "Preview unavailable"
+        }
+    }
 }
 
 enum RuntimeMediaAttributionPolicy {
@@ -39,6 +131,24 @@ struct RuntimeMediaPanelItem: Identifiable, Equatable, Sendable {
     let title: String
     let previewURL: URL
     let provider: RemoteMediaProvider
+    let creatorAttribution: String?
+    let sourceAttribution: String?
+
+    init(
+        id: String,
+        title: String,
+        previewURL: URL,
+        provider: RemoteMediaProvider,
+        creatorAttribution: String? = nil,
+        sourceAttribution: String? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.previewURL = previewURL
+        self.provider = provider
+        self.creatorAttribution = creatorAttribution
+        self.sourceAttribution = sourceAttribution
+    }
 }
 
 struct RuntimeMediaPanelSnapshot: Equatable, Sendable {
@@ -78,6 +188,9 @@ enum RuntimeMediaPanelUpdate: Equatable, Sendable {
 
 struct RuntimeMediaPanelView: View {
     let snapshot: RuntimeMediaPanelSnapshot
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityReduceTransparency)
+    private var reduceTransparency
 
     static func preferredSize(
         for snapshot: RuntimeMediaPanelSnapshot
@@ -85,7 +198,7 @@ struct RuntimeMediaPanelView: View {
         let hasGrid = !snapshot.items.isEmpty
         return CGSize(
             width: 500,
-            height: hasGrid ? 310 : 146
+            height: hasGrid ? 430 : 146
         )
     }
 
@@ -103,11 +216,25 @@ struct RuntimeMediaPanelView: View {
             footer
         }
         .padding(12)
-        .background(.regularMaterial)
+        .background {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(
+                    reduceTransparency
+                        ? AnyShapeStyle(
+                            Color(nsColor: .windowBackgroundColor)
+                        )
+                        : AnyShapeStyle(.regularMaterial)
+                )
+        }
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(.primary.opacity(0.12), lineWidth: 1)
+                .strokeBorder(
+                    .primary.opacity(
+                        contrast == .increased ? 0.5 : 0.12
+                    ),
+                    lineWidth: contrast == .increased ? 2 : 1
+                )
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("MojiPond media search")
@@ -136,7 +263,10 @@ struct RuntimeMediaPanelView: View {
         switch snapshot.state {
         case .offline:
             Text("OFFLINE")
-                .runtimeMediaBadge(color: .orange)
+                .runtimeMediaBadge(
+                    foreground: PondDesign.warningForeground,
+                    background: PondDesign.warningBackground
+                )
         case .loading, .resolving:
             ProgressView()
                 .controlSize(.small)
@@ -146,53 +276,56 @@ struct RuntimeMediaPanelView: View {
     }
 
     private var mediaGrid: some View {
-        LazyVGrid(
-            columns: Array(
-                repeating: GridItem(.flexible(), spacing: 8),
-                count: 4
-            ),
-            spacing: 8
-        ) {
-            ForEach(Array(snapshot.items.enumerated()), id: \.element.id) {
-                index,
-                item in
-                VStack(spacing: 4) {
-                    RuntimeAnimatedMediaPreview(
-                        url: item.previewURL,
-                        provider: item.provider
-                    )
-                        .frame(height: 78)
-                        .clipShape(
-                            RoundedRectangle(
-                                cornerRadius: 8,
-                                style: .continuous
-                            )
-                        )
-                    Text(item.title)
-                        .font(.caption2)
-                        .lineLimit(1)
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                LazyVGrid(
+                    columns: Array(
+                        repeating: GridItem(.flexible(), spacing: 8),
+                        count: 4
+                    ),
+                    spacing: 8
+                ) {
+                    ForEach(
+                        Array(snapshot.items.enumerated()),
+                        id: \.element.id
+                    ) { index, item in
+                        mediaCell(item, at: index)
+                            .id(item.id)
+                    }
                 }
-                .padding(5)
-                .foregroundStyle(
-                    index == snapshot.selectedIndex
-                        ? Color.white
-                        : Color.primary
-                )
-                .background {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(
-                            index == snapshot.selectedIndex
-                                ? Color.accentColor
-                                : Color.primary.opacity(0.055)
-                        )
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(item.title)
-                .accessibilityAddTraits(
-                    index == snapshot.selectedIndex ? [.isSelected] : []
-                )
+            }
+            .frame(height: 326)
+            .scrollIndicators(.visible)
+            .onAppear {
+                scrollToSelection(using: proxy)
+            }
+            .onChange(of: snapshot.selectedIndex) {
+                scrollToSelection(using: proxy)
             }
         }
+    }
+
+    private func mediaCell(
+        _ item: RuntimeMediaPanelItem,
+        at index: Int
+    ) -> some View {
+        RuntimeMediaCell(
+            item: item,
+            attributionDetail: attributionDetail(for: item),
+            isSelected: index == snapshot.selectedIndex
+        )
+    }
+
+    private func scrollToSelection(
+        using proxy: ScrollViewProxy
+    ) {
+        guard
+            let selectedIndex = snapshot.selectedIndex,
+            snapshot.items.indices.contains(selectedIndex)
+        else {
+            return
+        }
+        proxy.scrollTo(snapshot.items[selectedIndex].id, anchor: .center)
     }
 
     @ViewBuilder
@@ -238,12 +371,21 @@ struct RuntimeMediaPanelView: View {
         HStack(spacing: 8) {
             ForEach(snapshot.attributions, id: \.text) { attribution in
                 if attribution == .giphy {
-                    Text(attribution.text)
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.white)
+                    Image("PoweredByGIPHY")
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(width: 100, height: 13)
                         .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(.black, in: Capsule())
+                        .padding(.vertical, 4)
+                        .background(
+                            Color.black,
+                            in: RoundedRectangle(
+                                cornerRadius: 5,
+                                style: .continuous
+                            )
+                        )
+                        .accessibilityLabel("Powered by GIPHY")
                 } else {
                     Text(attribution.text)
                         .font(.caption2)
@@ -258,6 +400,16 @@ struct RuntimeMediaPanelView: View {
             }
         }
         .frame(minHeight: 22)
+    }
+
+    private func attributionDetail(
+        for item: RuntimeMediaPanelItem
+    ) -> String? {
+        let values = [
+            item.creatorAttribution.map { "by \($0)" },
+            item.sourceAttribution.map { "via \($0)" }
+        ].compactMap { $0 }
+        return values.isEmpty ? nil : values.joined(separator: " · ")
     }
 
     private func failureMessage(_ failure: MediaCommandFailure) -> String {
@@ -276,19 +428,127 @@ struct RuntimeMediaPanelView: View {
     }
 }
 
+private struct RuntimeMediaCell: View {
+    let item: RuntimeMediaPanelItem
+    let attributionDetail: String?
+    let isSelected: Bool
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var previewState = RuntimeMediaPreviewLoadState.loading
+
+    var body: some View {
+        VStack(spacing: 4) {
+            ZStack {
+                RuntimeAnimatedMediaPreview(
+                    url: item.previewURL,
+                    provider: item.provider,
+                    animates: RuntimeMediaPreviewPolicy.playback(
+                        isSelected: isSelected,
+                        reduceMotion: reduceMotion
+                    ).animates,
+                    loadState: $previewState
+                )
+
+                previewStatus
+            }
+            .frame(height: 78)
+            .clipShape(
+                RoundedRectangle(
+                    cornerRadius: 8,
+                    style: .continuous
+                )
+            )
+            Text(item.title)
+                .font(.caption2)
+                .lineLimit(1)
+            if let attributionDetail {
+                Text(attributionDetail)
+                    .font(.system(size: 8))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(5)
+        .foregroundStyle(
+            isSelected
+                ? PondDesign.selectionForeground
+                : Color.primary
+        )
+        .background {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(
+                    isSelected
+                        ? PondDesign.selectionBackground
+                        : Color.primary.opacity(0.055)
+                )
+        }
+        .overlay(alignment: .topTrailing) {
+            if isSelected {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(PondDesign.selectionForeground)
+                    .padding(8)
+                    .accessibilityHidden(true)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    }
+
+    @ViewBuilder
+    private var previewStatus: some View {
+        switch previewState {
+        case .loading:
+            ProgressView()
+                .controlSize(.small)
+                .accessibilityLabel("Loading media preview")
+        case .loaded:
+            EmptyView()
+        case .failed:
+            VStack(spacing: 3) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.title3)
+                Text("Preview unavailable")
+                    .font(.system(size: 8, weight: .medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+            .foregroundStyle(.secondary)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Media preview unavailable")
+        }
+    }
+
+    private var accessibilityLabel: String {
+        [
+            item.title,
+            attributionDetail,
+            previewState.accessibilityDescription
+        ]
+        .compactMap { $0 }
+        .joined(separator: ", ")
+    }
+}
+
 private extension View {
-    func runtimeMediaBadge(color: Color) -> some View {
+    func runtimeMediaBadge(
+        foreground: Color,
+        background: Color
+    ) -> some View {
         font(.system(size: 9, weight: .bold))
-            .foregroundStyle(color)
+            .foregroundStyle(foreground)
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
-            .background(color.opacity(0.12), in: Capsule())
+            .background(background, in: Capsule())
     }
 }
 
 private struct RuntimeAnimatedMediaPreview: NSViewRepresentable {
     let url: URL
     let provider: RemoteMediaProvider
+    let animates: Bool
+    @Binding var loadState: RuntimeMediaPreviewLoadState
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -298,12 +558,14 @@ private struct RuntimeAnimatedMediaPreview: NSViewRepresentable {
         let imageView = NSImageView()
         imageView.imageScaling = .scaleProportionallyUpOrDown
         imageView.imageFrameStyle = .none
-        imageView.animates = true
+        imageView.animates = false
         imageView.wantsLayer = true
         context.coordinator.load(
             url,
             provider: provider,
-            into: imageView
+            animates: animates,
+            into: imageView,
+            stateChanged: updateLoadState
         )
         return imageView
     }
@@ -312,7 +574,9 @@ private struct RuntimeAnimatedMediaPreview: NSViewRepresentable {
         context.coordinator.load(
             url,
             provider: provider,
-            into: imageView
+            animates: animates,
+            into: imageView,
+            stateChanged: updateLoadState
         )
     }
 
@@ -325,68 +589,162 @@ private struct RuntimeAnimatedMediaPreview: NSViewRepresentable {
     }
 
     @MainActor
+    private func updateLoadState(
+        _ state: RuntimeMediaPreviewLoadState
+    ) {
+        guard loadState != state else {
+            return
+        }
+        loadState = state
+    }
+
+    @MainActor
     final class Coordinator {
-        private static let maximumPreviewBytes = 8 * 1_024 * 1_024
+        private enum PreviewError: Error {
+            case unavailable
+        }
+
+        private static let maximumPreviewBytes = 4 * 1_024 * 1_024
         private static let session =
             RuntimeMediaNetworkPolicy.nonCachingSession()
+        private static let responseLoader = BoundedHTTPSResponseLoader(
+            session: session
+        )
         private var representedURL: URL?
         private var representedProvider: RemoteMediaProvider?
+        private var representedAnimation = false
         private var task: Task<Void, Never>?
+        private var generation: UInt64 = 0
 
         func load(
             _ url: URL,
             provider: RemoteMediaProvider,
-            into imageView: NSImageView
+            animates: Bool,
+            into imageView: NSImageView,
+            stateChanged: @escaping @MainActor (
+                RuntimeMediaPreviewLoadState
+            ) -> Void
         ) {
             guard
                 representedURL != url
                     || representedProvider != provider
+                    || representedAnimation != animates
             else {
                 return
             }
             representedURL = url
             representedProvider = provider
+            representedAnimation = animates
             task?.cancel()
+            generation &+= 1
+            let requestGeneration = generation
             imageView.image = nil
+            imageView.animates = false
 
-            task = Task { @MainActor [weak imageView] in
+            task = Task { @MainActor [weak self, weak imageView] in
+                guard let self else {
+                    return
+                }
+                stateChanged(.loading)
                 let data: Data
                 do {
                     if url.isFileURL {
+                        let values = try url.resourceValues(
+                            forKeys: [
+                                .isRegularFileKey,
+                                .isSymbolicLinkKey,
+                                .fileSizeKey
+                            ]
+                        )
+                        guard
+                            values.isRegularFile == true,
+                            values.isSymbolicLink != true,
+                            let fileSize = values.fileSize,
+                            fileSize > 0,
+                            fileSize <= Self.maximumPreviewBytes
+                        else {
+                            throw PreviewError.unavailable
+                        }
                         data = try Data(
                             contentsOf: url,
                             options: [.mappedIfSafe]
                         )
                     } else {
-                        guard url.scheme?.lowercased() == "https" else {
-                            return
+                        guard RemoteMediaURLPolicy.allows(
+                            url,
+                            for: provider
+                        ) else {
+                            throw PreviewError.unavailable
                         }
                         let request =
                             RuntimeMediaNetworkPolicy.nonCachingRequest(
                                 for: url
                             )
-                        let (downloaded, response) =
-                            try await Self.session.data(for: request)
+                        let loaded = try await Self.responseLoader.load(
+                            request,
+                            maximumBytes: Self.maximumPreviewBytes,
+                            redirectPolicy: .sameHost
+                        )
+                        let response = loaded.response
                         guard
-                            let response = response as? HTTPURLResponse,
                             (200 ..< 300).contains(response.statusCode),
                             response.mimeType?.hasPrefix("image/") == true
                         else {
-                            return
+                            throw PreviewError.unavailable
                         }
-                        data = downloaded
+                        data = loaded.data
                     }
                     try Task.checkCancellation()
+                    var limits = AssetValidationLimits.default
+                    limits.maximumFileBytes = Int64(
+                        Self.maximumPreviewBytes
+                    )
+                    limits.maximumPixelWidth = 2_048
+                    limits.maximumPixelHeight = 2_048
+                    limits.maximumPixelsPerFrame = 4_194_304
+                    limits.maximumFrameCount = 90
+                    limits.maximumTotalAnimationPixels = 24_000_000
+                    limits.maximumAnimationDurationSeconds = 30
+                    let playback: RuntimeMediaPreviewPlayback =
+                        animates ? .animated : .staticFrame
+                    let preparedData = await Task.detached(
+                        priority: .utility
+                    ) { () -> Data? in
+                        RuntimeMediaPreviewPolicy.prepareImageData(
+                            data,
+                            playback: playback,
+                            limits: limits
+                        )
+                    }.value
                     guard
-                        !data.isEmpty,
-                        data.count <= Self.maximumPreviewBytes,
-                        let image = NSImage(data: data)
+                        let preparedData,
+                        !preparedData.isEmpty,
+                        let image = NSImage(data: preparedData)
+                    else {
+                        throw PreviewError.unavailable
+                    }
+                    guard
+                        !Task.isCancelled,
+                        generation == requestGeneration,
+                        let imageView
                     else {
                         return
                     }
-                    imageView?.image = image
-                } catch {
+                    imageView.animates = animates
+                    imageView.image = image
+                    stateChanged(.loaded)
+                } catch is CancellationError {
                     return
+                } catch {
+                    guard
+                        !Task.isCancelled,
+                        generation == requestGeneration
+                    else {
+                        return
+                    }
+                    imageView?.animates = false
+                    imageView?.image = nil
+                    stateChanged(.failed)
                 }
             }
         }
@@ -394,8 +752,10 @@ private struct RuntimeAnimatedMediaPreview: NSViewRepresentable {
         func cancel() {
             task?.cancel()
             task = nil
+            generation &+= 1
             representedURL = nil
             representedProvider = nil
+            representedAnimation = false
         }
     }
 }

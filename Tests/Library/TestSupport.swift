@@ -31,7 +31,8 @@ enum TestSupport {
         format: UTType = .png,
         width: Int = 2,
         height: Int = 2,
-        frameCount: Int = 1
+        frameCount: Int = 1,
+        frameDuration: Double = 0.1
     ) throws -> URL {
         guard let context = CGContext(
             data: nil,
@@ -80,7 +81,8 @@ enum TestSupport {
             let properties: [CFString: Any] = format == .gif
                 ? [
                     kCGImagePropertyGIFDictionary: [
-                        kCGImagePropertyGIFDelayTime: 0.1
+                        kCGImagePropertyGIFUnclampedDelayTime:
+                            frameDuration
                     ]
                 ]
                 : [:]

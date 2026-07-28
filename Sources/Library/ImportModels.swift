@@ -10,7 +10,28 @@ struct PreparedEmoji: Identifiable, Equatable, Sendable {
     var order: Int
     let sourceURL: URL
     let sourceFilename: String
-    let asset: ValidatedAsset
+    let content: PreparedEmojiContent
+
+    var assetSourceURL: URL? {
+        guard case .asset = content else {
+            return nil
+        }
+        return sourceURL
+    }
+
+    var asset: ValidatedAsset? {
+        guard case let .asset(asset) = content else {
+            return nil
+        }
+        return asset
+    }
+
+    var unicode: String? {
+        guard case let .unicode(value) = content else {
+            return nil
+        }
+        return value
+    }
 
     init(
         id: UUID = UUID(),
@@ -33,8 +54,37 @@ struct PreparedEmoji: Identifiable, Equatable, Sendable {
         self.order = order
         self.sourceURL = sourceURL
         self.sourceFilename = sourceFilename ?? sourceURL.lastPathComponent
-        self.asset = asset
+        content = .asset(asset)
     }
+
+    init(
+        id: UUID = UUID(),
+        shortcode: Shortcode,
+        aliases: [Shortcode] = [],
+        displayName: String? = nil,
+        tags: [String] = [],
+        category: String? = nil,
+        order: Int = 0,
+        unicode: String,
+        sourceURL: URL,
+        sourceFilename: String = "Unicode emoji"
+    ) {
+        self.id = id
+        self.shortcode = shortcode
+        self.aliases = aliases
+        self.displayName = displayName
+        self.tags = tags
+        self.category = category
+        self.order = order
+        self.sourceURL = sourceURL
+        self.sourceFilename = sourceFilename
+        content = .unicode(unicode)
+    }
+}
+
+enum PreparedEmojiContent: Equatable, Sendable {
+    case asset(ValidatedAsset)
+    case unicode(String)
 }
 
 struct PreparedPackImport: Equatable, Sendable {
@@ -105,7 +155,8 @@ struct ImportPreviewItem: Identifiable, Equatable, Sendable {
     let sourceFilename: String
     let shortcode: Shortcode
     let aliases: [Shortcode]
-    let format: AssetFormat
+    let unicode: String?
+    let format: AssetFormat?
     let byteCount: Int64
     let pixelWidth: Int
     let pixelHeight: Int
@@ -120,6 +171,7 @@ struct ImportCollision: Identifiable, Equatable, Sendable {
 
     enum Existing: Equatable, Sendable {
         case library(ShortcodeOwner)
+        case reserved(ReservedShortcodeOwner)
         case incoming(candidateID: UUID, claim: Claim)
     }
 
@@ -151,6 +203,62 @@ struct ShortcodeOwner: Equatable, Hashable, Sendable {
     let isAlias: Bool
 }
 
+struct ReservedShortcodeOwner: Equatable, Hashable, Sendable {
+    enum Source: Equatable, Hashable, Sendable {
+        case builtIn
+        case customAlias
+    }
+
+    let shortcode: Shortcode
+    let itemID: String
+    let itemName: String
+    let packID: String
+    let packName: String
+    let isAlias: Bool
+    let source: Source
+}
+
+enum BuiltInShortcodeReservations {
+    static func owners(
+        in pack: EmojiCatalogPack?
+    ) -> [ReservedShortcodeOwner] {
+        guard let pack else {
+            return []
+        }
+        return pack.items.flatMap { item in
+            let primary = ReservedShortcodeOwner(
+                shortcode: item.shortcode,
+                itemID: item.id,
+                itemName: item.name,
+                packID: pack.id,
+                packName: pack.name,
+                isAlias: false,
+                source: .builtIn
+            )
+            let aliases = item.aliases.compactMap {
+                Shortcode(rawValue: $0)
+            }.map {
+                ReservedShortcodeOwner(
+                    shortcode: $0,
+                    itemID: item.id,
+                    itemName: item.name,
+                    packID: pack.id,
+                    packName: pack.name,
+                    isAlias: true,
+                    source: .builtIn
+                )
+            }
+            return [primary] + aliases
+        }
+    }
+
+    static func shortcodes(
+        in pack: EmojiCatalogPack
+    ) -> Set<Shortcode> {
+        Set(owners(in: pack).map(\.shortcode))
+    }
+}
+
 enum CollisionDecision: Equatable, Sendable {
     case skipIncomingItem
     case replaceExistingItem
@@ -166,9 +274,14 @@ struct ResolvedPackImport: Equatable, Sendable {
 enum ImportCollisionAnalyzer {
     static func makePreview(
         scanResult: ImportScanResult,
-        library: MojiPondLibrary
+        library: MojiPondLibrary,
+        reservedShortcodeOwners: [ReservedShortcodeOwner] = []
     ) -> ImportPreview {
         let owners = existingOwners(in: library)
+        let reservedOwners = Dictionary(
+            grouping: reservedShortcodeOwners,
+            by: \.shortcode
+        )
         var seenIncoming: [Shortcode: (UUID, ImportCollision.Claim)] = [:]
         var collisions: [ImportCollision] = []
 
@@ -178,6 +291,18 @@ enum ImportCollisionAnalyzer {
                 + candidate.aliases.enumerated().map { ($0.element, .alias(index: $0.offset)) }
 
             for (shortcode, claim) in claims {
+                if let protectedOwners = reservedOwners[shortcode] {
+                    for owner in protectedOwners {
+                        collisions.append(
+                            ImportCollision(
+                                shortcode: shortcode,
+                                incomingCandidateID: candidate.id,
+                                incomingClaim: claim,
+                                existing: .reserved(owner)
+                            )
+                        )
+                    }
+                }
                 if let existingOwners = owners[shortcode] {
                     for owner in existingOwners {
                         collisions.append(
@@ -206,17 +331,33 @@ enum ImportCollisionAnalyzer {
         }
 
         let previewItems = scanResult.preparedPack.items.map { candidate in
-            ImportPreviewItem(
-                id: candidate.id,
-                sourceFilename: candidate.sourceFilename,
-                shortcode: candidate.shortcode,
-                aliases: candidate.aliases,
-                format: candidate.asset.format,
-                byteCount: candidate.asset.digest.byteCount,
-                pixelWidth: candidate.asset.pixelWidth,
-                pixelHeight: candidate.asset.pixelHeight,
-                frameCount: candidate.asset.frameCount
-            )
+            if let asset = candidate.asset {
+                ImportPreviewItem(
+                    id: candidate.id,
+                    sourceFilename: candidate.sourceFilename,
+                    shortcode: candidate.shortcode,
+                    aliases: candidate.aliases,
+                    unicode: nil,
+                    format: asset.format,
+                    byteCount: asset.digest.byteCount,
+                    pixelWidth: asset.pixelWidth,
+                    pixelHeight: asset.pixelHeight,
+                    frameCount: asset.frameCount
+                )
+            } else {
+                ImportPreviewItem(
+                    id: candidate.id,
+                    sourceFilename: candidate.sourceFilename,
+                    shortcode: candidate.shortcode,
+                    aliases: candidate.aliases,
+                    unicode: candidate.unicode,
+                    format: nil,
+                    byteCount: 0,
+                    pixelWidth: 0,
+                    pixelHeight: 0,
+                    frameCount: 0
+                )
+            }
         }
         return ImportPreview(
             preparedPack: scanResult.preparedPack,
@@ -231,7 +372,8 @@ enum ImportCollisionAnalyzer {
     static func resolve(
         preview: ImportPreview,
         decisions: [UUID: CollisionDecision],
-        library: MojiPondLibrary
+        library: MojiPondLibrary,
+        reservedShortcodeOwners: [ReservedShortcodeOwner] = []
     ) throws -> ResolvedPackImport {
         var candidates = Dictionary(
             uniqueKeysWithValues: preview.preparedPack.items.map { ($0.id, $0) }
@@ -256,7 +398,21 @@ enum ImportCollisionAnalyzer {
             case .replaceExistingItem:
                 switch collision.existing {
                 case let .library(owner):
+                    guard currentLibraryItem(
+                        ownedBy: owner,
+                        stillClaims: collision.shortcode,
+                        in: library
+                    ) else {
+                        throw CollisionResolutionError.staleExistingOwner(
+                            owner.itemID
+                        )
+                    }
                     replacements.insert(owner.itemID)
+                case .reserved:
+                    throw CollisionResolutionError
+                        .cannotReplaceReservedShortcode(
+                            collision.shortcode
+                        )
                 case let .incoming(otherCandidateID, _):
                     skipped.insert(otherCandidateID)
                 }
@@ -289,9 +445,29 @@ enum ImportCollisionAnalyzer {
         try verifyNoRemainingCollisions(
             items: resolvedItems,
             library: library,
+            reservedShortcodeOwners: reservedShortcodeOwners,
             replacing: replacements
         )
         return ResolvedPackImport(pack: resolvedPack, existingItemIDsToReplace: replacements)
+    }
+
+    private static func currentLibraryItem(
+        ownedBy owner: ShortcodeOwner,
+        stillClaims shortcode: Shortcode,
+        in library: MojiPondLibrary
+    ) -> Bool {
+        guard
+            let pack = library.packs.first(where: {
+                $0.id == owner.packID
+            }),
+            let item = pack.items.first(where: {
+                $0.id == owner.itemID
+            })
+        else {
+            return false
+        }
+        return item.shortcode == shortcode
+            || item.aliases.contains(shortcode)
     }
 
     private static func existingOwners(
@@ -326,6 +502,7 @@ enum ImportCollisionAnalyzer {
     private static func verifyNoRemainingCollisions(
         items: [PreparedEmoji],
         library: MojiPondLibrary,
+        reservedShortcodeOwners: [ReservedShortcodeOwner],
         replacing replacements: Set<UUID>
     ) throws {
         var claimed = Set<Shortcode>()
@@ -344,6 +521,25 @@ enum ImportCollisionAnalyzer {
                 }
             }
         }
+
+        let currentReservations = Set(reservedShortcodeOwners)
+        for collision in previewReservedCollisions(
+            in: claimed,
+            owners: currentReservations
+        ) {
+            throw CollisionResolutionError.unresolved(collision)
+        }
+    }
+
+    private static func previewReservedCollisions(
+        in claimed: Set<Shortcode>,
+        owners: Set<ReservedShortcodeOwner>
+    ) -> Set<Shortcode> {
+        Set(
+            owners.lazy
+                .map(\.shortcode)
+                .filter(claimed.contains)
+        )
     }
 }
 
@@ -351,6 +547,8 @@ enum CollisionResolutionError: Error, Equatable, LocalizedError, Sendable {
     case missingDecision(UUID)
     case invalidAliasIndex
     case cannotDropPrimaryShortcode
+    case cannotReplaceReservedShortcode(Shortcode)
+    case staleExistingOwner(UUID)
     case unresolved(Shortcode)
 
     var errorDescription: String? {
@@ -361,6 +559,10 @@ enum CollisionResolutionError: Error, Equatable, LocalizedError, Sendable {
             "An alias changed while collision decisions were being applied."
         case .cannotDropPrimaryShortcode:
             "An emoji’s primary shortcode cannot be dropped."
+        case let .cannotReplaceReservedShortcode(shortcode):
+            "Shortcode \(shortcode.rawValue) is protected. Keep it or rename the incoming emoji."
+        case let .staleExistingOwner(itemID):
+            "Emoji \(itemID) changed after the import preview. Review the conflicts again before installing."
         case let .unresolved(shortcode):
             "Shortcode \(shortcode.rawValue) still collides after applying decisions."
         }

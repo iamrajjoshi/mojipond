@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 struct ImportHTTPResponse: Equatable, Sendable {
     let data: Data
@@ -13,13 +14,27 @@ struct ImportHTTPResponse: Equatable, Sendable {
 
 struct ImportURLPolicy: Equatable, Sendable {
     private let allowedHosts: Set<String>?
+    private let requiresPublicNetworkAddress: Bool
 
-    static let githubAPI = Self(allowedHosts: ["api.github.com"])
-    static let githubArchive = Self(allowedHosts: ["codeload.github.com"])
-    static let slackAsset = Self(allowedHosts: nil)
+    static let githubAPI = Self(
+        allowedHosts: ["api.github.com"],
+        requiresPublicNetworkAddress: false
+    )
+    static let githubArchive = Self(
+        allowedHosts: ["codeload.github.com"],
+        requiresPublicNetworkAddress: false
+    )
+    static let slackAsset = Self(
+        allowedHosts: nil,
+        requiresPublicNetworkAddress: true
+    )
 
-    private init(allowedHosts: Set<String>?) {
+    private init(
+        allowedHosts: Set<String>?,
+        requiresPublicNetworkAddress: Bool
+    ) {
         self.allowedHosts = allowedHosts
+        self.requiresPublicNetworkAddress = requiresPublicNetworkAddress
     }
 
     func validate(_ url: URL) throws {
@@ -39,12 +54,223 @@ struct ImportURLPolicy: Equatable, Sendable {
             throw ImportHTTPError.unexpectedPort
         }
         guard components.fragment == nil,
-              let host = components.host?.lowercased(),
+              let host = url.host?.lowercased(),
               !host.isEmpty else {
             throw ImportHTTPError.invalidURL
         }
         if let allowedHosts, !allowedHosts.contains(host) {
             throw ImportHTTPError.disallowedHost(host)
+        }
+        if requiresPublicNetworkAddress {
+            let normalizedHost = host.hasSuffix(".")
+                ? String(host.dropLast())
+                : host
+            guard normalizedHost != "localhost",
+                  !normalizedHost.hasSuffix(".localhost"),
+                  normalizedHost != "local",
+                  !normalizedHost.hasSuffix(".local"),
+                  !normalizedHost.contains("%") else {
+                throw ImportHTTPError.unsafeNetworkDestination(host)
+            }
+            if let address = ImportResolvedAddress(ipLiteral: normalizedHost),
+               !address.isPubliclyRoutable {
+                throw ImportHTTPError.unsafeNetworkDestination(host)
+            }
+        }
+    }
+
+    func validateForConnection(
+        _ url: URL,
+        resolver: any ImportHostResolving
+    ) throws {
+        try validate(url)
+        guard requiresPublicNetworkAddress,
+              let host = url.host?.lowercased() else {
+            return
+        }
+        let addresses = try resolver.resolve(host: host)
+        guard !addresses.isEmpty,
+              addresses.allSatisfy(\.isPubliclyRoutable) else {
+            throw ImportHTTPError.unsafeNetworkDestination(host)
+        }
+    }
+}
+
+protocol ImportHostResolving: Sendable {
+    func resolve(host: String) throws -> [ImportResolvedAddress]
+}
+
+struct SystemImportHostResolver: ImportHostResolving {
+    func resolve(host: String) throws -> [ImportResolvedAddress] {
+        var hints = addrinfo()
+        hints.ai_flags = AI_ADDRCONFIG | AI_NUMERICSERV
+        hints.ai_family = AF_UNSPEC
+        hints.ai_socktype = SOCK_STREAM
+        hints.ai_protocol = IPPROTO_TCP
+
+        var result: UnsafeMutablePointer<addrinfo>?
+        let status = getaddrinfo(host, "443", &hints, &result)
+        guard status == 0, let first = result else {
+            throw ImportHTTPError.hostResolutionFailed(host)
+        }
+        defer {
+            freeaddrinfo(first)
+        }
+
+        var addresses = Set<ImportResolvedAddress>()
+        var cursor: UnsafeMutablePointer<addrinfo>? = first
+        while let info = cursor?.pointee {
+            if info.ai_family == AF_INET,
+               let socketAddress = info.ai_addr {
+                var address = socketAddress
+                    .withMemoryRebound(
+                        to: sockaddr_in.self,
+                        capacity: 1
+                    ) { $0.pointee.sin_addr }
+                addresses.insert(
+                    .ipv4(withUnsafeBytes(of: &address) { Array($0) })
+                )
+            } else if info.ai_family == AF_INET6,
+                      let socketAddress = info.ai_addr {
+                var address = socketAddress
+                    .withMemoryRebound(
+                        to: sockaddr_in6.self,
+                        capacity: 1
+                    ) { $0.pointee.sin6_addr }
+                addresses.insert(
+                    .ipv6(withUnsafeBytes(of: &address) { Array($0) })
+                )
+            }
+            cursor = info.ai_next
+        }
+        guard !addresses.isEmpty else {
+            throw ImportHTTPError.hostResolutionFailed(host)
+        }
+        return addresses.sorted { $0.bytes.lexicographicallyPrecedes($1.bytes) }
+    }
+}
+
+struct ImportResolvedAddress: Hashable, Sendable {
+    enum Family: Hashable, Sendable {
+        case ipv4
+        case ipv6
+    }
+
+    let family: Family
+    let bytes: [UInt8]
+
+    private init(family: Family, bytes: [UInt8]) {
+        self.family = family
+        self.bytes = bytes
+    }
+
+    static func ipv4(_ bytes: [UInt8]) -> Self {
+        Self(family: .ipv4, bytes: bytes)
+    }
+
+    static func ipv6(_ bytes: [UInt8]) -> Self {
+        Self(family: .ipv6, bytes: bytes)
+    }
+
+    init?(ipLiteral: String) {
+        var ipv4Address = in_addr()
+        if ipLiteral.withCString({
+            inet_pton(AF_INET, $0, &ipv4Address)
+        }) == 1 {
+            var address = ipv4Address
+            self = .ipv4(withUnsafeBytes(of: &address) { Array($0) })
+            return
+        }
+
+        var ipv6Address = in6_addr()
+        if ipLiteral.withCString({
+            inet_pton(AF_INET6, $0, &ipv6Address)
+        }) == 1 {
+            var address = ipv6Address
+            self = .ipv6(withUnsafeBytes(of: &address) { Array($0) })
+            return
+        }
+        return nil
+    }
+
+    var isPubliclyRoutable: Bool {
+        switch family {
+        case .ipv4:
+            guard bytes.count == 4 else {
+                return false
+            }
+            let first = bytes[0]
+            let second = bytes[1]
+            if first == 0 || first == 10 || first == 127 || first >= 224 {
+                return false
+            }
+            if first == 100, (64...127).contains(second) {
+                return false
+            }
+            if first == 169, second == 254 {
+                return false
+            }
+            if first == 172, (16...31).contains(second) {
+                return false
+            }
+            if first == 192,
+               (
+                   second == 0
+                       || second == 88 && bytes[2] == 99
+                       || second == 168
+               ) {
+                return false
+            }
+            if first == 198, (second == 18 || second == 19) {
+                return false
+            }
+            if first == 198, second == 51, bytes[2] == 100 {
+                return false
+            }
+            if first == 203, second == 0, bytes[2] == 113 {
+                return false
+            }
+            return true
+        case .ipv6:
+            guard bytes.count == 16 else {
+                return false
+            }
+            if bytes.allSatisfy({ $0 == 0 }) {
+                return false
+            }
+            if bytes.dropLast().allSatisfy({ $0 == 0 }),
+               bytes.last == 1 {
+                return false
+            }
+            if bytes.prefix(10).allSatisfy({ $0 == 0 }),
+               bytes[10] == 0xFF,
+               bytes[11] == 0xFF {
+                return Self.ipv4(Array(bytes.suffix(4))).isPubliclyRoutable
+            }
+            if bytes.prefix(12).allSatisfy({ $0 == 0 }) {
+                return Self.ipv4(Array(bytes.suffix(4))).isPubliclyRoutable
+            }
+            guard bytes[0] & 0xE0 == 0x20 else {
+                return false
+            }
+            if bytes[0] == 0x20, bytes[1] == 0x02 {
+                return false
+            }
+            if bytes[0] == 0x20, bytes[1] == 0x01 {
+                if bytes[2] == 0x00, bytes[3] == 0x02 {
+                    return false
+                }
+                if bytes[2] == 0x0D, bytes[3] == 0xB8 {
+                    return false
+                }
+                if bytes[2] == 0x00, bytes[3] & 0xF0 == 0x10 {
+                    return false
+                }
+                if bytes[2] == 0x00, bytes[3] & 0xF0 == 0x20 {
+                    return false
+                }
+            }
+            return true
         }
     }
 }
@@ -58,6 +284,12 @@ protocol ImportHTTPTransport: Sendable {
 }
 
 struct URLSessionImportHTTPTransport: ImportHTTPTransport {
+    let resolver: any ImportHostResolving
+
+    init(resolver: any ImportHostResolving = SystemImportHostResolver()) {
+        self.resolver = resolver
+    }
+
     func fetch(
         _ request: URLRequest,
         policy: ImportURLPolicy,
@@ -70,9 +302,13 @@ struct URLSessionImportHTTPTransport: ImportHTTPTransport {
             throw ImportHTTPError.invalidURL
         }
         try policy.validate(url)
+        try await Task.detached(priority: .utility) {
+            try policy.validateForConnection(url, resolver: resolver)
+        }.value
 
         let operation = BoundedHTTPSRequest(
             policy: policy,
+            resolver: resolver,
             maximumBytes: maximumBytes
         )
         return try await operation.perform(request)
@@ -85,6 +321,8 @@ enum ImportHTTPError: Error, Equatable, LocalizedError, Sendable {
     case credentialBearingURL
     case unexpectedPort
     case disallowedHost(String)
+    case unsafeNetworkDestination(String)
+    case hostResolutionFailed(String)
     case invalidByteLimit
     case invalidResponse
     case responseTooLarge(limit: Int64)
@@ -103,6 +341,10 @@ enum ImportHTTPError: Error, Equatable, LocalizedError, Sendable {
             "Download URLs cannot use a custom port."
         case let .disallowedHost(host):
             "Downloads from \(host) are not allowed for this import."
+        case let .unsafeNetworkDestination(host):
+            "Downloads from the non-public network destination \(host) are not allowed."
+        case let .hostResolutionFailed(host):
+            "Could not resolve the download host \(host)."
         case .invalidByteLimit:
             "The download byte limit is invalid."
         case .invalidResponse:
@@ -119,6 +361,7 @@ enum ImportHTTPError: Error, Equatable, LocalizedError, Sendable {
 
 private final class BoundedHTTPSRequest: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private let policy: ImportURLPolicy
+    private let resolver: any ImportHostResolving
     private let maximumBytes: Int64
     private let lock = NSLock()
     private var continuation: CheckedContinuation<ImportHTTPResponse, Error>?
@@ -128,8 +371,13 @@ private final class BoundedHTTPSRequest: NSObject, URLSessionDataDelegate, @unch
     private var body = Data()
     private var cancellationRequested = false
 
-    init(policy: ImportURLPolicy, maximumBytes: Int64) {
+    init(
+        policy: ImportURLPolicy,
+        resolver: any ImportHostResolving,
+        maximumBytes: Int64
+    ) {
         self.policy = policy
+        self.resolver = resolver
         self.maximumBytes = maximumBytes
     }
 
@@ -201,7 +449,7 @@ private final class BoundedHTTPSRequest: NSObject, URLSessionDataDelegate, @unch
             guard let url = request.url else {
                 throw ImportHTTPError.invalidURL
             }
-            try policy.validate(url)
+            try policy.validateForConnection(url, resolver: resolver)
             completionHandler(request)
         } catch {
             completionHandler(nil)

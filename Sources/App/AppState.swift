@@ -2,6 +2,26 @@ import AppKit
 import Combine
 import ServiceManagement
 
+protocol LaunchAtLoginControlling {
+    var isEnabled: Bool { get }
+
+    func setEnabled(_ enabled: Bool) throws
+}
+
+struct SystemLaunchAtLoginController: LaunchAtLoginControlling {
+    var isEnabled: Bool {
+        SMAppService.mainApp.status == .enabled
+    }
+
+    func setEnabled(_ enabled: Bool) throws {
+        if enabled {
+            try SMAppService.mainApp.register()
+        } else {
+            try SMAppService.mainApp.unregister()
+        }
+    }
+}
+
 @MainActor
 final class AppState: ObservableObject {
     private enum Key {
@@ -11,15 +31,30 @@ final class AppState: ObservableObject {
     let permissions: SystemPermissionCenter
     let updates: AppUpdateController
     private let preferencesStore: any PreferencesPersisting
+    private let persistsOnboardingCompletion: Bool
+    private let launchAtLoginController:
+        any LaunchAtLoginControlling
 
     @Published var preferences: MojiPondPreferences {
         didSet {
             preferencesStore.save(preferences)
+            let oldAutomaticChecks =
+                oldValue.network.allowsUpdateChecks
+            let newAutomaticChecks =
+                preferences.network.allowsUpdateChecks
+            if oldAutomaticChecks != newAutomaticChecks {
+                updates.automaticChecksPreferenceDidChange(
+                    enabled: newAutomaticChecks
+                )
+            }
         }
     }
 
     @Published var hasCompletedOnboarding: Bool {
         didSet {
+            guard persistsOnboardingCompletion else {
+                return
+            }
             UserDefaults.standard.set(
                 hasCompletedOnboarding,
                 forKey: Key.completedOnboarding
@@ -31,21 +66,26 @@ final class AppState: ObservableObject {
     @Published private(set) var launchAtLoginError: String?
     @Published private(set) var runtimeState: MojiPondRuntimeState = .stopped
     @Published private(set) var runtimeNotice: String?
+    @Published private(set) var runtimeDenialNotice: String?
 
     init(
         permissions: SystemPermissionCenter = SystemPermissionCenter(),
         preferencesStore: any PreferencesPersisting =
             UserDefaultsPreferencesStore(),
-        updates: AppUpdateController = AppUpdateController()
+        updates: AppUpdateController = AppUpdateController(),
+        initialOnboardingCompletion: Bool? = nil,
+        launchAtLoginController: any LaunchAtLoginControlling =
+            SystemLaunchAtLoginController()
     ) {
         self.permissions = permissions
         self.preferencesStore = preferencesStore
         self.updates = updates
+        self.launchAtLoginController = launchAtLoginController
+        persistsOnboardingCompletion = initialOnboardingCompletion == nil
         preferences = preferencesStore.load()
-        hasCompletedOnboarding = UserDefaults.standard.bool(
-            forKey: Key.completedOnboarding
-        )
-        launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
+        hasCompletedOnboarding = initialOnboardingCompletion
+            ?? UserDefaults.standard.bool(forKey: Key.completedOnboarding)
+        launchAtLoginEnabled = launchAtLoginController.isEnabled
     }
 
     var isEnabled: Bool {
@@ -74,6 +114,21 @@ final class AppState: ObservableObject {
         switch runtimeState {
         case .running:
             return "Ready"
+        case let .contextSuspended(denial):
+            switch denial {
+            case .excludedApplication, .excludedDomain:
+                return "Excluded here"
+            case .secureEventInput, .secureField, .secureStatusUnknown:
+                return "Secure field"
+            case .applicationUnknown:
+                return "Unverified app"
+            case .domainUnknown:
+                return "Unverified site"
+            case .permissionUnavailable:
+                return "Permissions needed"
+            }
+        case .sessionLocked:
+            return "Locked"
         case .waitingForPermissions:
             return "Permissions needed"
         case .failed:
@@ -112,24 +167,24 @@ final class AppState: ObservableObject {
         runtimeNotice = notice
     }
 
+    func setRuntimeDenialNotice(_ notice: String?) {
+        runtimeDenialNotice = notice
+    }
+
     func finishOnboarding() {
         hasCompletedOnboarding = true
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
         do {
-            if enabled {
-                try SMAppService.mainApp.register()
-            } else {
-                try SMAppService.mainApp.unregister()
-            }
-            launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
+            try launchAtLoginController.setEnabled(enabled)
+            launchAtLoginEnabled = launchAtLoginController.isEnabled
             launchAtLoginError = nil
             updatePreferences {
                 $0.launchAtLogin = launchAtLoginEnabled
             }
         } catch {
-            launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
+            launchAtLoginEnabled = launchAtLoginController.isEnabled
             launchAtLoginError = error.localizedDescription
         }
     }
