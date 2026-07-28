@@ -1,3 +1,4 @@
+import ApplicationServices
 import XCTest
 @testable import MojiPond
 
@@ -32,6 +33,60 @@ final class InsertionEngineTests: XCTestCase {
         XCTAssertEqual(system.text, "🐸")
         XCTAssertEqual(pasteboard.items, originalClipboard)
         XCTAssertEqual(poster.pasteCount, 0)
+    }
+
+    func testMessagesShapedUnicodeUsesValidatedPasteAndRestoresClipboard()
+        async throws
+    {
+        let system = FakeAccessibilityTextSystem()
+        system.text = ":wave:"
+        system.selection = NSRange(location: 6, length: 0)
+        system.caretBounds = nil
+        system.boundsErrorsByRange[system.selection] = .axFailure(
+            operation: "read bounds for text range",
+            code: AXError.noValue.rawValue
+        )
+        system.rangedStringError = .axFailure(
+            operation: "read string for text range",
+            code: AXError.noValue.rawValue
+        )
+        system.settableAttributes = [kAXSelectedTextRangeAttribute]
+        let adapter = AccessibilityTextAdapter(system: system)
+        let target = try adapter.focusedTarget()
+        let context = try adapter.context(for: target)
+        let tokenRange = try XCTUnwrap(context.tokenRange)
+        let request = AccessibilityReplacementRequest(
+            target: target,
+            tokenRange: tokenRange,
+            expectedToken: ":wave:",
+            expectedSelection: system.selection
+        )
+        let originalClipboard = [PasteboardItemPayload.text("keep me")]
+        let pasteboard = FakePasteboard(items: originalClipboard)
+        let poster = FakeEventPoster()
+        let engine = InsertionEngine(
+            accessibility: adapter,
+            pasteboard: PasteboardTransactionCoordinator(
+                pasteboard: pasteboard
+            ),
+            eventPoster: poster,
+            restorationDelay: .zero
+        )
+
+        let result = await engine.insert(.unicode("👋"), replacing: request)
+
+        XCTAssertNil(context.caretBounds)
+        XCTAssertEqual(tokenRange, NSRange(location: 0, length: 6))
+        XCTAssertEqual(
+            result,
+            .inserted(.temporaryPasteboard(.restored))
+        )
+        XCTAssertEqual(
+            system.selectedRangesSet,
+            [NSRange(location: 0, length: 6)]
+        )
+        XCTAssertEqual(poster.pasteCount, 1)
+        XCTAssertEqual(pasteboard.items, originalClipboard)
     }
 
     func testMediaRevalidatesSelectsPastesAndRestoresClipboard() async throws {

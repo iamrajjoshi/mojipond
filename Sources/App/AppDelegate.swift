@@ -822,10 +822,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
-        Publishers.CombineLatest3(
+        Publishers.CombineLatest4(
             appState.$preferences.removeDuplicates(),
             appState.permissions.$snapshot.removeDuplicates(),
-            appState.$runtimeState.removeDuplicates()
+            appState.$runtimeState.removeDuplicates(),
+            Publishers.CombineLatest(
+                appState.$runtimeNotice.removeDuplicates(),
+                appState.$runtimeDenialNotice.removeDuplicates()
+            )
         )
         .dropFirst()
         .debounce(for: .milliseconds(75), scheduler: RunLoop.main)
@@ -924,12 +928,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let notice = runtimeNotice(for: denial)
             if appState.runtimeDenialNotice != notice {
                 appState.setRuntimeDenialNotice(notice)
-                rebuildStatusMenu()
             }
         case .sessionAllowed:
             if appState.runtimeDenialNotice != nil {
                 appState.setRuntimeDenialNotice(nil)
-                rebuildStatusMenu()
             }
         case .catalogLoadFailed:
             appState.setRuntimeNotice(

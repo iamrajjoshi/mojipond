@@ -144,6 +144,9 @@ final class MacAccessibilityTextSystem: AccessibilityTextSystem {
             return number.intValue
         } catch AccessibilityTextError.unsupportedAttribute {
             return nil
+        } catch AccessibilityTextError.axFailure(_, let code)
+            where code == AXError.noValue.rawValue {
+            return nil
         }
     }
 
@@ -163,7 +166,10 @@ final class MacAccessibilityTextSystem: AccessibilityTextSystem {
             rangeValue,
             &value
         )
-        if error == .parameterizedAttributeUnsupported || error == .attributeUnsupported {
+        if error == .parameterizedAttributeUnsupported
+            || error == .attributeUnsupported
+            || error == .noValue
+        {
             return nil
         }
         try check(error, operation: "read string for text range")
@@ -228,7 +234,11 @@ final class MacAccessibilityTextSystem: AccessibilityTextSystem {
             rangeValue,
             &value
         )
-        if error == .parameterizedAttributeUnsupported || error == .attributeUnsupported {
+        if error == .parameterizedAttributeUnsupported
+            || error == .attributeUnsupported
+            || error == .noValue
+            || error == .notEnoughPrecision
+        {
             return nil
         }
         try check(error, operation: "read bounds for text range")
@@ -258,13 +268,23 @@ final class MacAccessibilityTextSystem: AccessibilityTextSystem {
 
     func subrole(of element: AccessibilityElementReference) throws -> String? {
         do {
-            return try copyAttribute(
+            let value = try copyAttribute(
                 kAXSubroleAttribute,
                 from: element,
                 operation: "read text target subrole"
-            ) as? String
+            )
+            guard let subrole = value as? String else {
+                throw AccessibilityTextError.invalidAttributeValue(
+                    kAXSubroleAttribute
+                )
+            }
+            return subrole
+        } catch AccessibilityTextError.unsupportedAttribute(let attribute)
+            where attribute == kAXSubroleAttribute {
+            return nil
         } catch AccessibilityTextError.axFailure(_, let code)
-            where code == AXError.attributeUnsupported.rawValue {
+            where code == AXError.attributeUnsupported.rawValue
+                || code == AXError.noValue.rawValue {
             return nil
         }
     }
@@ -274,14 +294,15 @@ final class MacAccessibilityTextSystem: AccessibilityTextSystem {
         in element: AccessibilityElementReference
     ) throws -> Bool {
         var settable = DarwinBoolean(false)
-        try check(
-            AXUIElementIsAttributeSettable(
-                axElement(element),
-                attribute as CFString,
-                &settable
-            ),
-            operation: "check whether \(attribute) is settable"
+        let error = AXUIElementIsAttributeSettable(
+            axElement(element),
+            attribute as CFString,
+            &settable
         )
+        if error == .attributeUnsupported || error == .noValue {
+            return false
+        }
+        try check(error, operation: "check whether \(attribute) is settable")
         return settable.boolValue
     }
 
@@ -397,8 +418,8 @@ final class AccessibilityTextAdapter: DirectUnicodeReplacing {
             throw AccessibilityTextError.invalidUTF16Range
         }
 
-        let caretBounds = try system.bounds(
-            for: NSRange(location: selection.location, length: 0),
+        let caretBounds = try caretBounds(
+            for: selection,
             in: target.element
         )
         let fragmentStart = max(
@@ -519,7 +540,7 @@ final class AccessibilityTextAdapter: DirectUnicodeReplacing {
     }
 
     func secureStatus(of target: AccessibilityTextTarget) throws -> Bool {
-        try system.subrole(of: target.element) == kAXSecureTextFieldSubrole
+        try subrole(of: target) == kAXSecureTextFieldSubrole
     }
 
     static func validate(_ range: NSRange, in string: String) throws {
@@ -628,9 +649,85 @@ final class AccessibilityTextAdapter: DirectUnicodeReplacing {
     }
 
     private func rejectSecureTarget(_ target: AccessibilityTextTarget) throws {
-        if try system.subrole(of: target.element) == kAXSecureTextFieldSubrole {
+        if try subrole(of: target) == kAXSecureTextFieldSubrole {
             throw AccessibilityTextError.secureTextField
         }
+    }
+
+    private func subrole(of target: AccessibilityTextTarget) throws -> String? {
+        do {
+            return try system.subrole(of: target.element)
+        } catch AccessibilityTextError.unsupportedAttribute(let attribute)
+            where attribute == kAXSubroleAttribute {
+            // AXSubrole is optional on ordinary editable controls, including
+            // the Messages composer. Its absence proves only that the control
+            // has no specialized subrole; it is not an unknown security state.
+            return nil
+        } catch AccessibilityTextError.axFailure(_, let code)
+            where code == AXError.attributeUnsupported.rawValue
+                || code == AXError.noValue.rawValue {
+            return nil
+        }
+    }
+
+    private func caretBounds(
+        for selection: NSRange,
+        in element: AccessibilityElementReference
+    ) throws -> CGRect? {
+        let collapsedRange = NSRange(
+            location: selection.location,
+            length: 0
+        )
+        if let bounds = try optionalBounds(
+            for: collapsedRange,
+            in: element
+        ) {
+            return bounds
+        }
+
+        guard selection.length == 0, selection.location > 0 else {
+            return nil
+        }
+        let previousCharacterRange = NSRange(
+            location: selection.location - 1,
+            length: 1
+        )
+        guard
+            let previousBounds = try optionalBounds(
+                for: previousCharacterRange,
+                in: element
+            ),
+            Self.canDeriveCaret(from: previousBounds)
+        else {
+            return nil
+        }
+        return CGRect(
+            x: previousBounds.maxX,
+            y: previousBounds.minY,
+            width: 0,
+            height: previousBounds.height
+        )
+    }
+
+    private func optionalBounds(
+        for range: NSRange,
+        in element: AccessibilityElementReference
+    ) throws -> CGRect? {
+        do {
+            return try system.bounds(for: range, in: element)
+        } catch AccessibilityTextError.axFailure(_, let code)
+            where code == AXError.noValue.rawValue
+                || code == AXError.notEnoughPrecision.rawValue {
+            return nil
+        }
+    }
+
+    private static func canDeriveCaret(from bounds: CGRect) -> Bool {
+        bounds.origin.x.isFinite
+            && bounds.origin.y.isFinite
+            && bounds.width.isFinite
+            && bounds.height.isFinite
+            && bounds.height > 0
     }
 
     private func validateCurrentElement(
@@ -678,7 +775,14 @@ final class AccessibilityTextAdapter: DirectUnicodeReplacing {
         in range: NSRange,
         from element: AccessibilityElementReference
     ) throws -> String {
-        if let rangedString = try system.string(for: range, in: element) {
+        let rangedString: String?
+        do {
+            rangedString = try system.string(for: range, in: element)
+        } catch AccessibilityTextError.axFailure(_, let code)
+            where code == AXError.noValue.rawValue {
+            rangedString = nil
+        }
+        if let rangedString {
             guard rangedString.utf16.count == range.length else {
                 throw AccessibilityTextError.invalidAttributeValue(
                     kAXStringForRangeParameterizedAttribute
@@ -690,8 +794,15 @@ final class AccessibilityTextAdapter: DirectUnicodeReplacing {
         // Some controls do not implement AXStringForRange. Only fall back to
         // AXValue after proving the control is small, avoiding full-document
         // reads from browsers, editors, and message histories.
+        let characterCount: Int?
+        do {
+            characterCount = try system.numberOfCharacters(in: element)
+        } catch AccessibilityTextError.axFailure(_, let code)
+            where code == AXError.noValue.rawValue {
+            characterCount = nil
+        }
         guard
-            let characterCount = try system.numberOfCharacters(in: element),
+            let characterCount,
             characterCount <= maximumFallbackDocumentLength
         else {
             throw AccessibilityTextError.unsupportedAttribute(
