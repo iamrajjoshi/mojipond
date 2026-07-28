@@ -32,6 +32,67 @@ final class LibraryViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.visibleItems.map(\.shortcode), ["frog"])
     }
 
+    func testCopiesBuiltInUnicodeWithoutTypingPermissions() async throws {
+        let fixture = try await makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.workspace) }
+        let pasteboard = FakePasteboard(items: [.text("existing")])
+        let viewModel = makeViewModel(
+            fixture,
+            pasteboard: pasteboard
+        )
+        await viewModel.reload()
+
+        let wave = try XCTUnwrap(
+            viewModel.allDisplayItems.first(where: {
+                $0.shortcode == "wave"
+            })
+        )
+        viewModel.copyToClipboard(wave)
+
+        XCTAssertEqual(
+            pasteboard.items.first?.representations.first?.data,
+            Data("👋".utf8)
+        )
+        XCTAssertEqual(viewModel.notice?.kind, .information)
+    }
+
+    func testCopiesOriginalManagedImageBytes() async throws {
+        let fixture = try await makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.workspace) }
+        let source = try TestSupport.writeImage(
+            to: fixture.workspace.appendingPathComponent("frog.png")
+        )
+        let original = try Data(contentsOf: source)
+        _ = try await install(
+            files: [source],
+            name: "Frog Pack",
+            into: fixture.store
+        )
+        let pasteboard = FakePasteboard()
+        let viewModel = makeViewModel(
+            fixture,
+            pasteboard: pasteboard
+        )
+        await viewModel.reload()
+
+        let frog = try XCTUnwrap(
+            viewModel.allDisplayItems.first(where: {
+                $0.shortcode == "frog"
+            })
+        )
+        viewModel.copyToClipboard(frog)
+
+        XCTAssertEqual(
+            pasteboard.items.first?.representations.first?.data,
+            original
+        )
+        XCTAssertEqual(
+            pasteboard.items.first?.representations.first?.typeIdentifier,
+            "public.png"
+        )
+        XCTAssertEqual(viewModel.notice?.kind, .information)
+    }
+
     func testNetworkImportRequiresExplicitPerImportConsent() async throws {
         let fixture = try await makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.workspace) }
@@ -306,12 +367,14 @@ final class LibraryViewModelTests: XCTestCase {
 
     private func makeViewModel(
         _ fixture: Fixture,
+        pasteboard: any PasteboardAccessing = FakePasteboard(),
         onMutation: @escaping LibraryViewModel.MutationCallback = { _ in }
     ) -> LibraryViewModel {
         LibraryViewModel(
             store: fixture.store,
             paths: fixture.paths,
             builtInLoader: { Self.builtInPack() },
+            pasteboard: pasteboard,
             onMutation: onMutation
         )
     }

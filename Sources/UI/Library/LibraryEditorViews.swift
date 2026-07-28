@@ -196,6 +196,10 @@ struct LibraryItemDetailView: View {
                     viewModel.requestRemoveItem(packID: packID, item: libraryItem)
                     dismiss()
                 }
+                Button("Copy Emoji") {
+                    viewModel.copyToClipboard(item)
+                }
+                .keyboardShortcut("c", modifiers: .command)
                 Spacer()
                 Button("Cancel") {
                     dismiss()
@@ -250,6 +254,10 @@ struct LibraryItemDetailView: View {
         .formStyle(.grouped)
         .safeAreaInset(edge: .bottom) {
             HStack {
+                Button("Copy Emoji") {
+                    viewModel.copyToClipboard(item)
+                }
+                .keyboardShortcut("c", modifiers: .command)
                 Spacer()
                 Button("Done") {
                     dismiss()
