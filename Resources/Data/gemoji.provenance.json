@@ -1,0 +1,12 @@
+{
+  "name": "gemoji",
+  "source": "https://github.com/github/gemoji",
+  "revision": "0eca75db9301421efc8710baf7a7576793ae452a",
+  "sourcePath": "db/emoji.json",
+  "recordCount": 1870,
+  "sha256": "b174ae2aeb321b52f64adb9ff412f966a7f338839d780784dd15dcad702c2dd6",
+  "license": "MIT",
+  "licensePath": "ThirdParty/gemoji/LICENSE",
+  "pinnedOn": "2026-07-27"
+}
+

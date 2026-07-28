@@ -61,3 +61,19 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         CODE_SIGNING_ALLOWED: NO
 
+  MojiPondIntegrationFixture:
+    type: application
+    platform: macOS
+    sources:
+      - path: IntegrationFixture
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rajjoshi.MojiPondIntegrationFixture
+        PRODUCT_NAME: MojiPondIntegrationFixture
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: MojiPond Integration Fixture
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""
+
