@@ -445,6 +445,66 @@ actor ImportPreparation {
         into store: LibraryStore,
         decisions: [UUID: CollisionDecision] = [:]
     ) async throws -> EmojiPack {
+        try beginInstall()
+        do {
+            let resolved = try await resolve(
+                using: store,
+                decisions: decisions
+            )
+            let pack = try await store.install(resolved)
+            finishInstall()
+            return pack
+        } catch {
+            state = .ready
+            throw error
+        }
+    }
+
+    func append(
+        into store: LibraryStore,
+        packID: UUID,
+        decisions: [UUID: CollisionDecision] = [:]
+    ) async throws -> EmojiPack {
+        try beginInstall()
+        do {
+            let resolved = try await resolve(
+                using: store,
+                decisions: decisions
+            )
+            let pack = try await store.append(resolved, to: packID)
+            finishInstall()
+            return pack
+        } catch {
+            state = .ready
+            throw error
+        }
+    }
+
+    func replacePackContents(
+        in store: LibraryStore,
+        packID: UUID,
+        decisions: [UUID: CollisionDecision] = [:]
+    ) async throws -> EmojiPack {
+        try beginInstall()
+        do {
+            let resolved = try await resolve(
+                using: store,
+                decisions: decisions,
+                excludingPackID: packID
+            )
+            let pack = try await store.replacePackContents(
+                resolved,
+                in: packID
+            )
+            finishInstall()
+            return pack
+        } catch {
+            state = .ready
+            throw error
+        }
+    }
+
+    private func beginInstall() throws {
         switch state {
         case .ready:
             state = .installing
@@ -453,22 +513,27 @@ actor ImportPreparation {
         case .discarded:
             throw ImportPreparationError.discarded
         }
+    }
 
-        do {
-            let library = try await store.snapshot()
-            let resolved = try ImportCollisionAnalyzer.resolve(
-                preview: preview,
-                decisions: decisions,
-                library: library
-            )
-            let pack = try await store.install(resolved)
-            workspaceLease.cleanUp()
-            state = .discarded
-            return pack
-        } catch {
-            state = .ready
-            throw error
+    private func resolve(
+        using store: LibraryStore,
+        decisions: [UUID: CollisionDecision],
+        excludingPackID: UUID? = nil
+    ) async throws -> ResolvedPackImport {
+        var library = try await store.snapshot()
+        if let excludingPackID {
+            library.packs.removeAll { $0.id == excludingPackID }
         }
+        return try ImportCollisionAnalyzer.resolve(
+            preview: preview,
+            decisions: decisions,
+            library: library
+        )
+    }
+
+    private func finishInstall() {
+        workspaceLease.cleanUp()
+        state = .discarded
     }
 
     func discard() throws {
