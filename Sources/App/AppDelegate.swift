@@ -13,6 +13,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var runtimeController: MojiPondRuntimeController?
     private var usageStore: FileEmojiUsageStore?
     private(set) var libraryStore: LibraryStore?
+    private var libraryViewModel: LibraryViewModel?
+    private var pendingMediaCopyFallback:
+        RuntimeMediaCopyFallbackDiagnostic?
     private var cancellables = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -59,6 +62,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 action: nil,
                 keyEquivalent: ""
             ).isEnabled = false
+        }
+        if pendingMediaCopyFallback?.payload != nil {
+            menu.addItem(
+                withTitle: "Copy Media Instead",
+                action: #selector(copyPendingMedia),
+                keyEquivalent: ""
+            )
         }
         menu.addItem(.separator())
         menu.addItem(withTitle: "Open Library", action: #selector(showLibrary), keyEquivalent: "o")
@@ -129,9 +139,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let controller = NSHostingController(
-            rootView: LibraryShellView(appState: appState)
-        )
+        let rootView: LibraryShellView
+        if let libraryViewModel {
+            rootView = LibraryShellView(
+                appState: appState,
+                viewModel: libraryViewModel
+            )
+        } else {
+            rootView = LibraryShellView(appState: appState)
+        }
+        let controller = NSHostingController(rootView: rootView)
         let window = NSWindow(contentViewController: controller)
         window.title = "MojiPond Library"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
@@ -169,6 +186,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc
     private func openEmojiBrowser() {
         runtimeController?.openBrowser()
+    }
+
+    @objc
+    private func copyPendingMedia() {
+        guard let payload = pendingMediaCopyFallback?.payload else {
+            return
+        }
+        let copied = MacPasteboardAccess().replaceContents(with: [payload])
+        pendingMediaCopyFallback = nil
+        appState.setRuntimeNotice(
+            copied
+                ? "Media copied to the clipboard."
+                : "MojiPond could not copy the media."
+        )
+        rebuildStatusMenu()
     }
 
     @objc
@@ -222,14 +254,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let library = LibraryStore(rootURL: paths.libraryRoot)
             let runtime = try MojiPondRuntimeController(
                 preferences: appState.preferences,
-                usageStore: usage
+                usageStore: usage,
+                managedMediaRoot: paths.libraryRoot,
+                mediaCacheRoot: paths.mediaCacheRoot
+            )
+            let libraryViewModel = LibraryViewModel(
+                store: library,
+                paths: paths,
+                onMutation: { [weak self] _ in
+                    Task {
+                        await self?.reloadRuntimeCatalog()
+                    }
+                }
             )
 
             usageStore = usage
             libraryStore = library
+            self.libraryViewModel = libraryViewModel
             runtimeController = runtime
             runtime.onDiagnostic = { [weak self] diagnostic in
                 self?.handleRuntimeDiagnostic(diagnostic)
+            }
+            runtime.onMediaCopyFallback = { [weak self] diagnostic in
+                self?.handleMediaCopyFallback(diagnostic)
             }
             runtime.start()
 
@@ -378,6 +425,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
              .eventTapDisabledByTimeout,
              .eventTapDisabledByUserInput:
             break
+        }
+    }
+
+    private func handleMediaCopyFallback(
+        _ diagnostic: RuntimeMediaCopyFallbackDiagnostic
+    ) {
+        pendingMediaCopyFallback =
+            diagnostic.payload == nil ? nil : diagnostic
+        let action = diagnostic.payload == nil
+            ? ""
+            : " Choose Copy Media Instead from the MojiPond menu."
+        appState.setRuntimeNotice(
+            mediaFallbackMessage(for: diagnostic.reason) + action
+        )
+        rebuildStatusMenu()
+    }
+
+    private func mediaFallbackMessage(
+        for reason: RuntimeMediaCopyFallbackReason
+    ) -> String {
+        switch reason {
+        case .notMessages:
+            "Automatic media paste is currently verified only in Messages; "
+                + "the token was left intact."
+        case .managedLibraryUnavailable:
+            "The custom media library is unavailable; the token was left intact."
+        case .invalidManagedAsset:
+            "This media item failed its safety or integrity check."
+        case .downloadFailed:
+            "The selected media could not be downloaded."
+        case .unsupportedDownloadedMedia:
+            "The downloaded media was empty, unsafe, or unsupported."
+        case let .insertionFailed(reason):
+            insertionFallbackMessage(for: reason)
+        }
+    }
+
+    private func insertionFallbackMessage(
+        for reason: InsertionFailureReason
+    ) -> String {
+        switch reason {
+        case .targetChanged:
+            "The text target changed before MojiPond could paste."
+        case .secureOrUnsupportedTarget:
+            "MojiPond left the token intact in this secure or unsupported field."
+        case .eventPostingUnavailable:
+            "macOS did not allow MojiPond to post the paste shortcut."
+        case .unsafeClipboardSnapshot:
+            "MojiPond could not safely preserve the current clipboard."
+        case .clipboardWriteFailed:
+            "MojiPond could not stage the media on the clipboard."
+        case .unknown:
+            "MojiPond could not safely insert the selected media."
         }
     }
 

@@ -361,6 +361,14 @@ struct LibraryShellView: View {
                             LibraryEmojiCard(item: item) {
                                 selectedItem = item
                             }
+                            .contextMenu {
+                                Button("Copy Emoji") {
+                                    viewModel.copyToClipboard(item)
+                                }
+                                Button("Show Details") {
+                                    selectedItem = item
+                                }
+                            }
                         }
                     }
                     .padding(PondDesign.contentPadding)
@@ -369,6 +377,14 @@ struct LibraryShellView: View {
                 List(viewModel.visibleItems) { item in
                     LibraryEmojiListRow(item: item) {
                         selectedItem = item
+                    }
+                    .contextMenu {
+                        Button("Copy Emoji") {
+                            viewModel.copyToClipboard(item)
+                        }
+                        Button("Show Details") {
+                            selectedItem = item
+                        }
                     }
                 }
                 .listStyle(.inset)

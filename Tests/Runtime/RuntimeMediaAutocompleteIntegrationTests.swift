@@ -106,14 +106,18 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
         type(":pond:", into: harness.worker)
 
         let didReportFallback = await eventually {
-            harness.diagnostics.values.contains(
-                .mediaCopyFallbackAvailable(
-                    RuntimeMediaCopyFallbackDiagnostic(
-                        source: .customEmoji(shortcode: "pond"),
-                        reason: .notMessages
-                    )
-                )
-            )
+            harness.diagnostics.values.contains {
+                guard
+                    case let .mediaCopyFallbackAvailable(diagnostic) = $0
+                else {
+                    return false
+                }
+                return diagnostic.source
+                    == .customEmoji(shortcode: "pond")
+                    && diagnostic.reason == .notMessages
+                    && diagnostic.payload?.representations.first?.data
+                        == png
+            }
         }
         XCTAssertTrue(didReportFallback)
         XCTAssertEqual(harness.poster.pasteCount, 0)

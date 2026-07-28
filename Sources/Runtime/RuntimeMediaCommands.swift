@@ -85,6 +85,17 @@ enum RuntimeMediaCopyFallbackReason: Equatable, Sendable {
 struct RuntimeMediaCopyFallbackDiagnostic: Equatable, Sendable {
     let source: RuntimeMediaInsertionSource
     let reason: RuntimeMediaCopyFallbackReason
+    let payload: PasteboardItemPayload?
+
+    init(
+        source: RuntimeMediaInsertionSource,
+        reason: RuntimeMediaCopyFallbackReason,
+        payload: PasteboardItemPayload? = nil
+    ) {
+        self.source = source
+        self.reason = reason
+        self.payload = payload
+    }
 }
 
 enum RuntimeMediaDownloadError: Error, Equatable, Sendable {

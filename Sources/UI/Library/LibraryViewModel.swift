@@ -39,6 +39,7 @@ final class LibraryViewModel: ObservableObject {
     private let importer: any LibraryImportPreparing
     private let builtInLoader: BuiltInPackLoader
     private let onMutation: MutationCallback
+    private let pasteboard: any PasteboardAccessing
     private var preparation: ImportPreparation?
     private var importTask: Task<Void, Never>?
     private var undoMutation: UndoMutation?
@@ -50,6 +51,7 @@ final class LibraryViewModel: ObservableObject {
         builtInLoader: @escaping BuiltInPackLoader = {
             try BuiltInRuntimeCatalogLoader().loadPack()
         },
+        pasteboard: any PasteboardAccessing = MacPasteboardAccess(),
         onMutation: @escaping MutationCallback = { _ in }
     ) {
         self.store = store
@@ -58,6 +60,7 @@ final class LibraryViewModel: ObservableObject {
             temporaryRootURL: paths.importStagingRoot
         )
         self.builtInLoader = builtInLoader
+        self.pasteboard = pasteboard
         self.onMutation = onMutation
     }
 
@@ -707,6 +710,24 @@ final class LibraryViewModel: ObservableObject {
         self.notice = notice
     }
 
+    func copyToClipboard(_ item: LibraryDisplayItem) {
+        do {
+            let payload = try pasteboardPayload(for: item)
+            guard pasteboard.replaceContents(with: [payload]) else {
+                throw LibraryCopyError.pasteboardWriteFailed
+            }
+            notice = LibraryNotice(
+                kind: .information,
+                title: "Copied \(item.displayName)",
+                message: item.unicode == nil
+                    ? "Original image bytes are on the clipboard."
+                    : "Unicode emoji is on the clipboard."
+            )
+        } catch {
+            presentError("Couldn’t copy emoji", error)
+        }
+    }
+
     func cancelRemoval() {
         pendingRemoval = nil
     }
@@ -867,6 +888,49 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
+    private func pasteboardPayload(
+        for item: LibraryDisplayItem
+    ) throws -> PasteboardItemPayload {
+        if let unicode = item.unicode {
+            return .text(unicode)
+        }
+        guard
+            case let .custom(packID) = item.origin,
+            let pack = library.packs.first(where: { $0.id == packID }),
+            let libraryItem = pack.items.first(where: {
+                "custom-\($0.id.uuidString)" == item.id
+            }),
+            let asset = libraryItem.payload.asset
+        else {
+            throw LibraryCopyError.itemUnavailable
+        }
+        let media = MediaEmojiContent(
+            mediaType: Self.mediaType(for: asset.format),
+            relativePath: asset.relativePath,
+            originalFilename: libraryItem.sourceFilename,
+            contentHash: asset.sha256,
+            isAnimated: asset.frameCount > 1
+        )
+        return try RuntimeManagedMediaResolver()
+            .resolve(media, beneath: paths.libraryRoot)
+            .pasteboardPayload
+    }
+
+    private static func mediaType(
+        for format: AssetFormat
+    ) -> EmojiMediaType {
+        switch format {
+        case .png:
+            .png
+        case .jpeg:
+            .jpeg
+        case .gif:
+            .gif
+        case .webP:
+            .webP
+        }
+    }
+
     private func finishMutation(
         message: String,
         undo: UndoMutation?
@@ -997,6 +1061,20 @@ final class LibraryViewModel: ObservableObject {
     private enum UndoMutation {
         case setEnabled(packID: UUID, isEnabled: Bool)
         case move(packID: UUID, destination: Int)
+    }
+}
+
+private enum LibraryCopyError: Error, LocalizedError {
+    case itemUnavailable
+    case pasteboardWriteFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .itemUnavailable:
+            "The original emoji is no longer available."
+        case .pasteboardWriteFailed:
+            "The Mac clipboard did not accept the emoji."
+        }
     }
 }
 

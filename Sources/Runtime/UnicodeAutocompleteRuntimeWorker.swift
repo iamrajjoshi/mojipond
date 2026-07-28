@@ -89,11 +89,10 @@ final class RuntimeMainActorBridge {
     }
 
     func insertDownloadedMedia(
-        _ download: MediaCommandDownload,
+        _ payload: PasteboardItemPayload,
         replacing request: AccessibilityReplacementRequest
-    ) async throws -> InsertionResult {
-        let payload = try RuntimeMediaPayloadBuilder.payload(for: download)
-        return await insertionEngine.insert(
+    ) async -> InsertionResult {
+        await insertionEngine.insert(
             .media(payload),
             replacing: request
         )
@@ -916,8 +915,11 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             }
 
             do {
-                let insertionResult = try await bridge.insertDownloadedMedia(
-                    download,
+                let payload = try RuntimeMediaPayloadBuilder.payload(
+                    for: download
+                )
+                let insertionResult = await bridge.insertDownloadedMedia(
+                    payload,
                     replacing: request
                 )
                 guard let self else {
@@ -939,7 +941,8 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                                     source: command == .gif
                                         ? .gif
                                         : .sticker,
-                                    reason: .insertionFailed(reason)
+                                    reason: .insertionFailed(reason),
+                                    payload: payload
                                 )
                             )
                         )
@@ -1527,25 +1530,6 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             return
         }
 
-        let captureBundleIdentifier =
-            activeTransaction?.bundleIdentifier
-        guard
-            captureBundleIdentifier
-                == MediaCommandParser.messagesBundleIdentifier
-        else {
-            diagnosticHandler?(
-                .mediaCopyFallbackAvailable(
-                    RuntimeMediaCopyFallbackDiagnostic(
-                        source: .customEmoji(
-                            shortcode: item.shortcode.rawValue
-                        ),
-                        reason: .notMessages
-                    )
-                )
-            )
-            clear(transactionID: transactionID)
-            return
-        }
         guard let managedMediaRoot else {
             diagnosticHandler?(
                 .mediaCopyFallbackAvailable(
@@ -1575,6 +1559,27 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                             shortcode: item.shortcode.rawValue
                         ),
                         reason: .invalidManagedAsset
+                    )
+                )
+            )
+            clear(transactionID: transactionID)
+            return
+        }
+
+        let captureBundleIdentifier =
+            activeTransaction?.bundleIdentifier
+        guard
+            captureBundleIdentifier
+                == MediaCommandParser.messagesBundleIdentifier
+        else {
+            diagnosticHandler?(
+                .mediaCopyFallbackAvailable(
+                    RuntimeMediaCopyFallbackDiagnostic(
+                        source: .customEmoji(
+                            shortcode: item.shortcode.rawValue
+                        ),
+                        reason: .notMessages,
+                        payload: resolved.pasteboardPayload
                     )
                 )
             )
@@ -1613,7 +1618,8 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                                 source: .customEmoji(
                                     shortcode: item.shortcode.rawValue
                                 ),
-                                reason: .insertionFailed(reason)
+                                reason: .insertionFailed(reason),
+                                payload: resolved.pasteboardPayload
                             )
                         )
                     )
