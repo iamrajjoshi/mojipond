@@ -6,6 +6,7 @@ struct SettingsRootView: View {
     @ObservedObject var appState: AppState
     @ObservedObject private var permissions: SystemPermissionCenter
     @ObservedObject private var updates: AppUpdateController
+    @StateObject private var giphyKey = GiphyKeySettingsModel()
 
     @State private var domainDraft = ""
     @State private var exclusionError: String?
@@ -81,8 +82,63 @@ struct SettingsRootView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
+
+            Section("GIPHY API key") {
+                SecureField(
+                    "Paste a GIPHY API key",
+                    text: $giphyKey.draftKey
+                )
+                .accessibilityHint(
+                    "The key is stored in Keychain and is never shown again."
+                )
+
+                HStack {
+                    Label(
+                        giphyKey.statusTitle,
+                        systemImage: giphyKey.statusSymbolName
+                    )
+                    .foregroundStyle(
+                        giphyKey.hasStoredKey
+                            ? PondDesign.lily
+                            : Color.secondary
+                    )
+
+                    Spacer()
+
+                    Button("Remove", role: .destructive) {
+                        giphyKey.remove()
+                    }
+                    .disabled(!giphyKey.hasStoredKey)
+
+                    Button("Save to Keychain") {
+                        giphyKey.save()
+                    }
+                    .disabled(
+                        giphyKey.draftKey.trimmingCharacters(
+                            in: .whitespacesAndNewlines
+                        ).isEmpty
+                    )
+                }
+
+                if case let .failed(message) = giphyKey.status {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
+                Text(
+                    "Used only for explicit /gif searches in Messages. "
+                        + "MojiPond sends the query directly to GIPHY and "
+                        + "does not persist GIPHY media."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
+        .onAppear {
+            giphyKey.refresh()
+        }
     }
 
     private var shortcuts: some View {
