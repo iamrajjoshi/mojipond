@@ -17,6 +17,9 @@ enum PondDesign {
     static let warningBackground = Color(
         nsColor: warningBackgroundColor
     )
+    static let errorForeground = Color(
+        nsColor: errorForegroundColor
+    )
 
     private static let pondColor = adaptiveColor(
         name: "MojiPondPond",
@@ -102,12 +105,12 @@ enum PondDesign {
         )
     )
 
-    private static let warningForegroundColor = adaptiveColor(
+    static let warningForegroundColor = adaptiveColor(
         name: "MojiPondWarningForeground",
         light: NSColor(
-            srgbRed: 0.42,
-            green: 0.16,
-            blue: 0.01,
+            srgbRed: 0.30,
+            green: 0.10,
+            blue: 0,
             alpha: 1
         ),
         dark: NSColor(
@@ -117,8 +120,8 @@ enum PondDesign {
             alpha: 1
         ),
         highContrastLight: NSColor(
-            srgbRed: 0.30,
-            green: 0.10,
+            srgbRed: 0.22,
+            green: 0.05,
             blue: 0,
             alpha: 1
         ),
@@ -130,7 +133,7 @@ enum PondDesign {
         )
     )
 
-    private static let warningBackgroundColor = adaptiveColor(
+    static let warningBackgroundColor = adaptiveColor(
         name: "MojiPondWarningBackground",
         light: NSColor(
             srgbRed: 1,
@@ -154,6 +157,34 @@ enum PondDesign {
             srgbRed: 0.12,
             green: 0.06,
             blue: 0.02,
+            alpha: 1
+        )
+    )
+
+    static let errorForegroundColor = adaptiveColor(
+        name: "MojiPondErrorForeground",
+        light: NSColor(
+            srgbRed: 0.38,
+            green: 0.02,
+            blue: 0.01,
+            alpha: 1
+        ),
+        dark: NSColor(
+            srgbRed: 1,
+            green: 0.64,
+            blue: 0.61,
+            alpha: 1
+        ),
+        highContrastLight: NSColor(
+            srgbRed: 0.28,
+            green: 0.01,
+            blue: 0,
+            alpha: 1
+        ),
+        highContrastDark: NSColor(
+            srgbRed: 1,
+            green: 0.78,
+            blue: 0.75,
             alpha: 1
         )
     )

@@ -458,9 +458,9 @@ struct LibraryNoticeBanner: View {
         case .information:
             PondDesign.lily
         case .warning:
-            .orange
+            PondDesign.warningForeground
         case .error:
-            .red
+            PondDesign.errorForeground
         }
     }
 }

@@ -133,7 +133,7 @@ struct LibraryImportSourceView: View {
                 if let sourceError {
                     Label(sourceError, systemImage: "exclamationmark.circle")
                         .font(.caption)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(PondDesign.errorForeground)
                 }
 
                 HStack {
@@ -706,7 +706,9 @@ struct LibraryImportPreviewView: View {
                         ForEach(session.preview.rejections) { rejection in
                             HStack(alignment: .top, spacing: 10) {
                                 Image(systemName: "xmark.circle")
-                                    .foregroundStyle(.red)
+                                    .foregroundStyle(
+                                        PondDesign.errorForeground
+                                    )
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(rejection.source)
                                         .font(.callout.weight(.medium))
@@ -763,7 +765,7 @@ struct LibraryImportPreviewView: View {
                     systemImage: "exclamationmark.circle"
                 )
                 .font(.callout)
-                .foregroundStyle(.orange)
+                .foregroundStyle(PondDesign.warningForeground)
             } else {
                 Label("Ready to install", systemImage: "checkmark.circle")
                     .font(.callout)

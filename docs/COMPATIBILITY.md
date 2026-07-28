@@ -29,14 +29,14 @@ Signing identities installed: none
 | --- | --- | --- |
 | macOS 14 deployment target | Automated | `project.yml` sets `MACOSX_DEPLOYMENT_TARGET=14.0`; runtime launch on macOS 14 remains pending |
 | Debug build on the environment above | Automated | Final warnings-as-errors test build completed successfully on 2026-07-28 |
-| Unit test suite on the environment above | Automated | 384 executed: 383 passed, 0 failed, and 1 intentionally gated live-network test skipped; the same Bufo test passed separately against the real repository |
-| Universal Release binary (`arm64` + `x86_64`) | Manually verified | The 2026-07-28 local Release archive passed strict code-signature verification; `lipo -archs` reported `x86_64 arm64`, both slices declare macOS 14.0 minimum, and the ad-hoc signature carries Hardened Runtime |
-| Xcode archive, ZIP, DMG, and SHA-256 output | Manually verified | `MojiPond-20260728T090608Z-local` was independently checked: SHA-256 verification passed (`6f241377…` ZIP, `6e517d63…` DMG), the metadata-free ZIP tested clean and expanded to exactly one byte-identical `MojiPond.app`, and the read-only DMG verified, mounted, and contained the same valid app plus an `/Applications` link |
-| Launch from `/Applications` with ad-hoc signing | Manually verified | The current Universal Release build was installed at `/Applications/MojiPond.app`, its strict signature verified, and the process launched successfully on the environment above. The bundle contains one executable, reports `x86_64 arm64`, and carries an ad-hoc Hardened Runtime signature |
+| Unit test suite on the environment above | Automated | 386 executed: 385 passed, 0 failed, and 1 intentionally gated live-network test skipped; the same Bufo test passed separately against the real repository |
+| Universal Release binary (`arm64` + `x86_64`) | Manually verified | The `8c5eb77` 2026-07-28 local Release archive passed strict code-signature verification; `lipo -archs` reported `x86_64 arm64`, both slices declare macOS 14.0 minimum, and the ad-hoc signature carries Hardened Runtime |
+| Xcode archive, ZIP, DMG, metadata, and SHA-256 output | Manually verified | `MojiPond-20260728T095411Z-local`, built from immutable snapshot `8c5eb77`, was independently checked: SHA-256 verification passed (`325e4a79…` ZIP, `103ed3f9…` DMG, `deb898ef…` metadata), metadata records the exact clean revision and branch, the metadata-free ZIP tested clean and expanded to exactly one byte-identical `MojiPond.app`, and the read-only DMG verified, mounted, and contained the same valid app plus an `/Applications` link |
+| Launch from `/Applications` with ad-hoc signing | Manually verified | The `8c5eb77` Universal Release was installed at `/Applications/MojiPond.app`, compared byte-for-byte with the verified archive, and launched successfully on the environment above. Its strict signature verifies; the bundle contains one executable, reports `x86_64 arm64`, and carries an ad-hoc Hardened Runtime signature |
 | Developer ID signing | Pending | No Developer ID Application identity is installed |
-| Apple notarization and stapling | Pending | Requires Developer ID signing and Apple notary credentials |
-| Clean-clone build | Manually verified | A new private-repository clone at `cfcbaa7` passed XcodeGen, all 374 deterministic test executions (373 passed and one intentional live-network skip), `./scripts/build.sh Debug`, strict signature verification, and all three signed-feed generator groups; the temporary checkout was clean and removed afterward |
-| GitHub Actions | Manually verified | CI run `30345666439` on exact commit `9e33097` passed the secret scan, project generation, build, deterministic tests, and signed-feed generator on `macos-26` |
+| Apple notarization, stapling, and Gatekeeper distribution | Pending | No Developer ID identity or Apple notary credentials are installed. Gatekeeper is enabled and correctly rejected the personal ad-hoc build (`spctl` exit 3), so this artifact must not be described as public-distribution ready |
+| Clean-clone build | Manually verified | A new private-repository clone at exact commit `8c5eb77` passed XcodeGen, all 384 deterministic test executions (383 passed and one intentional live-network skip), `./scripts/build.sh Debug`, and all three signed-feed generator groups; the temporary checkout remained clean and was removed afterward |
+| GitHub Actions | Manually verified | CI run `30348478490` on exact commit `8c5eb77` passed the secret scan, checksum-pinned XcodeGen bootstrap, project generation, build, deterministic tests, and signed-feed generator on `macos-26` |
 
 ## Global autocomplete and safety
 
@@ -54,9 +54,16 @@ Signing identities installed: none
 | Clipboard snapshot, restoration race, and GIF-byte preservation | Automated | Pasteboard and insertion-engine tests |
 | Unicode replacement in an unsent Messages draft | Pending | Requires user-granted TCC permissions and a manual Messages check |
 | Unicode replacement in TextEdit and Notes | Pending | Real-app checks not yet recorded |
+| Unicode replacement in Mail | Pending | Real-app check not yet recorded |
+| Native fields and browser content-editable fields | Pending | Native Accessibility fixtures are automated; real Safari and Chrome content-editable checks are not yet recorded |
 | Rich-editor Unicode fallback | Pending | Requires a real supported editor check |
 | Password or secure field in a real app | Pending | Automated only; no real-app check recorded |
 | Browser exclusion in live Safari and Chrome | Pending | Automated only; no real-browser check recorded |
+| Slack, Discord, and terminal exclusions | Pending | Default-exclusion policy is automated; real Slack, Discord, and Terminal/iTerm checks are not yet recorded |
+| User-added excluded app and domain | Pending | Preference and matching logic are automated; real excluded-app and excluded-domain checks are not yet recorded |
+| US and non-US keyboard layouts | Pending | Parser behavior is automated independently of layout; manual US and at least one non-US layout check are not yet recorded |
+| App, focus, target, and caret changes while open | Pending | Cancellation and stale-target paths are automated; manual cross-app and caret-movement checks with a visible panel are not yet recorded |
+| Spaces and fullscreen | Pending | Geometry is automated; manual Space and fullscreen checks are not yet recorded |
 
 ## Packs and imports
 
@@ -74,6 +81,8 @@ Signing identities installed: none
 | Atomic library install, edit, replacement, removal, and migration | Automated | Actor store tests |
 | Custom Unicode creation, search, copy, and portable export | Automated | Store tests cover collision-safe creation, validation, digesting, Unicode-only export, and mixed round trips; Library ViewModel tests cover creation, alias search, rejection, and clipboard bytes |
 | Library import workflow in the running app | Pending | Full browse, edit, import-preview, conflict-resolution, install, export, and GitHub-refresh UI is connected; a manual running-app check is not yet recorded |
+| Manual file, folder, ZIP, and Slack-style imports | Pending | Each source and conflict path is covered by deterministic scanner/orchestrator tests; interactive running-app imports are not yet recorded |
+| Manual failed, cancelled, and offline imports | Pending | Failure, cancellation, cleanup, and network-denial behavior are automated; interactive running-app checks are not yet recorded |
 | Real `knobiknows/all-the-bufo` import | Manually verified | Gated live XCTest on 2026-07-28 fetched the public repository, resolved its revision, validated 1,000+ assets including `bufo-fußball.png`, exposed normalized-name conflicts, installed with explicit keep-first/drop-alias decisions, and removed its workspace in 17.5 seconds. The repository audit found no detected license or redistribution grant, so its artwork is neither bundled nor redistributed |
 
 ## Messages media commands
@@ -88,11 +97,12 @@ Signing identities installed: none
 | Live GIPHY key and production provider review | Pending | No live-key test or production approval is recorded |
 | Media download validation and Noto-only cache | Automated | Downloader/cache tests cover HTTPS, content type, limits, cancellation, atomic cache behavior, and GIPHY rejection |
 | Managed custom-media insertion validation | Automated | Resolver tests cover root containment, symlink escape, regular files, size, digest, magic bytes, and original animated bytes |
-| `/sticker` grid and GIF insertion in an unsent Messages draft | Pending | Command parser, grid, resolver, and insertion engine are connected to the global runtime and covered by the 384-test suite; a manual Messages check still needs to be recorded |
-| Custom PNG insertion in an unsent Messages draft | Pending | Managed-media resolution is connected to shortcode selection and covered by the 384-test suite; a manual Messages check with TCC permission still needs to be recorded |
+| `/sticker` grid and GIF insertion in an unsent Messages draft | Pending | Command parser, grid, resolver, and insertion engine are connected to the global runtime and covered by the 386-test suite; a manual Messages check still needs to be recorded |
+| Custom PNG insertion in an unsent Messages draft | Pending | Managed-media resolution is connected to shortcode selection and covered by the 386-test suite; a manual Messages check with TCC permission still needs to be recorded |
 | Custom animated GIF remains animated in Messages | Pending | Clipboard bytes are tested; end-to-end Messages behavior is not |
 | Clipboard unchanged after Messages media insertion | Pending | Restoration engine is automated; real-app paste race is not |
-| User-visible **Copy Media Instead** recovery | Pending | Status-menu action and notice are connected and covered by the 384-test suite; a manual clipboard check still needs to be recorded |
+| Messages cancellation and target switch during commit | Pending | Cancellation, transaction IDs, and stale-target revalidation are automated; an unsent-draft check that cancels and switches the focused app/target during commit is not yet recorded |
+| User-visible **Copy Media Instead** recovery | Pending | Status-menu action and notice are connected and covered by the 386-test suite; a manual clipboard check still needs to be recorded |
 
 ## UI and accessibility quality
 
@@ -100,13 +110,15 @@ Signing identities installed: none
 | --- | --- | --- |
 | Onboarding permission states and library-only path | Automated | App-state and permission-center tests |
 | Installed Release permission preflight | Manually verified | `/Applications/MojiPond.app --print-permissions-and-quit` reported Accessibility, Input Monitoring, and Event Posting granted after the final Release install; denial, revocation, and re-grant still require an interactive System Settings audit |
+| First install, denial, grant, revocation, re-grant, and relaunch | Pending | Deterministic permission providers cover every rendered state, and the installed app currently preflights all three permissions as granted; changing real TCC state requires explicit user action in System Settings and has not been recorded |
 | Settings persistence and legacy migration | Automated | Preferences-store tests |
-| GIPHY Keychain settings editor | Pending | Secure add, replace, status, and remove UI is connected; the current suite and a manual Keychain check still need to be recorded |
+| GIPHY Keychain settings editor | Pending | Model add, replace, status, and remove behavior is covered by the recorded deterministic suite; a real Keychain/UI check remains pending |
 | Keyboard navigation of suggestion surface | Automated | Runtime keyboard, parser, and worker tests |
 | VoiceOver labels and traversal | Pending | Deterministic tests cover runtime preview labels, selected-state announcements, loading, and failure semantics; an interactive VoiceOver traversal audit is not yet recorded |
 | Light and dark appearance | Pending | No screenshot audit recorded |
+| Required documentation screenshot set | Pending | Deterministic routes exist for onboarding permission states, Library, import preview, Settings, caret suggestions, and the full browser in light/dark appearances; the UI-test targets compile, but an unlocked run, visual inspection, and committed screenshots have not yet been completed |
 | Reduced Motion | Automated | Runtime animated media falls back to a validated static first frame and interaction transitions disable animation; deterministic policy tests passed, while a manual setting audit remains pending |
-| Reduced Transparency and increased contrast | Automated | Runtime surfaces provide solid-material and stronger-border fallbacks and adaptive colors; source and build verification passed, while a manual setting audit remains pending |
+| Reduced Transparency and increased contrast | Automated | Runtime surfaces provide solid-material and stronger-border fallbacks and adaptive colors. Deterministic tests verify warning/error text at 4.5:1 or greater against native light, dark, and high-contrast backgrounds; a manual setting audit remains pending |
 | Window resizing and smallest supported size | Automated | Onboarding, Library, and Settings use scrollable or adaptive layouts with explicit minimum sizes; both UI-test schemes compiled, while an unlocked screenshot and interaction audit remains pending |
 | Multi-display and scaled-display behavior | Pending | Geometry is automated; physical displays are not |
 
@@ -114,7 +126,7 @@ Signing identities installed: none
 
 | Capability | State | Evidence or remaining proof |
 | --- | --- | --- |
-| Installed-app idle CPU and memory | Manually verified | Five one-second `top` samples of the installed Universal Release build on 2026-07-28 measured 0.0–0.3% CPU, 33 MiB resident memory, and seven threads; every sample reported the process sleeping |
+| Installed-app idle CPU and memory | Manually verified | Five one-second `top` samples of the installed `8c5eb77` Universal Release on 2026-07-28 measured 0.0–0.6% CPU, 30 MiB resident memory, and seven threads; every sample reported the process sleeping |
 | Event-tap callback time | Pending | The callback boundary is structurally bounded and covered by deterministic tests, but an actual callback-duration measurement has not yet been recorded |
 | Warm suggestion latency | Pending | Search and presentation paths are covered by deterministic tests, but an unlocked real-caret measurement has not yet been recorded |
 

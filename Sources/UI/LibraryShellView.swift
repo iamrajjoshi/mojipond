@@ -466,7 +466,7 @@ struct LibraryShellView: View {
     private func partialBanner(_ message: String) -> some View {
         HStack(alignment: .top, spacing: 9) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+                .foregroundStyle(PondDesign.warningForeground)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Some library content could not be loaded")
                     .font(.callout.weight(.semibold))
@@ -483,7 +483,7 @@ struct LibraryShellView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(.orange.opacity(0.09))
+        .background(PondDesign.warningBackground)
         .overlay(alignment: .bottom) {
             Divider()
         }
