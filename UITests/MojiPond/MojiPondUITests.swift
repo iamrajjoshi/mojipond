@@ -16,7 +16,12 @@ final class MojiPondUITests: XCTestCase {
             "Every emote, right where you type"
         ].waitForExistence(timeout: 5)
         XCTAssertTrue(welcomeExists)
-        attachScreen(named: "onboarding-welcome")
+        let onboardingWindow = application.windows["Set Up MojiPond"]
+        XCTAssertTrue(onboardingWindow.waitForExistence(timeout: 2))
+        attachScreen(
+            named: "onboarding-welcome",
+            element: onboardingWindow
+        )
 
         application.buttons["Continue"].click()
 
@@ -28,7 +33,10 @@ final class MojiPondUITests: XCTestCase {
             "Continue in Library Mode"
         ].exists
         XCTAssertTrue(libraryModeExists)
-        attachScreen(named: "onboarding-permission-explanation")
+        attachScreen(
+            named: "onboarding-permission-explanation",
+            element: onboardingWindow
+        )
 
         application.buttons["Continue in Library Mode"].click()
 
@@ -43,7 +51,10 @@ final class MojiPondUITests: XCTestCase {
             )
         ).firstMatch.exists
         XCTAssertFalse(privacyWindowExists)
-        attachScreen(named: "onboarding-practice")
+        attachScreen(
+            named: "onboarding-practice",
+            element: onboardingWindow
+        )
     }
 
     func testLibraryLaunchesFromDeterministicState() {
@@ -57,18 +68,26 @@ final class MojiPondUITests: XCTestCase {
         }
 
         assertLibraryIsReady(application)
-        attachScreen(named: "library-initial")
+        attachScreen(
+            named: "library-initial",
+            element: application.windows["MojiPond Library"]
+        )
     }
 
     func testLibraryLightAndDarkAppearanceScreenshots() {
         continueAfterFailure = false
-        captureLibraryImportSurface(
+        let lightScreenshot = captureLibraryImportSurface(
             appearance: .light,
             screenshotName: "library-light"
         )
-        captureLibraryImportSurface(
+        let darkScreenshot = captureLibraryImportSurface(
             appearance: .dark,
             screenshotName: "library-dark"
+        )
+        XCTAssertNotEqual(
+            lightScreenshot,
+            darkScreenshot,
+            "Light and dark screenshots must render distinct appearances"
         )
     }
 
@@ -114,13 +133,15 @@ final class MojiPondUITests: XCTestCase {
             appearance: .light,
             windowTitle: "MojiPond Settings",
             expectedText: "Enable MojiPond",
+            expectsStaticText: true,
             screenshotName: "settings"
         )
         captureDocumentationSurface(
             initialScreen: "import-preview",
             appearance: .light,
             windowTitle: "MojiPond Import Preview",
-            expectedText: "Pond Favorites",
+            expectedText: "Review “Pond Favorites”",
+            expectsStaticText: true,
             screenshotName: "import-preview"
         )
         captureDocumentationSurface(
@@ -137,6 +158,7 @@ final class MojiPondUITests: XCTestCase {
             windowTitle: "MojiPond Emoji Browser",
             windowIdentifier: "runtime.suggestionPanel",
             expectedText: "pond",
+            expectsStaticText: true,
             screenshotName: "emoji-browser-dark"
         )
     }
@@ -144,7 +166,7 @@ final class MojiPondUITests: XCTestCase {
     private func captureLibraryImportSurface(
         appearance: AppUITestAppearance,
         screenshotName: String
-    ) {
+    ) -> Data {
         let application = launch(
             initialScreen: "library",
             appearance: appearance
@@ -154,13 +176,29 @@ final class MojiPondUITests: XCTestCase {
         }
 
         assertLibraryIsReady(application)
-        application.buttons["Import Pack"].click()
+        let importPackButtons = application.buttons.matching(
+            NSPredicate(format: "label == %@", "Import Pack")
+        )
+        let importPackButton = importPackButtons.firstMatch
+        XCTAssertTrue(
+            importPackButton.waitForExistence(timeout: 2),
+            "Expected Import Pack to be available"
+        )
+        XCTAssertEqual(
+            importPackButtons.count,
+            1,
+            "Expected exactly one accessible Import Pack button"
+        )
+        importPackButton.click()
         XCTAssertTrue(
             application.staticTexts[
                 "Import an emoji pack"
             ].waitForExistence(timeout: 2)
         )
-        attachScreen(named: screenshotName)
+        return attachScreen(
+            named: screenshotName,
+            element: application.windows["MojiPond Library"]
+        )
     }
 
     private func captureDocumentationSurface(
@@ -169,6 +207,7 @@ final class MojiPondUITests: XCTestCase {
         windowTitle: String,
         windowIdentifier: String? = nil,
         expectedText: String,
+        expectsStaticText: Bool = false,
         screenshotName: String
     ) {
         let application = launch(
@@ -179,18 +218,18 @@ final class MojiPondUITests: XCTestCase {
             application.terminate()
         }
 
-        let window = application.windows[
-            windowIdentifier ?? windowTitle
-        ]
-        XCTAssertTrue(window.waitForExistence(timeout: 5))
-        let matchingText = window.descendants(
-            matching: .any
-        ).matching(
-            NSPredicate(
-                format: "label CONTAINS[c] %@",
-                expectedText
-            )
-        ).firstMatch
+        let window = if let windowIdentifier {
+            application.dialogs[windowIdentifier]
+        } else {
+            application.windows[windowTitle]
+        }
+        XCTAssertTrue(
+            window.waitForExistence(timeout: 5),
+            "Expected \(windowTitle) to exist"
+        )
+        let matchingText = expectsStaticText
+            ? window.staticTexts[expectedText]
+            : window.descendants(matching: .any)[expectedText]
         XCTAssertTrue(
             matchingText.waitForExistence(timeout: 5),
             "Expected \(windowTitle) to contain \(expectedText)"
@@ -247,7 +286,7 @@ final class MojiPondUITests: XCTestCase {
         XCTAssertTrue(
             application.buttons[
                 "Import Pack"
-            ].waitForExistence(timeout: 5)
+            ].firstMatch.waitForExistence(timeout: 5)
         )
         XCTAssertTrue(
             application.staticTexts[
@@ -275,34 +314,26 @@ final class MojiPondUITests: XCTestCase {
             initialScreen,
             AppUITestArgument.permissionScenario,
             permissionScenario.rawValue,
-            "-AppleInterfaceStyle",
-            appearance.rawValue,
-            "-AppleInterfaceStyleSwitchesAutomatically",
-            "false"
+            AppUITestArgument.appearance,
+            appearance.rawValue
         ]
         application.launch()
         return application
     }
 
-    private func attachScreen(named name: String) {
-        let attachment = XCTAttachment(
-            screenshot: XCUIScreen.main.screenshot()
-        )
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
-    }
-
+    @discardableResult
     private func attachScreen(
         named name: String,
         element: XCUIElement
-    ) {
+    ) -> Data {
+        let screenshot = element.screenshot()
         let attachment = XCTAttachment(
-            screenshot: element.screenshot()
+            screenshot: screenshot
         )
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+        return screenshot.pngRepresentation
     }
 }
 
@@ -311,11 +342,13 @@ private enum AppUITestArgument {
     static let screen = "--mojipond-ui-test-screen"
     static let permissionScenario =
         "--mojipond-ui-test-permissions"
+    static let appearance =
+        "--mojipond-ui-test-appearance"
 }
 
 private enum AppUITestAppearance: String {
-    case light = "Light"
-    case dark = "Dark"
+    case light
+    case dark
 }
 
 private enum AppUITestPermissionScenario: String {

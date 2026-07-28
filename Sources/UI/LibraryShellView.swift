@@ -69,15 +69,6 @@ struct LibraryShellView: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 76)
-
-                Button {
-                    showsImportSource = true
-                } label: {
-                    Label("Import Pack", systemImage: "square.and.arrow.down")
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut("i", modifiers: .command)
-                .accessibilityHint("Choose files, a folder, ZIP, Slack manifest, or GitHub source")
             }
 
             ToolbarItem(placement: .status) {
@@ -285,6 +276,20 @@ struct LibraryShellView: View {
                         .lineLimit(2)
                 }
                 Spacer()
+
+                Button {
+                    showsImportSource = true
+                } label: {
+                    Label(
+                        "Import Pack",
+                        systemImage: "square.and.arrow.down"
+                    )
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut("i", modifiers: .command)
+                .accessibilityHint(
+                    "Choose files, a folder, ZIP, Slack manifest, or GitHub source"
+                )
 
                 if case .builtIn = viewModel.scope {
                     Button("Source & License", systemImage: "info.circle") {

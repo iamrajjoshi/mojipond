@@ -3,6 +3,10 @@ import SwiftUI
 
 @main
 struct IntegrationFixtureApp: App {
+    init() {
+        NSApplication.shared.appearance = NSAppearance(named: .aqua)
+    }
+
     var body: some Scene {
         WindowGroup("MojiPond Integration Fixture") {
             FixtureContentView()
@@ -89,4 +93,3 @@ private struct RichTextFixture: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {}
 }
-

@@ -38,6 +38,23 @@ pipelines, and Messages-only sticker and GIF command engines.
   post-launch readiness acknowledgement, and rollback.
 - No accounts, message-database access, telemetry, or cloud storage.
 
+## Product tour
+
+These captures come from the isolated macOS UI-test harness and contain only
+MojiPond windows or panels.
+
+| Onboarding | Library |
+| --- | --- |
+| ![MojiPond onboarding](docs/screenshots/onboarding.png) | ![MojiPond emoji Library](docs/screenshots/library.png) |
+| Import review | Settings |
+| ![MojiPond import preview](docs/screenshots/import-preview.png) | ![MojiPond Settings](docs/screenshots/settings.png) |
+| Caret suggestions | Double-trigger browser |
+| ![MojiPond caret suggestions](docs/screenshots/caret-suggestions.png) | ![MojiPond emoji browser in dark appearance](docs/screenshots/emoji-browser-dark.png) |
+
+The complete reviewed set also includes permission states, the Library import
+flow in both appearances, and the native integration fixture under
+[`docs/screenshots`](docs/screenshots).
+
 ## Requirements
 
 - macOS 14 or newer (deployment target; older releases are unsupported).
@@ -118,9 +135,11 @@ xcodebuild \
 
 The MojiPond UI scheme launches with isolated temporary Library data,
 deterministic not-requested/denied/granted/revoked permission scenarios, and
-runtime/network startup disabled. It does not request TCC access or interact
-with Messages. The integration fixture safely exercises an ordinary field,
-multiline editor, secure field, and attachment-capable rich text view.
+runtime/network startup disabled. It also forces explicit light or dark
+appearance and fails if the two Library captures are identical. It does not
+request TCC access or interact with Messages. The integration fixture safely
+exercises an ordinary field, multiline editor, secure field, and
+attachment-capable rich text view.
 
 ## Grant permissions
 
