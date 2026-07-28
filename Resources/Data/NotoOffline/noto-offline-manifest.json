@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 1,
+  "sourceName": "Noto Animated Emoji",
+  "creator": "Google",
+  "sourceURL": "https://googlefonts.github.io/noto-emoji-animation/",
+  "assetSourcePattern": "https://fonts.gstatic.com/s/e/notoemoji/latest/{codepoint}/512.gif",
+  "licenseName": "Creative Commons Attribution 4.0 International",
+  "licenseURL": "https://creativecommons.org/licenses/by/4.0/",
+  "attribution": "Noto Animated Emoji by Google",
+  "retrievedAt": "2026-07-27",
+  "assets": [
+    {
+      "id": "noto-1f602",
+      "codepoint": "1f602",
+      "title": "Face with Tears of Joy",
+      "tags": ["joy", "laugh", "tears", "happy"],
+      "popularity": 875,
+      "filename": "gifs/1f602.gif",
+      "byteCount": 1176505,
+      "sha256": "ed0f5e16efdbed5d64db46c41cdbbe6bc9a1d8ca2fd8466553a4230b63c59f14"
+    },
+    {
+      "id": "noto-1f923",
+      "codepoint": "1f923",
+      "title": "Rolling on the Floor Laughing",
+      "tags": ["rofl", "laugh", "tears", "funny"],
+      "popularity": 874,
+      "filename": "gifs/1f923.gif",
+      "byteCount": 609521,
+      "sha256": "af593d5a1f24576b03ff47bf984b6d00deef753c66f28a7aa5d100e48ba1b36e"
+    },
+    {
+      "id": "noto-1f62d",
+      "codepoint": "1f62d",
+      "title": "Loudly Crying Face",
+      "tags": ["loudly crying", "cry", "sad", "tears"],
+      "popularity": 873,
+      "filename": "gifs/1f62d.gif",
+      "byteCount": 1243939,
+      "sha256": "ca8981b48c104a6bc4d66b7d7962f4339b5290fae5b16f519ddabe37ca4fff7b"
+    },
+    {
+      "id": "noto-1f60d",
+      "codepoint": "1f60d",
+      "title": "Smiling Face with Heart-Eyes",
+      "tags": ["heart eyes", "love", "crush", "smile"],
+      "popularity": 866,
+      "filename": "gifs/1f60d.gif",
+      "byteCount": 978737,
+      "sha256": "8b891ba60e3d7cd9c508368094dbc2c8a8cb631190116b555e675c46ab255154"
+    },
+    {
+      "id": "noto-1f914",
+      "codepoint": "1f914",
+      "title": "Thinking Face",
+      "tags": ["thinking face", "think", "hmm", "wonder"],
+      "popularity": 835,
+      "filename": "gifs/1f914.gif",
+      "byteCount": 1388932,
+      "sha256": "cc4b16879b5f7264a37d7000783776b817b2f8f9e8084672c01d0849ab1bd27c"
+    },
+    {
+      "id": "noto-1f60e",
+      "codepoint": "1f60e",
+      "title": "Smiling Face with Sunglasses",
+      "tags": ["sunglasses face", "cool", "sun", "smile"],
+      "popularity": 776,
+      "filename": "gifs/1f60e.gif",
+      "byteCount": 1037279,
+      "sha256": "9bc24379d9d52a3a863f7a7bd53bef063cd8651fd90e3a035fcb710897c75ad5"
+    },
+    {
+      "id": "noto-1f4a9",
+      "codepoint": "1f4a9",
+      "title": "Pile of Poo",
+      "tags": ["poop", "poo", "pile", "funny"],
+      "popularity": 773,
+      "filename": "gifs/1f4a9.gif",
+      "byteCount": 409720,
+      "sha256": "edfe9bfe47dbf1765a6190b5d384a98284f23af0e36c32dfb9ac8e162c35e7bf"
+    },
+    {
+      "id": "noto-2728",
+      "codepoint": "2728",
+      "title": "Sparkles",
+      "tags": ["sparkles", "shine", "magic", "stars"],
+      "popularity": 743,
+      "filename": "gifs/2728.gif",
+      "byteCount": 158633,
+      "sha256": "e598e4b90f9f6206ab6316defd43ef3305c14ebbb03840b09dca8f8685888261"
+    },
+    {
+      "id": "noto-1f525",
+      "codepoint": "1f525",
+      "title": "Fire",
+      "tags": ["fire", "burn", "lit", "hot"],
+      "popularity": 738,
+      "filename": "gifs/1f525.gif",
+      "byteCount": 475239,
+      "sha256": "d8785d856b415fed27d3fafde40cc34bfb2ef9f2bffeecc9cbe7b3428e0f7e3e"
+    },
+    {
+      "id": "noto-1f389",
+      "codepoint": "1f389",
+      "title": "Party Popper",
+      "tags": ["party popper", "party", "celebrate", "confetti"],
+      "popularity": 736,
+      "filename": "gifs/1f389.gif",
+      "byteCount": 395755,
+      "sha256": "86879c45175f3901a8676d9b0bb5132c7a98b20a9f40487c21e4c896ce196616"
+    },
+    {
+      "id": "noto-2764_fe0f",
+      "codepoint": "2764_fe0f",
+      "title": "Red Heart",
+      "tags": ["red heart", "heart", "love", "romance"],
+      "popularity": 734,
+      "filename": "gifs/2764_fe0f.gif",
+      "byteCount": 248803,
+      "sha256": "8558abf3f723b996ade7518dd405cf564e9cd17000161717cfa143c42d94323c"
+    },
+    {
+      "id": "noto-1f44d",
+      "codepoint": "1f44d",
+      "title": "Thumbs Up",
+      "tags": ["thumbs up", "+1", "yes", "approve"],
+      "popularity": 651,
+      "filename": "gifs/1f44d.gif",
+      "byteCount": 194821,
+      "sha256": "6f9e0ded0161c86e3d7ab1f42c8d0ad4c609bbce86d0c04092127f94b373134b"
+    },
+    {
+      "id": "noto-1f44b",
+      "codepoint": "1f44b",
+      "title": "Waving Hand",
+      "tags": ["wave", "hello", "goodbye", "hand"],
+      "popularity": 555,
+      "filename": "gifs/1f44b.gif",
+      "byteCount": 378319,
+      "sha256": "1025c22c790ada1e071c0ace357817a7745c356b2ace3cb0e508329f67ff9fe0"
+    },
+    {
+      "id": "noto-1f984",
+      "codepoint": "1f984",
+      "title": "Unicorn",
+      "tags": ["unicorn", "magic", "horse", "rainbow"],
+      "popularity": 324,
+      "filename": "gifs/1f984.gif",
+      "byteCount": 991094,
+      "sha256": "c7fbf6845f42d96d2d103780743dbe63ae3365c5f3e20f2eace18ce3140812d8"
+    },
+    {
+      "id": "noto-1f438",
+      "codepoint": "1f438",
+      "title": "Frog",
+      "tags": ["frog", "toad", "pond", "animal"],
+      "popularity": 316,
+      "filename": "gifs/1f438.gif",
+      "byteCount": 714342,
+      "sha256": "306578caedf65e832c3be760fa84fbe3ec3cd99cb995c2578bdea7d94ddc2a1d"
+    },
+    {
+      "id": "noto-1f680",
+      "codepoint": "1f680",
+      "title": "Rocket",
+      "tags": ["rocket", "launch", "space", "ship"],
+      "popularity": 167,
+      "filename": "gifs/1f680.gif",
+      "byteCount": 262339,
+      "sha256": "d644d67d81484688452b5d4bc1f79e98333a33b4fe4c03283839dd9008f19a5f"
+    }
+  ]
+}
