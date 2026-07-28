@@ -5,15 +5,15 @@ import ServiceManagement
 @MainActor
 final class AppState: ObservableObject {
     private enum Key {
-        static let isEnabled = "app.isEnabled"
         static let completedOnboarding = "onboarding.completed"
     }
 
     let permissions: SystemPermissionCenter
+    private let preferencesStore: any PreferencesPersisting
 
-    @Published var isEnabled: Bool {
+    @Published var preferences: MojiPondPreferences {
         didSet {
-            UserDefaults.standard.set(isEnabled, forKey: Key.isEnabled)
+            preferencesStore.save(preferences)
         }
     }
 
@@ -28,14 +28,25 @@ final class AppState: ObservableObject {
 
     @Published private(set) var launchAtLoginEnabled: Bool
     @Published private(set) var launchAtLoginError: String?
+    @Published private(set) var runtimeState: MojiPondRuntimeState = .stopped
+    @Published private(set) var runtimeNotice: String?
 
-    init(permissions: SystemPermissionCenter = SystemPermissionCenter()) {
+    init(
+        permissions: SystemPermissionCenter = SystemPermissionCenter(),
+        preferencesStore: any PreferencesPersisting =
+            UserDefaultsPreferencesStore()
+    ) {
         self.permissions = permissions
-        isEnabled = UserDefaults.standard.object(forKey: Key.isEnabled) as? Bool ?? true
+        self.preferencesStore = preferencesStore
+        preferences = preferencesStore.load()
         hasCompletedOnboarding = UserDefaults.standard.bool(
             forKey: Key.completedOnboarding
         )
         launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
+    }
+
+    var isEnabled: Bool {
+        preferences.activationMode == .enabled
     }
 
     var isInstalledInApplications: Bool {
@@ -51,14 +62,48 @@ final class AppState: ObservableObject {
         guard isEnabled else {
             return "Paused"
         }
+        if case .failed = runtimeState {
+            return "Needs attention"
+        }
         guard canMonitorTyping else {
             return "Permissions needed"
         }
-        return "Ready"
+        switch runtimeState {
+        case .running:
+            return "Ready"
+        case .waitingForPermissions:
+            return "Permissions needed"
+        case .failed:
+            return "Needs attention"
+        case .paused:
+            return "Paused"
+        case .stopped:
+            return "Starting…"
+        }
     }
 
     func start() {
         permissions.startLiveUpdates()
+    }
+
+    func setEnabled(_ enabled: Bool) {
+        preferences.activationMode = enabled ? .enabled : .paused
+    }
+
+    func updatePreferences(
+        _ update: (inout MojiPondPreferences) -> Void
+    ) {
+        var candidate = preferences
+        update(&candidate)
+        preferences = candidate
+    }
+
+    func setRuntimeState(_ state: MojiPondRuntimeState) {
+        runtimeState = state
+    }
+
+    func setRuntimeNotice(_ notice: String?) {
+        runtimeNotice = notice
     }
 
     func finishOnboarding() {
@@ -74,10 +119,12 @@ final class AppState: ObservableObject {
             }
             launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
             launchAtLoginError = nil
+            updatePreferences {
+                $0.launchAtLogin = launchAtLoginEnabled
+            }
         } catch {
             launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
             launchAtLoginError = error.localizedDescription
         }
     }
 }
-

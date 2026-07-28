@@ -3,6 +3,7 @@
 # Xcode
 DerivedData/
 .derived/
+.derived-*/
 build/
 MojiPond.xcodeproj/
 *.xcarchive
@@ -26,6 +27,8 @@ Screenshots/Local/
 *.app
 *.dmg
 *.zip
+*.profraw
+work/
 
 # Secrets and signing material
 .env

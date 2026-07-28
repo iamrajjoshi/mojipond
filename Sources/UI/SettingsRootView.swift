@@ -1,16 +1,13 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SettingsRootView: View {
     @ObservedObject var appState: AppState
     @ObservedObject private var permissions: SystemPermissionCenter
 
-    @AppStorage("shortcuts.trigger") private var trigger = ":"
-    @AppStorage("shortcuts.acceptTab") private var acceptTab = true
-    @AppStorage("shortcuts.acceptReturn") private var acceptReturn = true
-    @AppStorage("shortcuts.exactReplacement") private var exactReplacement = true
-    @AppStorage("shortcuts.doubleTriggerBrowser") private var doubleTriggerBrowser = true
-    @AppStorage("media.stickersEnabled") private var stickersEnabled = true
-    @AppStorage("media.giphyEnabled") private var giphyEnabled = false
+    @State private var domainDraft = ""
+    @State private var exclusionError: String?
 
     init(appState: AppState) {
         self.appState = appState
@@ -19,8 +16,31 @@ struct SettingsRootView: View {
 
     var body: some View {
         TabView {
-            Form {
-                Toggle("Enable MojiPond", isOn: $appState.isEnabled)
+            general
+                .tabItem { Label("General", systemImage: "gear") }
+            shortcuts
+                .tabItem { Label("Shortcuts", systemImage: "keyboard") }
+            library
+                .tabItem { Label("Library", systemImage: "square.grid.2x2") }
+            privacy
+                .tabItem { Label("Privacy", systemImage: "hand.raised") }
+            about
+                .tabItem { Label("About", systemImage: "info.circle") }
+        }
+        .padding(14)
+        .frame(width: 680, height: 540)
+    }
+
+    private var general: some View {
+        Form {
+            Section {
+                Toggle(
+                    "Enable MojiPond",
+                    isOn: Binding(
+                        get: { appState.isEnabled },
+                        set: { appState.setEnabled($0) }
+                    )
+                )
                 Toggle(
                     "Launch at login",
                     isOn: Binding(
@@ -29,80 +49,341 @@ struct SettingsRootView: View {
                     )
                 )
                 if let error = appState.launchAtLoginError {
-                    Text(error)
+                    Label(error, systemImage: "exclamationmark.triangle")
                         .font(.caption)
-                        .foregroundStyle(.red)
-                }
-
-                Section("Online media") {
-                    Toggle("Enable /sticker in Messages", isOn: $stickersEnabled)
-                    Toggle("Enable /gif in Messages", isOn: $giphyEnabled)
-                    Text("GIF search is optional and sends only your explicit search term to GIPHY.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.orange)
                 }
             }
-            .formStyle(.grouped)
-            .tabItem { Label("General", systemImage: "gear") }
 
-            Form {
-                Picker("Trigger", selection: $trigger) {
-                    ForEach([":", ";", "/", "\\", "@", "#", "~", "|"], id: \.self) {
-                        Text($0).tag($0)
-                    }
-                }
-                Toggle("Accept with Tab", isOn: $acceptTab)
-                Toggle("Accept with Return", isOn: $acceptReturn)
-                Toggle("Replace exact closing tokens", isOn: $exactReplacement)
-                Toggle("Open browser with \(trigger)\(trigger)", isOn: $doubleTriggerBrowser)
+            Section("Online features") {
+                Toggle(
+                    "Allow public GitHub pack imports",
+                    isOn: preference(\.network.allowsGitHubImports)
+                )
+                Toggle(
+                    "Allow /sticker downloads in Messages",
+                    isOn: preference(\.network.allowsStickerSearch)
+                )
+                Toggle(
+                    "Allow /gif search in Messages",
+                    isOn: preference(\.network.allowsGIFSearch)
+                )
+                Toggle(
+                    "Check for signed updates",
+                    isOn: preference(\.network.allowsUpdateChecks)
+                )
+                Text(
+                    "Online features are independent and off by default. "
+                        + "Only an explicit pack URL or media query is sent."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
-            .formStyle(.grouped)
-            .tabItem { Label("Shortcuts", systemImage: "keyboard") }
+        }
+        .formStyle(.grouped)
+    }
 
-            Form {
+    private var shortcuts: some View {
+        Form {
+            Picker(
+                "Shortcode trigger",
+                selection: preference(\.shortcode.trigger)
+            ) {
+                ForEach(ShortcodeTrigger.allCases, id: \.self) { trigger in
+                    Text(trigger.rawValue).tag(trigger)
+                }
+            }
+
+            Section("Suggestions") {
+                Toggle(
+                    "Show suggestions on a bare trigger",
+                    isOn: preference(
+                        \.shortcode.showsSuggestionsOnBareTrigger
+                    )
+                )
+                Toggle(
+                    "Accept with Tab",
+                    isOn: preference(\.shortcode.acceptsTab)
+                )
+                Toggle(
+                    "Accept with Return",
+                    isOn: preference(\.shortcode.acceptsReturn)
+                )
+                Toggle(
+                    "Replace an exact closing token",
+                    isOn: preference(
+                        \.shortcode.replacesOnExactClosingTrigger
+                    )
+                )
+                Toggle(
+                    "Open the browser with \(triggerText)\(triggerText)",
+                    isOn: preference(
+                        \.shortcode.opensBrowserOnDoubleTrigger
+                    )
+                )
+            }
+
+            LabeledContent("Example") {
+                Text("\(triggerText)lizard\(triggerText) → 🦎")
+                    .fontDesign(.monospaced)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var library: some View {
+        Form {
+            Section("Local data") {
+                Text(
+                    "Imported packs, aliases, favorites, and ranking stay on "
+                        + "this Mac. Pack assets are copied into managed "
+                        + "Application Support storage."
+                )
+                .foregroundStyle(.secondary)
+                Button("Open MojiPond Library") {
+                    NotificationCenter.default.post(
+                        name: .mojiPondShowLibrary,
+                        object: nil
+                    )
+                }
+                Button("Reset recents and usage ranking", role: .destructive) {
+                    NotificationCenter.default.post(
+                        name: .mojiPondResetUsageRanking,
+                        object: nil
+                    )
+                }
+            }
+
+            Section("Portable packs") {
+                Text(
+                    "MojiPond supports individual files, folders, ZIPs, "
+                        + "Slack-style emoji.json files, and public GitHub URLs."
+                )
+                .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var privacy: some View {
+        Form {
+            Section("System permissions") {
                 PermissionSettingsRow(
                     title: "Input Monitoring",
+                    detail: "Recognizes a bounded shortcode while you type.",
                     status: permissions.snapshot.inputMonitoring,
                     request: { permissions.requestInputMonitoring() }
                 )
                 PermissionSettingsRow(
                     title: "Accessibility",
+                    detail: "Validates the caret and replaces your selection.",
                     status: permissions.snapshot.accessibility,
                     request: { permissions.requestAccessibility() }
                 )
-                Section("Exclusions") {
-                    Text("Password fields, terminals, virtual machines, Slack, and Discord are ignored by default.")
+                PermissionSettingsRow(
+                    title: "Event Posting",
+                    detail: "Needed only to paste media into another app.",
+                    status: permissions.snapshot.eventPosting,
+                    request: { permissions.requestEventPosting() }
+                )
+            }
+
+            Section("Excluded apps") {
+                ForEach(appState.preferences.exclusions.applications) { app in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(app.displayName)
+                            Text(app.bundleIdentifier)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if app.bundleIdentifier
+                            != Bundle.main.bundleIdentifier?.lowercased() {
+                            Button {
+                                removeApplicationExclusion(app.id)
+                            } label: {
+                                Image(systemName: "minus.circle")
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(
+                                "Remove \(app.displayName) exclusion"
+                            )
+                        }
+                    }
+                }
+                Button("Add Application…", action: chooseExcludedApplication)
+            }
+
+            Section("Excluded websites") {
+                ForEach(appState.preferences.exclusions.domains) { domain in
+                    HStack {
+                        Text(domain.domain)
+                        Spacer()
+                        Text(domain.includesSubdomains ? "Includes subdomains" : "Exact host")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button {
+                            removeDomainExclusion(domain.id)
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(
+                            "Remove \(domain.domain) exclusion"
+                        )
+                    }
+                }
+                HStack {
+                    TextField("example.com", text: $domainDraft)
+                        .onSubmit(addDomainExclusion)
+                    Button("Add", action: addDomainExclusion)
+                        .disabled(domainDraft.isEmpty)
+                }
+                if let exclusionError {
+                    Text(exclusionError)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                Text(
+                    "Domain exclusions apply only in browsers where MojiPond "
+                        + "can safely identify the active host."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var about: some View {
+        Form {
+            HStack(spacing: 16) {
+                PondMark(size: 64)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("MojiPond")
+                        .font(.title2.weight(.semibold))
+                    Text("Your pond for every emote.")
                         .foregroundStyle(.secondary)
-                    Button("Manage Excluded Apps…") {}
-                    Button("Manage Excluded Websites…") {}
                 }
             }
-            .formStyle(.grouped)
-            .tabItem { Label("Privacy", systemImage: "hand.raised") }
 
-            Form {
-                LabeledContent("Version", value: "0.1.0")
-                LabeledContent("Updates", value: "Disabled until a signed feed is configured")
-                Link("View source repository", destination: URL(string: "https://github.com/iamrajjoshi/mojipond")!)
-                Text("Your pond for every emote.")
-                    .foregroundStyle(.secondary)
-            }
-            .formStyle(.grouped)
-            .tabItem { Label("About", systemImage: "info.circle") }
+            LabeledContent(
+                "Version",
+                value: Bundle.main.object(
+                    forInfoDictionaryKey: "CFBundleShortVersionString"
+                ) as? String ?? "Development"
+            )
+            LabeledContent(
+                "Updates",
+                value: "Disabled until a signed feed is configured"
+            )
+            Link(
+                "View private source repository",
+                destination: URL(
+                    string: "https://github.com/iamrajjoshi/mojipond"
+                )!
+            )
+            Text(
+                "No accounts, telemetry, message database access, "
+                    + "or background cloud storage."
+            )
+            .foregroundStyle(.secondary)
         }
-        .padding(14)
-        .frame(width: 620, height: 460)
+        .formStyle(.grouped)
+    }
+
+    private var triggerText: String {
+        appState.preferences.shortcode.trigger.rawValue
+    }
+
+    private func preference<Value>(
+        _ keyPath: WritableKeyPath<MojiPondPreferences, Value>
+    ) -> Binding<Value> {
+        Binding(
+            get: { appState.preferences[keyPath: keyPath] },
+            set: { value in
+                appState.updatePreferences {
+                    $0[keyPath: keyPath] = value
+                }
+            }
+        )
+    }
+
+    private func chooseExcludedApplication() {
+        let panel = NSOpenPanel()
+        panel.title = "Exclude an Application"
+        panel.prompt = "Exclude"
+        panel.allowedContentTypes = [.application]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        guard panel.runModal() == .OK,
+              let url = panel.url,
+              let bundle = Bundle(url: url),
+              let identifier = bundle.bundleIdentifier else {
+            return
+        }
+
+        let exclusion = ApplicationExclusion(
+            bundleIdentifier: identifier,
+            displayName: bundle.object(
+                forInfoDictionaryKey: "CFBundleDisplayName"
+            ) as? String ?? url.deletingPathExtension().lastPathComponent
+        )
+        appState.updatePreferences {
+            guard !$0.exclusions.applications.contains(
+                where: { $0.id == exclusion.id }
+            ) else {
+                return
+            }
+            $0.exclusions.applications.append(exclusion)
+        }
+    }
+
+    private func removeApplicationExclusion(_ id: String) {
+        appState.updatePreferences {
+            $0.exclusions.applications.removeAll { $0.id == id }
+        }
+    }
+
+    private func addDomainExclusion() {
+        guard let exclusion = DomainExclusion(domain: domainDraft) else {
+            exclusionError = "Enter a hostname such as example.com."
+            return
+        }
+        appState.updatePreferences {
+            guard !$0.exclusions.domains.contains(
+                where: { $0.id == exclusion.id }
+            ) else {
+                return
+            }
+            $0.exclusions.domains.append(exclusion)
+        }
+        domainDraft = ""
+        exclusionError = nil
+    }
+
+    private func removeDomainExclusion(_ id: String) {
+        appState.updatePreferences {
+            $0.exclusions.domains.removeAll { $0.id == id }
+        }
     }
 }
 
 private struct PermissionSettingsRow: View {
     let title: String
+    let detail: String
     let status: SystemPermissionStatus
     let request: () -> Void
 
     var body: some View {
-        HStack {
-            Text(title)
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Spacer()
             PermissionStatusView(status: status)
             if status != .granted {
@@ -112,3 +393,11 @@ private struct PermissionSettingsRow: View {
     }
 }
 
+extension Notification.Name {
+    static let mojiPondShowLibrary = Notification.Name(
+        "com.rajjoshi.MojiPond.showLibrary"
+    )
+    static let mojiPondResetUsageRanking = Notification.Name(
+        "com.rajjoshi.MojiPond.resetUsageRanking"
+    )
+}
