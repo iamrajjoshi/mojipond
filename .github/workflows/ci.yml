@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and deterministic tests
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Verify tracked files contain no release secrets
+        shell: bash
+        run: |
+          sensitive_files="$(
+            git ls-files \
+              | grep -E '(^|/)(\.env($|\.)|[^/]+\.(p8|p12|pem|key|mobileprovision|cer))$' \
+              || true
+          )"
+          if [[ -n "$sensitive_files" ]]; then
+            echo "Potential secret-bearing files are tracked:"
+            echo "$sensitive_files"
+            exit 1
+          fi
+
+          private_key_pattern='BEGIN (RSA |EC |OPENSSH )?PRIVATE'" KEY"
+          if git grep -I -n -E "$private_key_pattern" -- .
+          then
+            echo "Private key material must never be committed."
+            exit 1
+          fi
+
+          if git grep -I -n -E \
+            '(GIPHY_API_KEY|NOTARIZATION_PASSWORD|AC_PASSWORD)[[:space:]]*=[[:space:]]*[^$[:space:]]{8,}' \
+            -- .
+          then
+            echo "A likely hard-coded release or provider secret was found."
+            exit 1
+          fi
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build
+        run: |
+          xcodebuild \
+            -project MojiPond.xcodeproj \
+            -scheme MojiPond \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            -derivedDataPath .derived/ci \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Run deterministic tests
+        run: |
+          xcodebuild \
+            -project MojiPond.xcodeproj \
+            -scheme MojiPond \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            -derivedDataPath .derived/ci \
+            CODE_SIGNING_ALLOWED=NO \
+            test
