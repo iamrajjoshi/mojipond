@@ -40,6 +40,13 @@ enum RuntimeSuggestionPanelUpdate: Equatable, Sendable {
 @MainActor
 protocol RuntimeSuggestionPresenting: AnyObject {
     func apply(_ update: RuntimeSuggestionPanelUpdate)
+    func applyMedia(_ update: RuntimeMediaPanelUpdate)
+}
+
+extension RuntimeSuggestionPresenting {
+    func applyMedia(_ update: RuntimeMediaPanelUpdate) {
+        _ = update
+    }
 }
 
 /// A keyboard-only, nonactivating surface. Ignoring mouse events is deliberate:
@@ -49,7 +56,11 @@ protocol RuntimeSuggestionPresenting: AnyObject {
 final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
     private let panel: NonactivatingCaretPanel
     private let hostingController: NSHostingController<RuntimeSuggestionPanelView>
+    private let mediaPanel: NonactivatingCaretPanel
+    private let mediaHostingController:
+        NSHostingController<RuntimeMediaPanelView>
     private var latestRevision: UInt64 = 0
+    private var latestMediaRevision: UInt64 = 0
 
     init() {
         let initial = RuntimeSuggestionPanelView(
@@ -62,8 +73,14 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
             )
         )
         hostingController = NSHostingController(rootView: initial)
+        mediaHostingController = NSHostingController(
+            rootView: RuntimeMediaPanelView(snapshot: .empty)
+        )
         panel = NonactivatingCaretPanel(
             contentRect: CGRect(x: 0, y: 0, width: 380, height: 48)
+        )
+        mediaPanel = NonactivatingCaretPanel(
+            contentRect: CGRect(x: 0, y: 0, width: 500, height: 210)
         )
         panel.contentViewController = hostingController
         panel.backgroundColor = .clear
@@ -71,6 +88,41 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
         panel.hasShadow = true
         panel.ignoresMouseEvents = true
         panel.setAccessibilityLabel("MojiPond emoji suggestions")
+
+        mediaPanel.contentViewController = mediaHostingController
+        mediaPanel.backgroundColor = .clear
+        mediaPanel.isOpaque = false
+        mediaPanel.hasShadow = true
+        mediaPanel.ignoresMouseEvents = true
+        mediaPanel.setAccessibilityLabel("MojiPond media search")
+    }
+
+    func applyMedia(_ update: RuntimeMediaPanelUpdate) {
+        guard update.revision >= latestMediaRevision else {
+            return
+        }
+        latestMediaRevision = update.revision
+
+        switch update {
+        case .hide:
+            mediaPanel.orderOut(nil)
+        case let .show(snapshot, caretBounds):
+            panel.orderOut(nil)
+            mediaHostingController.rootView = RuntimeMediaPanelView(
+                snapshot: snapshot
+            )
+            mediaPanel.setContentSize(
+                RuntimeMediaPanelView.preferredSize(for: snapshot)
+            )
+            guard CaretPanelPositioner.position(
+                mediaPanel,
+                nearQuartzCaret: caretBounds
+            ) != nil else {
+                mediaPanel.orderOut(nil)
+                return
+            }
+            mediaPanel.orderFrontRegardless()
+        }
     }
 
     func apply(_ update: RuntimeSuggestionPanelUpdate) {
@@ -121,6 +173,8 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
                 width: 440,
                 height: CGFloat(snapshot.rows.count * 44 + 48)
             )
+        case .media:
+            CGSize(width: 440, height: 1)
         }
     }
 }

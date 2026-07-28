@@ -121,6 +121,59 @@ final class RuntimeKeyboardTests: XCTestCase {
         )
     }
 
+    func testMediaGridOwnsHorizontalAndVerticalNavigationOnlyWhileVisible() {
+        let gate = RuntimeInterceptionGate()
+        gate.setCaptureEnabled(true)
+
+        XCTAssertEqual(
+            gate.decision(
+                for: snapshot(keyCode: RuntimeKeyboardKeyCode.leftArrow)
+            ),
+            .passThrough
+        )
+
+        gate.setMode(
+            .media,
+            acceptsTab: true,
+            acceptsReturn: true
+        )
+        for keyCode in [
+            RuntimeKeyboardKeyCode.leftArrow,
+            RuntimeKeyboardKeyCode.rightArrow,
+            RuntimeKeyboardKeyCode.upArrow,
+            RuntimeKeyboardKeyCode.downArrow,
+            RuntimeKeyboardKeyCode.tab,
+            RuntimeKeyboardKeyCode.returnKey,
+            RuntimeKeyboardKeyCode.escape
+        ] {
+            XCTAssertEqual(
+                gate.decision(for: snapshot(keyCode: keyCode)),
+                .intercept
+            )
+        }
+        XCTAssertEqual(
+            gate.decision(
+                for: snapshot(
+                    keyCode: RuntimeKeyboardKeyCode.rightArrow,
+                    flags: [.maskCommand]
+                )
+            ),
+            .passThrough
+        )
+
+        gate.setMode(
+            .hidden,
+            acceptsTab: true,
+            acceptsReturn: true
+        )
+        XCTAssertEqual(
+            gate.decision(
+                for: snapshot(keyCode: RuntimeKeyboardKeyCode.rightArrow)
+            ),
+            .passThrough
+        )
+    }
+
     private func snapshot(
         keyCode: CGKeyCode,
         flags: CGEventFlags = [],

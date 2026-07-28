@@ -112,6 +112,7 @@ enum RuntimeInterceptionMode: Equatable, Sendable {
     case hidden
     case suggestions
     case browser
+    case media
 }
 
 /// The only mutable state consulted synchronously by the event-tap callback.
@@ -169,9 +170,13 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
         }
 
         switch snapshot.keyCode {
+        case RuntimeKeyboardKeyCode.escape:
+            return .intercept
+        case RuntimeKeyboardKeyCode.leftArrow,
+             RuntimeKeyboardKeyCode.rightArrow:
+            return current.mode == .media ? .intercept : .passThrough
         case RuntimeKeyboardKeyCode.upArrow,
-             RuntimeKeyboardKeyCode.downArrow,
-             RuntimeKeyboardKeyCode.escape:
+             RuntimeKeyboardKeyCode.downArrow:
             return .intercept
         case RuntimeKeyboardKeyCode.tab:
             return current.acceptsTab || current.mode == .browser

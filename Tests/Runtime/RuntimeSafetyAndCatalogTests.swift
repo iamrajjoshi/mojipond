@@ -170,6 +170,35 @@ final class RuntimeSafetyAndCatalogTests: XCTestCase {
         )
     }
 
+    func testRuntimeCaptureLocatesBoundedMediaCommandSuffix() throws {
+        let system = FakeAccessibilityTextSystem()
+        system.text = "draft /gif pond"
+        system.selection = NSRange(
+            location: system.text.utf16.count,
+            length: 0
+        )
+        let provider = RuntimeAccessibilityTextContextProvider(
+            accessibility: AccessibilityTextAdapter(system: system),
+            permissionChecker: GrantedRuntimePermissionChecker(),
+            secureInputChecker: InactiveRuntimeSecureInputChecker(),
+            applicationIdentity: MessagesRuntimeIdentityProvider()
+        )
+
+        let capture = try provider.capture(
+            expectedToken: "/gif pond",
+            trigger: "/"
+        )
+
+        XCTAssertEqual(
+            capture.context.tokenRange,
+            NSRange(location: 6, length: 9)
+        )
+        XCTAssertEqual(
+            capture.bundleIdentifier,
+            MediaCommandParser.messagesBundleIdentifier
+        )
+    }
+
     func testCatalogLoaderBuildsExactLocalIndexFromInjectedData() throws {
         let data = Data(
             """
@@ -205,5 +234,33 @@ private struct FixedRuntimeCatalogDataProvider: RuntimeCatalogDataProviding {
 
     func gemojiData() throws -> Data {
         data
+    }
+}
+
+private struct GrantedRuntimePermissionChecker:
+    RuntimePermissionChecking
+{
+    func currentPermissions() -> RuntimePermissionPreflight {
+        RuntimePermissionPreflight(
+            inputMonitoringGranted: true,
+            accessibilityGranted: true
+        )
+    }
+}
+
+private struct InactiveRuntimeSecureInputChecker:
+    RuntimeSecureInputChecking
+{
+    var secureEventInputEnabled: Bool {
+        false
+    }
+}
+
+private struct MessagesRuntimeIdentityProvider:
+    RuntimeApplicationIdentityProviding
+{
+    func bundleIdentifier(for processIdentifier: pid_t) -> String? {
+        _ = processIdentifier
+        return MediaCommandParser.messagesBundleIdentifier
     }
 }
