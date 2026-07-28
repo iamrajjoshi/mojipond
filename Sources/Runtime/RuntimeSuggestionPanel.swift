@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 struct RuntimeSuggestionRow: Identifiable, Equatable, Sendable {
@@ -94,12 +95,15 @@ enum RuntimeSuggestionPanelUpdate: Equatable, Sendable {
         snapshot: RuntimeSuggestionPanelSnapshot,
         quartzCaretBounds: CGRect
     )
+    case retain(revision: UInt64)
     case hide(revision: UInt64)
 
     var revision: UInt64 {
         switch self {
         case let .show(snapshot, _):
             snapshot.revision
+        case let .retain(revision):
+            revision
         case let .hide(revision):
             revision
         }
@@ -142,10 +146,21 @@ extension RuntimeSuggestionPresenting {
 /// a global click always dismisses the active transaction instead of racing a
 /// panel click against a focus change in the destination app.
 @MainActor
+private final class RuntimeSuggestionPanelModel: ObservableObject {
+    @Published var snapshot: RuntimeSuggestionPanelSnapshot
+
+    init(snapshot: RuntimeSuggestionPanelSnapshot) {
+        self.snapshot = snapshot
+    }
+}
+
+@MainActor
 final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
     private let panel: NonactivatingCaretPanel
+    private let suggestionModel: RuntimeSuggestionPanelModel
     private let hostingController: NSHostingController<RuntimeSuggestionPanelView>
     private let mediaPanel: NonactivatingCaretPanel
+    private let mediaModel: RuntimeMediaPanelModel
     private let mediaHostingController:
         NSHostingController<RuntimeMediaPanelView>
     private var latestRevision: UInt64 = 0
@@ -154,19 +169,25 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
     private var lastMediaAnnouncement: String?
 
     init() {
-        let initial = RuntimeSuggestionPanelView(
-            snapshot: RuntimeSuggestionPanelSnapshot(
-                revision: 0,
-                transactionID: ParserTransactionID(rawValue: 0),
-                mode: .hidden,
-                rows: [],
-                selectedIndex: 0,
-                query: nil
-            )
+        let initialSnapshot = RuntimeSuggestionPanelSnapshot(
+            revision: 0,
+            transactionID: ParserTransactionID(rawValue: 0),
+            mode: .hidden,
+            rows: [],
+            selectedIndex: 0,
+            query: nil
         )
-        hostingController = NSHostingController(rootView: initial)
+        let suggestionModel = RuntimeSuggestionPanelModel(
+            snapshot: initialSnapshot
+        )
+        self.suggestionModel = suggestionModel
+        hostingController = NSHostingController(
+            rootView: RuntimeSuggestionPanelView(model: suggestionModel)
+        )
+        let mediaModel = RuntimeMediaPanelModel(snapshot: .empty)
+        self.mediaModel = mediaModel
         mediaHostingController = NSHostingController(
-            rootView: RuntimeMediaPanelView(snapshot: .empty)
+            rootView: RuntimeMediaPanelView(model: mediaModel)
         )
         panel = NonactivatingCaretPanel(
             contentRect: CGRect(x: 0, y: 0, width: 380, height: 48)
@@ -210,9 +231,7 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
             return false
         case let .show(snapshot, caretBounds):
             panel.orderOut(nil)
-            mediaHostingController.rootView = RuntimeMediaPanelView(
-                snapshot: snapshot
-            )
+            mediaModel.snapshot = snapshot
             mediaPanel.setContentSize(
                 RuntimeMediaPanelView.preferredSize(for: snapshot)
             )
@@ -223,7 +242,9 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
                 mediaPanel.orderOut(nil)
                 return false
             }
-            mediaPanel.orderFrontRegardless()
+            if !mediaPanel.isVisible {
+                mediaPanel.orderFrontRegardless()
+            }
             announceMedia(snapshot)
             return true
         }
@@ -242,6 +263,9 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
         latestRevision = update.revision
 
         switch update {
+        case .retain:
+            return panel.isVisible
+
         case let .hide(revision):
             _ = revision
             panel.orderOut(nil)
@@ -253,9 +277,7 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
                 panel.orderOut(nil)
                 return false
             }
-            hostingController.rootView = RuntimeSuggestionPanelView(
-                snapshot: snapshot
-            )
+            suggestionModel.snapshot = snapshot
             panel.title = snapshot.mode == .browser
                 ? "MojiPond Emoji Browser"
                 : "MojiPond Caret Suggestions"
@@ -273,7 +295,9 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
                 panel.orderOut(nil)
                 return false
             }
-            panel.orderFrontRegardless()
+            if !panel.isVisible {
+                panel.orderFrontRegardless()
+            }
             announceSuggestions(snapshot)
             return true
         }
@@ -335,10 +359,14 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
 }
 
 struct RuntimeSuggestionPanelView: View {
-    let snapshot: RuntimeSuggestionPanelSnapshot
+    @ObservedObject fileprivate var model: RuntimeSuggestionPanelModel
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceTransparency)
     private var reduceTransparency
+
+    private var snapshot: RuntimeSuggestionPanelSnapshot {
+        model.snapshot
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {

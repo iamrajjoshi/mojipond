@@ -95,6 +95,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        if
+            ProcessInfo.processInfo.environment[
+                "XCTestConfigurationFilePath"
+            ] == nil
+        {
+            AdaptiveGlyphPayloadService.shared.prewarmEncoder()
+        }
         appState.start()
         let servicesStarted = configureApplicationServices()
         observeApplicationState()

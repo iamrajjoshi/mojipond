@@ -226,6 +226,10 @@ explicit network confirmation.
 - Use the arrow keys or Tab to move through a media grid, Return to insert the
   selected original, and Escape to close it. Media commands and custom-image
   shortcode insertion are restricted to Messages.
+- On macOS 15 or later, a validated single-frame custom image is inserted in
+  Messages as an inline adaptive image glyph. Animated assets remain media;
+  macOS 14 and glyph-conversion failures retain the existing image-attachment
+  fallback.
 - GIPHY results retain conspicuous attribution. Selected originals are
   downloaded directly and are not cached, proxied, or rewritten.
 

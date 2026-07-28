@@ -13,6 +13,9 @@ final class ThirdPartyNoticesTests: XCTestCase {
 
         XCTAssertTrue(notice.contains("Copyright (c) 2019 GitHub, Inc."))
         XCTAssertTrue(
+            notice.contains("Copyright (c) 2026 Josh LaCalamito")
+        )
+        XCTAssertTrue(
             notice.contains("Creative Commons Attribution 4.0")
         )
         XCTAssertTrue(notice.contains("Powered by GIPHY"))

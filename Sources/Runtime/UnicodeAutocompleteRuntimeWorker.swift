@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import UniformTypeIdentifiers
 
 enum UnicodeAutocompleteRuntimeDiagnostic: Equatable, Sendable {
     case unsupportedTarget
@@ -165,6 +166,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
     }
 
     private let queue: DispatchQueue
+    private let managedMediaResolutionQueue: DispatchQueue
     private let interceptionGate: RuntimeInterceptionGate
     private let contextProvider: any RuntimeTextContextCapturing
     private let mainActorBridge: RuntimeMainActorBridge
@@ -172,6 +174,9 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
     private let frontmostApplication:
         any RuntimeFrontmostApplicationProviding
     private let managedMediaResolver: any RuntimeManagedMediaResolving
+    private let managedMediaPayloadBuilder:
+        @Sendable (RuntimeResolvedManagedMedia) -> PasteboardItemPayload
+    private let adaptiveGlyphPayloadService: AdaptiveGlyphPayloadService
     private let mediaCommandCoordinator:
         (any RuntimeMediaCommandCoordinating)?
     private let remoteMediaCache:
@@ -207,6 +212,11 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             any RuntimeManagedMediaResolving =
                 RuntimeManagedMediaResolver(),
         managedMediaRoot: URL? = nil,
+        adaptiveGlyphPayloadService:
+            AdaptiveGlyphPayloadService = .shared,
+        managedMediaPayloadBuilder:
+            @escaping @Sendable (RuntimeResolvedManagedMedia) ->
+                PasteboardItemPayload = { $0.pasteboardPayload },
         mediaCommandCoordinator:
             (any RuntimeMediaCommandCoordinating)? = nil,
         remoteMediaCache:
@@ -224,7 +234,9 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         self.usageStore = usageStore
         self.frontmostApplication = frontmostApplication
         self.managedMediaResolver = managedMediaResolver
+        self.managedMediaPayloadBuilder = managedMediaPayloadBuilder
         self.managedMediaRoot = managedMediaRoot?.standardizedFileURL
+        self.adaptiveGlyphPayloadService = adaptiveGlyphPayloadService
         self.mediaCommandCoordinator = mediaCommandCoordinator
         self.remoteMediaCache = remoteMediaCache
         self.diagnosticHandler = diagnosticHandler
@@ -238,6 +250,10 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             )
         )
         queue = DispatchQueue(label: queueLabel, qos: .userInteractive)
+        managedMediaResolutionQueue = DispatchQueue(
+            label: "\(queueLabel).managed-media-resolution",
+            qos: .userInitiated
+        )
     }
 
     func enqueue(_ snapshot: KeyboardEventSnapshot) {
@@ -1489,11 +1505,12 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         transaction.selectedIndex = 0
         armShortcodeInactivityTimeout(for: &transaction)
         activeTransaction = transaction
-        hideSurface()
 
         guard !transaction.results.isEmpty else {
+            hideSurface()
             return
         }
+        suspendSurfaceInterceptionRetainingPresentation()
         scheduleCapture(
             transactionID: transactionID,
             expectedToken: token.rendered,
@@ -1591,6 +1608,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         armShortcodeInactivityTimeout(for: &transaction)
         activeTransaction = transaction
         present(transaction)
+        prepareSelectedAdaptiveGlyphIfUseful(in: transaction)
     }
 
     private func moveSelection(
@@ -1609,6 +1627,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         armShortcodeInactivityTimeout(for: &transaction)
         activeTransaction = transaction
         present(transaction)
+        prepareSelectedAdaptiveGlyphIfUseful(in: transaction)
     }
 
     private func armShortcodeInactivityTimeout(
@@ -1774,10 +1793,12 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             transaction.visibleMode = .suggestions
             activeTransaction = transaction
             present(transaction)
+            prepareSelectedAdaptiveGlyphIfUseful(in: transaction)
         case .showBrowser:
             transaction.visibleMode = .browser
             activeTransaction = transaction
             present(transaction)
+            prepareSelectedAdaptiveGlyphIfUseful(in: transaction)
         case let .insert(item):
             guard
                 let sessionTarget = transaction.sessionTarget,
@@ -1889,65 +1910,259 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             return
         }
 
-        let resolved: RuntimeResolvedManagedMedia
-        do {
-            resolved = try managedMediaResolver.resolve(
+        guard
+            let pendingRevision = beginPendingManagedMediaInsertion(
+                transactionID: transactionID
+            )
+        else {
+            return
+        }
+        let resolver = managedMediaResolver
+        managedMediaResolutionQueue.async { [weak self] in
+            let resolved = try? resolver.resolve(
                 media,
                 beneath: managedMediaRoot
             )
-        } catch {
-            diagnosticHandler?(
-                .mediaCopyFallbackAvailable(
-                    RuntimeMediaCopyFallbackDiagnostic(
-                        source: .customEmoji(
-                            shortcode: item.shortcode.rawValue
-                        ),
-                        reason: .invalidManagedAsset
+            guard let self else {
+                return
+            }
+            queue.async { [weak self] in
+                guard
+                    let self,
+                    let current = activeTransaction,
+                    current.transactionID == transactionID,
+                    current.activityRevision == pendingRevision,
+                    current.sessionTarget?.processIdentifier
+                        == request.target.processIdentifier
+                else {
+                    return
+                }
+                guard let resolved else {
+                    diagnosticHandler?(
+                        .mediaCopyFallbackAvailable(
+                            RuntimeMediaCopyFallbackDiagnostic(
+                                source: .customEmoji(
+                                    shortcode: item.shortcode.rawValue
+                                ),
+                                reason: .invalidManagedAsset
+                            )
+                        )
                     )
+                    clear(transactionID: transactionID)
+                    return
+                }
+                finishManagedMediaResolution(
+                    resolved,
+                    item: item,
+                    media: media,
+                    request: request,
+                    transactionID: transactionID,
+                    pendingRevision: pendingRevision
                 )
-            )
-            clear(transactionID: transactionID)
-            return
+            }
         }
+    }
 
+    private func finishManagedMediaResolution(
+        _ resolved: RuntimeResolvedManagedMedia,
+        item: EmojiItem,
+        media: MediaEmojiContent,
+        request: AccessibilityReplacementRequest,
+        transactionID: ParserTransactionID,
+        pendingRevision: UInt64
+    ) {
         let captureBundleIdentifier =
             activeTransaction?.bundleIdentifier
-        let payload = resolved.pasteboardPayload
         if resolved.insertionPolicy
             == .copyOnlyAnimatedWebPExperimental
         {
-            diagnosticHandler?(
-                .mediaCopyFallbackAvailable(
-                    RuntimeMediaCopyFallbackDiagnostic(
-                        source: .customEmoji(
-                            shortcode: item.shortcode.rawValue
-                        ),
-                        reason: .animatedWebPExperimental,
-                        payload: payload
+            buildManagedMediaPayload(
+                resolved,
+                transactionID: transactionID,
+                pendingRevision: pendingRevision,
+                targetProcessIdentifier:
+                    request.target.processIdentifier
+            ) { [weak self] payload in
+                guard let self else {
+                    return
+                }
+                diagnosticHandler?(
+                    .mediaCopyFallbackAvailable(
+                        RuntimeMediaCopyFallbackDiagnostic(
+                            source: .customEmoji(
+                                shortcode: item.shortcode.rawValue
+                            ),
+                            reason: .animatedWebPExperimental,
+                            payload: payload
+                        )
                     )
                 )
-            )
-            clear(transactionID: transactionID)
+                clear(transactionID: transactionID)
+            }
             return
         }
         guard
             captureBundleIdentifier
                 == MediaCommandParser.messagesBundleIdentifier
         else {
-            diagnosticHandler?(
-                .mediaCopyFallbackAvailable(
-                    RuntimeMediaCopyFallbackDiagnostic(
-                        source: .customEmoji(
-                            shortcode: item.shortcode.rawValue
-                        ),
-                        reason: .notMessages,
-                        payload: payload
+            buildManagedMediaPayload(
+                resolved,
+                transactionID: transactionID,
+                pendingRevision: pendingRevision,
+                targetProcessIdentifier:
+                    request.target.processIdentifier
+            ) { [weak self] payload in
+                guard let self else {
+                    return
+                }
+                diagnosticHandler?(
+                    .mediaCopyFallbackAvailable(
+                        RuntimeMediaCopyFallbackDiagnostic(
+                            source: .customEmoji(
+                                shortcode: item.shortcode.rawValue
+                            ),
+                            reason: .notMessages,
+                            payload: payload
+                        )
                     )
                 )
-            )
-            clear(transactionID: transactionID)
+                clear(transactionID: transactionID)
+            }
             return
         }
+
+        let shortcode = item.shortcode.rawValue
+        let inlineFallback = ":\(shortcode):"
+        let contentIdentifier =
+            "mojipond:\(media.contentHash.lowercased()):\(shortcode)"
+        let glyphRequest = AdaptiveGlyphPayloadRequest(
+            sourceData: resolved.originalData,
+            sourceType: resolved.uniformType,
+            contentIdentifier: contentIdentifier,
+            accessibilityDescription: inlineFallback,
+            plainTextFallback: inlineFallback
+        )
+
+        guard !media.isAnimated else {
+            buildAndInsertManagedMediaFallback(
+                resolved,
+                item: item,
+                request: request,
+                transactionID: transactionID,
+                pendingRevision: pendingRevision
+            )
+            return
+        }
+
+        let targetProcessIdentifier = request.target.processIdentifier
+        adaptiveGlyphPayloadService.payload(for: glyphRequest) {
+            [weak self] glyphPayload in
+            guard let self else {
+                return
+            }
+            queue.async { [weak self] in
+                guard
+                    let self,
+                    let current = activeTransaction,
+                    current.transactionID == transactionID,
+                    current.activityRevision == pendingRevision,
+                    current.sessionTarget?.processIdentifier
+                        == targetProcessIdentifier
+                else {
+                    return
+                }
+                if let glyphPayload {
+                    insertManagedMediaPayload(
+                        glyphPayload,
+                        item: item,
+                        request: request,
+                        transactionID: transactionID
+                    )
+                } else {
+                    buildAndInsertManagedMediaFallback(
+                        resolved,
+                        item: item,
+                        request: request,
+                        transactionID: transactionID,
+                        pendingRevision: pendingRevision
+                    )
+                }
+            }
+        }
+    }
+
+    private func buildAndInsertManagedMediaFallback(
+        _ resolved: RuntimeResolvedManagedMedia,
+        item: EmojiItem,
+        request: AccessibilityReplacementRequest,
+        transactionID: ParserTransactionID,
+        pendingRevision: UInt64
+    ) {
+        buildManagedMediaPayload(
+            resolved,
+            transactionID: transactionID,
+            pendingRevision: pendingRevision,
+            targetProcessIdentifier: request.target.processIdentifier
+        ) { [weak self] payload in
+            guard let self else {
+                return
+            }
+            insertManagedMediaPayload(
+                payload,
+                item: item,
+                request: request,
+                transactionID: transactionID
+            )
+        }
+    }
+
+    private func buildManagedMediaPayload(
+        _ resolved: RuntimeResolvedManagedMedia,
+        transactionID: ParserTransactionID,
+        pendingRevision: UInt64,
+        targetProcessIdentifier: pid_t,
+        completion: @escaping @Sendable (PasteboardItemPayload) -> Void
+    ) {
+        let payloadBuilder = managedMediaPayloadBuilder
+        managedMediaResolutionQueue.async { [weak self] in
+            let payload = payloadBuilder(resolved)
+            guard let self else {
+                return
+            }
+            queue.async { [weak self] in
+                guard
+                    let self,
+                    let current = activeTransaction,
+                    current.transactionID == transactionID,
+                    current.activityRevision == pendingRevision,
+                    current.sessionTarget?.processIdentifier
+                        == targetProcessIdentifier
+                else {
+                    return
+                }
+                completion(payload)
+            }
+        }
+    }
+
+    private func insertManagedMediaPayload(
+        _ payload: PasteboardItemPayload,
+        item: EmojiItem,
+        request: AccessibilityReplacementRequest,
+        transactionID: ParserTransactionID
+    ) {
+        guard
+            var transaction = activeTransaction,
+            transaction.transactionID == transactionID,
+            transaction.sessionTarget?.processIdentifier
+                == request.target.processIdentifier
+        else {
+            return
+        }
+        // Payload preparation is complete. Invalidate its long timeout before
+        // handing the final, focus-revalidated insertion to the main actor.
+        transaction.activityRevision &+= 1
+        activeTransaction = transaction
 
         let bridge = mainActorBridge
         Task { @MainActor [weak self] in
@@ -1991,6 +2206,119 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                 }
                 clear(transactionID: transactionID)
             }
+        }
+    }
+
+    private func beginPendingManagedMediaInsertion(
+        transactionID: ParserTransactionID
+    ) -> UInt64? {
+        guard
+            var transaction = activeTransaction,
+            transaction.transactionID == transactionID
+        else {
+            return nil
+        }
+        transaction.activityRevision &+= 1
+        activeTransaction = transaction
+        let revision = transaction.activityRevision
+        queue.asyncAfter(deadline: .now() + .seconds(30)) { [weak self] in
+            guard
+                let self,
+                let current = activeTransaction,
+                current.transactionID == transactionID,
+                current.activityRevision == revision
+            else {
+                return
+            }
+            cancelCurrentTransaction(reason: .timeout)
+        }
+        return revision
+    }
+
+    private func prepareSelectedAdaptiveGlyphIfUseful(
+        in transaction: ActiveTransaction
+    ) {
+        guard
+            transaction.bundleIdentifier
+                == MediaCommandParser.messagesBundleIdentifier,
+            let managedMediaRoot,
+            transaction.results.indices.contains(transaction.selectedIndex)
+        else {
+            return
+        }
+
+        let query: String
+        switch transaction.visibleMode {
+        case .suggestions:
+            query = transaction.expectedToken
+                .dropFirst()
+                .lowercased()
+        case .browser:
+            query = transaction.browserQuery.lowercased()
+        case .hidden, .media:
+            return
+        }
+        guard query.utf8.count >= 3 else {
+            return
+        }
+
+        let item = transaction.results[transaction.selectedIndex].item
+        guard
+            item.shortcode.rawValue.lowercased().hasPrefix(query),
+            case let .media(media) = item.content,
+            !media.isAnimated
+        else {
+            return
+        }
+
+        let shortcode = item.shortcode.rawValue
+        let inlineFallback = ":\(shortcode):"
+        let contentIdentifier =
+            "mojipond:\(media.contentHash.lowercased()):\(shortcode)"
+        let sourceType = adaptiveGlyphSourceType(for: media.mediaType)
+        let key = AdaptiveGlyphPayloadCacheKey(
+            sourceType: sourceType,
+            contentIdentifier: contentIdentifier,
+            accessibilityDescription: inlineFallback,
+            plainTextFallback: inlineFallback
+        )
+        let resolver = managedMediaResolver
+        adaptiveGlyphPayloadService.prepare(
+            for: key,
+            loader: {
+                guard
+                    let resolved = try? resolver.resolve(
+                        media,
+                        beneath: managedMediaRoot
+                    ),
+                    resolved.insertionPolicy == .automatic,
+                    resolved.uniformType == sourceType
+                else {
+                    return nil
+                }
+                return AdaptiveGlyphPayloadRequest(
+                    sourceData: resolved.originalData,
+                    sourceType: resolved.uniformType,
+                    contentIdentifier: contentIdentifier,
+                    accessibilityDescription: inlineFallback,
+                    plainTextFallback: inlineFallback
+                )
+            }
+        )
+    }
+
+    private func adaptiveGlyphSourceType(
+        for mediaType: EmojiMediaType
+    ) -> UTType {
+        switch mediaType {
+        case .png:
+            .png
+        case .jpeg:
+            .jpeg
+        case .gif:
+            .gif
+        case .webP:
+            .webP
         }
     }
 
@@ -2081,6 +2409,24 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         )
         uiRevision &+= 1
         let update = RuntimeSuggestionPanelUpdate.hide(revision: uiRevision)
+        let bridge = mainActorBridge
+        Task { @MainActor in
+            bridge.apply(update)
+        }
+    }
+
+    private func suspendSurfaceInterceptionRetainingPresentation() {
+        interceptionGate.setMode(
+            .hidden,
+            acceptsTab: configuration.preferences.shortcode.acceptsTab,
+            acceptsReturn: configuration.preferences.shortcode.acceptsReturn
+        )
+        // Invalidate any in-flight presentation completion without ordering
+        // the current panel out. The next verified capture updates it in place.
+        uiRevision &+= 1
+        let update = RuntimeSuggestionPanelUpdate.retain(
+            revision: uiRevision
+        )
         let bridge = mainActorBridge
         Task { @MainActor in
             bridge.apply(update)
