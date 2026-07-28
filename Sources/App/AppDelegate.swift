@@ -69,6 +69,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         menu.addItem(withTitle: "Setup & Permissions", action: #selector(showOnboarding), keyEquivalent: "")
         menu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
+        if case let .available(metadata) = appState.updates.state {
+            let updateItem = menu.addItem(
+                withTitle: "MojiPond \(metadata.version) Available…",
+                action: #selector(openUpdateReleaseNotes),
+                keyEquivalent: ""
+            )
+            updateItem.isEnabled = metadata.releaseNotesURL != nil
+        } else {
+            menu.addItem(
+                withTitle: "Check for Updates…",
+                action: #selector(checkForUpdates),
+                keyEquivalent: ""
+            )
+        }
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit MojiPond", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.menu = menu
@@ -157,9 +171,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         runtimeController?.openBrowser()
     }
 
+    @objc
+    private func checkForUpdates() {
+        appState.updates.checkManually(
+            automaticChecksEnabled:
+                appState.preferences.network.allowsUpdateChecks
+        )
+    }
+
+    @objc
+    private func openUpdateReleaseNotes() {
+        guard
+            case let .available(metadata) = appState.updates.state,
+            let releaseNotesURL = metadata.releaseNotesURL
+        else {
+            return
+        }
+        NSWorkspace.shared.open(releaseNotesURL)
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         runtimeController?.stop()
         appState.permissions.stopLiveUpdates()
+        appState.updates.cancel()
     }
 
     private func rebuildStatusMenu() {
@@ -229,6 +263,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .removeDuplicates()
             .sink { [weak self] state in
                 self?.appState.setRuntimeState(state)
+            }
+            .store(in: &cancellables)
+
+        appState.updates.$state
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in
+                self?.rebuildStatusMenu()
             }
             .store(in: &cancellables)
 
