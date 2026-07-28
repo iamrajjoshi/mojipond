@@ -1,0 +1,97 @@
+import XCTest
+@testable import MojiPond
+
+final class MojiPondPreferencesTests: XCTestCase {
+    func testDefaultsAreLocalFirstAndUseFrozenAutocompleteBehavior() {
+        let preferences = MojiPondPreferences.defaults
+
+        XCTAssertEqual(preferences.activationMode, .enabled)
+        XCTAssertFalse(preferences.launchAtLogin)
+        XCTAssertEqual(preferences.shortcode.trigger, .colon)
+        XCTAssertTrue(preferences.shortcode.acceptsTab)
+        XCTAssertTrue(preferences.shortcode.acceptsReturn)
+        XCTAssertFalse(preferences.shortcode.showsSuggestionsOnBareTrigger)
+        XCTAssertTrue(preferences.shortcode.replacesOnExactClosingTrigger)
+        XCTAssertTrue(preferences.shortcode.opensBrowserOnDoubleTrigger)
+        XCTAssertNil(preferences.defaultSkinTone)
+        XCTAssertFalse(preferences.network.allowsGitHubImports)
+        XCTAssertFalse(preferences.network.allowsStickerSearch)
+        XCTAssertFalse(preferences.network.allowsGIFSearch)
+        XCTAssertFalse(preferences.network.allowsUpdateChecks)
+    }
+
+    func testDefaultExclusionsCoverSelfSensitiveAppsTerminalsRemoteToolsAndChat() {
+        let exclusions = ExclusionPreferences.defaults
+        let expectedBundleIdentifiers = [
+            "com.rajjoshi.MojiPond",
+            "com.1password.1password",
+            "com.apple.Terminal",
+            "com.parallels.desktop.console",
+            "com.tinyspeck.slackmacgap",
+            "com.hnc.Discord"
+        ]
+
+        for bundleIdentifier in expectedBundleIdentifiers {
+            XCTAssertNotNil(
+                exclusions.match(bundleIdentifier: bundleIdentifier, domain: nil),
+                "Expected default exclusion for \(bundleIdentifier)"
+            )
+        }
+        XCTAssertNil(
+            exclusions.match(bundleIdentifier: "com.apple.MobileSMS", domain: nil)
+        )
+    }
+
+    func testDomainExclusionMatchesExactAndLabelBoundedSubdomains() throws {
+        let exclusion = try XCTUnwrap(
+            DomainExclusion(domain: "Example.COM.", includesSubdomains: true)
+        )
+
+        XCTAssertEqual(exclusion.domain, "example.com")
+        XCTAssertTrue(exclusion.matches(host: "example.com"))
+        XCTAssertTrue(exclusion.matches(host: "chat.example.com"))
+        XCTAssertFalse(exclusion.matches(host: "notexample.com"))
+        XCTAssertFalse(exclusion.matches(host: "example.com.evil.test"))
+    }
+
+    func testExactOnlyDomainDoesNotMatchSubdomainsAndRejectsMalformedHosts() throws {
+        let exclusion = try XCTUnwrap(
+            DomainExclusion(domain: "example.com", includesSubdomains: false)
+        )
+
+        XCTAssertTrue(exclusion.matches(host: "example.com"))
+        XCTAssertFalse(exclusion.matches(host: "chat.example.com"))
+        XCTAssertNil(DomainExclusion(domain: "https://example.com"))
+        XCTAssertNil(DomainExclusion(domain: "-bad.example"))
+        XCTAssertNil(DomainExclusion(domain: "bad..example"))
+    }
+
+    func testEveryDocumentedTriggerRoundTripsThroughPreferences() throws {
+        XCTAssertEqual(
+            Set(ShortcodeTrigger.allCases.map(\.rawValue)),
+            Set([":", ";", "/", "\\", "@", "#", "~", "|"])
+        )
+
+        for trigger in ShortcodeTrigger.allCases {
+            let preferences = MojiPondPreferences(
+                shortcode: ShortcodePreferences(trigger: trigger)
+            )
+            let data = try JSONEncoder().encode(preferences)
+            let decoded = try JSONDecoder().decode(MojiPondPreferences.self, from: data)
+            XCTAssertEqual(decoded, preferences)
+            XCTAssertEqual(ShortcodeTrigger(character: trigger.character), trigger)
+        }
+    }
+
+    func testTimeoutAndParserMaximumAreBounded() {
+        XCTAssertEqual(ShortcodePreferences(parserTimeout: 0).parserTimeout, 0.1)
+        XCTAssertEqual(
+            ShortcodeParserConfiguration(maximumTokenLength: 10_000).maximumTokenLength,
+            Shortcode.maximumLength
+        )
+        XCTAssertEqual(
+            ShortcodeParserConfiguration(maximumTokenLength: 0).maximumTokenLength,
+            1
+        )
+    }
+}
