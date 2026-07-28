@@ -1,0 +1,8 @@
+{
+  "ok": true,
+  "emoji": {
+    "party_parrot": "https://emoji.slack-edge.com/T/party_parrot.gif",
+    "party": "alias:party_parrot",
+    "celebrate": "alias:party"
+  }
+}

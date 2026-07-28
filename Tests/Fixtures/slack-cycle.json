@@ -1,0 +1,7 @@
+{
+  "emoji": {
+    "frog_a": "alias:frog_b",
+    "frog_b": "alias:frog_c",
+    "frog_c": "alias:frog_a"
+  }
+}
