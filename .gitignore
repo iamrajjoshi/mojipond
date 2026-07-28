@@ -3,6 +3,7 @@
 # Xcode
 DerivedData/
 build/
+MojiPond.xcodeproj/
 *.xcarchive
 *.dSYM
 *.dSYM.zip
@@ -37,4 +38,3 @@ Secrets.xcconfig
 *.provisionprofile
 sparkle_private_key*
 notarytool-profile*
-
