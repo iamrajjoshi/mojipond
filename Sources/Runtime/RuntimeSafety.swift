@@ -54,6 +54,22 @@ struct RuntimeSessionSafetyInput: Equatable, Sendable {
     let focusedElementIsSecure: Bool?
     /// `nil` means the target process could not be mapped to a stable app ID.
     let bundleIdentifier: String?
+    /// `nil` means no supported browser domain could be proven via AX.
+    let domain: String?
+
+    init(
+        permissions: RuntimePermissionPreflight,
+        secureEventInputEnabled: Bool,
+        focusedElementIsSecure: Bool?,
+        bundleIdentifier: String?,
+        domain: String? = nil
+    ) {
+        self.permissions = permissions
+        self.secureEventInputEnabled = secureEventInputEnabled
+        self.focusedElementIsSecure = focusedElementIsSecure
+        self.bundleIdentifier = bundleIdentifier
+        self.domain = domain
+    }
 }
 
 enum RuntimeSessionDenial: Error, Equatable, Sendable {
@@ -63,6 +79,7 @@ enum RuntimeSessionDenial: Error, Equatable, Sendable {
     case secureStatusUnknown
     case applicationUnknown
     case excludedApplication(String)
+    case excludedDomain(String)
 }
 
 struct RuntimeSessionSafetyPolicy: Sendable {
@@ -92,13 +109,17 @@ struct RuntimeSessionSafetyPolicy: Sendable {
         else {
             return .applicationUnknown
         }
-        if case let .application(exclusion)? = exclusions.match(
+        switch exclusions.match(
             bundleIdentifier: bundleIdentifier,
-            domain: nil
+            domain: input.domain
         ) {
+        case let .application(exclusion):
             return .excludedApplication(exclusion.bundleIdentifier)
+        case let .domain(exclusion):
+            return .excludedDomain(exclusion.domain)
+        case nil:
+            return nil
         }
-        return nil
     }
 }
 
@@ -146,6 +167,7 @@ final class RuntimeAccessibilityTextContextProvider:
     private let permissionChecker: any RuntimePermissionChecking
     private let secureInputChecker: any RuntimeSecureInputChecking
     private let applicationIdentity: any RuntimeApplicationIdentityProviding
+    private let browserDomainProvider: any BrowserDomainProviding
     private var safetyPolicy: RuntimeSessionSafetyPolicy
     private let lock = NSLock()
 
@@ -157,12 +179,15 @@ final class RuntimeAccessibilityTextContextProvider:
             MacRuntimeSecureInputChecker(),
         applicationIdentity: any RuntimeApplicationIdentityProviding =
             MacRuntimeApplicationIdentityProvider(),
+        browserDomainProvider: any BrowserDomainProviding =
+            AXBrowserDomainProvider(),
         exclusions: ExclusionPreferences = .defaults
     ) {
         self.accessibility = accessibility
         self.permissionChecker = permissionChecker
         self.secureInputChecker = secureInputChecker
         self.applicationIdentity = applicationIdentity
+        self.browserDomainProvider = browserDomainProvider
         safetyPolicy = RuntimeSessionSafetyPolicy(exclusions: exclusions)
     }
 
@@ -203,12 +228,36 @@ final class RuntimeAccessibilityTextContextProvider:
         let policy = lock.withLock {
             safetyPolicy
         }
+        let safetyInput = RuntimeSessionSafetyInput(
+            permissions: permissions,
+            secureEventInputEnabled: false,
+            focusedElementIsSecure: secureStatus,
+            bundleIdentifier: bundleIdentifier
+        )
+        if let denial = policy.evaluate(safetyInput) {
+            throw RuntimeTextCaptureError.denied(denial)
+        }
+
+        let domain: String?
+        if policy.exclusions.domains.isEmpty {
+            domain = nil
+        } else if let bundleIdentifier {
+            domain = try? browserDomainProvider.host(
+                for: bundleIdentifier,
+                processIdentifier: target.processIdentifier
+            )
+        } else {
+            domain = nil
+        }
         if let denial = policy.evaluate(
             RuntimeSessionSafetyInput(
-                permissions: permissions,
-                secureEventInputEnabled: false,
-                focusedElementIsSecure: secureStatus,
-                bundleIdentifier: bundleIdentifier
+                permissions: safetyInput.permissions,
+                secureEventInputEnabled:
+                    safetyInput.secureEventInputEnabled,
+                focusedElementIsSecure:
+                    safetyInput.focusedElementIsSecure,
+                bundleIdentifier: safetyInput.bundleIdentifier,
+                domain: domain
             )
         ) {
             throw RuntimeTextCaptureError.denied(denial)
