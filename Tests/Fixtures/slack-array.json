@@ -1,0 +1,10 @@
+[
+  {
+    "name": "Bufo Wave",
+    "image_url": "https://example.com/bufo-wave.png"
+  },
+  {
+    "name": "hello_bufo",
+    "alias_for": "Bufo Wave"
+  }
+]
