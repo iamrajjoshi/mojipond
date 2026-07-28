@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
@@ -186,11 +187,24 @@ enum RuntimeMediaPanelUpdate: Equatable, Sendable {
     }
 }
 
+@MainActor
+final class RuntimeMediaPanelModel: ObservableObject {
+    @Published var snapshot: RuntimeMediaPanelSnapshot
+
+    init(snapshot: RuntimeMediaPanelSnapshot) {
+        self.snapshot = snapshot
+    }
+}
+
 struct RuntimeMediaPanelView: View {
-    let snapshot: RuntimeMediaPanelSnapshot
+    @ObservedObject var model: RuntimeMediaPanelModel
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceTransparency)
     private var reduceTransparency
+
+    private var snapshot: RuntimeMediaPanelSnapshot {
+        model.snapshot
+    }
 
     static func preferredSize(
         for snapshot: RuntimeMediaPanelSnapshot
@@ -302,7 +316,10 @@ struct RuntimeMediaPanelView: View {
             .onAppear {
                 scrollToSelection(using: proxy)
             }
-            .onChange(of: snapshot.selectedIndex) {
+            // A retained hosting view no longer receives onAppear for every
+            // result set. Re-scroll on the snapshot revision so index 0 in a
+            // new grid cannot inherit the old grid's scroll offset.
+            .onChange(of: snapshot.revision) {
                 scrollToSelection(using: proxy)
             }
         }

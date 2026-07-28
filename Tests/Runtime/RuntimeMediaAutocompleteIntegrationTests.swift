@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import CryptoKit
 import Foundation
@@ -40,6 +41,21 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
             harness.poster.pasteCount == 1
         }
         XCTAssertTrue(didPaste)
+        let temporaryPayload = try XCTUnwrap(
+            harness.pasteboard.successfulWrites.first?.first
+        )
+        XCTAssertEqual(
+            temporaryPayload.representations.first {
+                $0.typeIdentifier == UTType.gif.identifier
+            }?.data,
+            gif
+        )
+        XCTAssertFalse(
+            temporaryPayload.representations.contains {
+                $0.typeIdentifier
+                    == NSPasteboard.PasteboardType.rtfd.rawValue
+            }
+        )
         XCTAssertFalse(
             harness.diagnostics.values.contains {
                 switch $0 {
@@ -56,11 +72,14 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
     }
 
     func testCustomPNGAutocompleteSelectionPastesInMessages() async throws {
-        let png = Data([
-            0x89, 0x50, 0x4E, 0x47,
-            0x0D, 0x0A, 0x1A, 0x0A,
-            0x01
-        ])
+        let sourceRoot = try TestSupport.makeTemporaryDirectory()
+        temporaryRoots.append(sourceRoot)
+        let pngURL = try TestSupport.writeImage(
+            to: sourceRoot.appendingPathComponent("source.png"),
+            width: 16,
+            height: 12
+        )
+        let png = try Data(contentsOf: pngURL)
         let fixture = try makeMediaFixture(data: png, filename: "bufo.png")
         let harness = try makeHarness(
             items: [
@@ -87,10 +106,335 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
             keySnapshot(keyCode: RuntimeKeyboardKeyCode.tab)
         )
 
+        // Keep enough room for a cold ImageIO process while guarding against
+        // the former square-redraw path's minute-long codec stall.
+        let didPaste = await eventually(timeout: .seconds(15)) {
+            harness.poster.pasteCount == 1
+        }
+        XCTAssertTrue(didPaste)
+        let temporaryPayload = try XCTUnwrap(
+            harness.pasteboard.successfulWrites.first?.first
+        )
+        if #available(macOS 15.0, *) {
+            XCTAssertEqual(
+                temporaryPayload.representations.first?.typeIdentifier,
+                NSPasteboard.PasteboardType.rtfd.rawValue
+            )
+            XCTAssertFalse(
+                temporaryPayload.representations.contains {
+                    $0.typeIdentifier == UTType.png.identifier
+                        || $0.typeIdentifier == UTType.tiff.identifier
+                }
+            )
+        } else {
+            XCTAssertEqual(
+                temporaryPayload.representations.first?.typeIdentifier,
+                UTType.png.identifier
+            )
+        }
+    }
+
+    func testSuccessfulStaticGlyphDoesNotBuildPhotoFallback() async throws {
+        let sourceRoot = try TestSupport.makeTemporaryDirectory()
+        temporaryRoots.append(sourceRoot)
+        let pngURL = try TestSupport.writeImage(
+            to: sourceRoot.appendingPathComponent("fast.png"),
+            width: 16,
+            height: 12
+        )
+        let png = try Data(contentsOf: pngURL)
+        let fixture = try makeMediaFixture(data: png, filename: "fast.png")
+        let fallbackRecorder = RuntimeMediaPayloadBuilderRecorder()
+        let service = AdaptiveGlyphPayloadService(
+            queueLabel:
+                "com.rajjoshi.MojiPond.tests.fast-static-glyph.\(UUID())",
+            builder: { _ in
+                .text("native glyph")
+            }
+        )
+        let harness = try makeHarness(
+            items: [
+                mediaEmoji(
+                    shortcode: "bufo",
+                    mediaType: .png,
+                    relativePath: fixture.relativePath,
+                    data: png
+                )
+            ],
+            targetText: ":bu",
+            bundleIdentifier: messages,
+            managedMediaRoot: fixture.root,
+            adaptiveGlyphPayloadService: service,
+            managedMediaPayloadBuilder: { resolved in
+                fallbackRecorder.build(resolved)
+            }
+        )
+
+        harness.worker.setCaptureEnabled(true)
+        type(":bu", into: harness.worker)
+        let didShowSuggestion = await eventually {
+            harness.presenter.latestSuggestion?.rows
+                .contains(where: { $0.shortcode == "bufo" }) == true
+        }
+        XCTAssertTrue(didShowSuggestion)
+
+        harness.worker.enqueue(
+            keySnapshot(keyCode: RuntimeKeyboardKeyCode.tab)
+        )
         let didPaste = await eventually {
             harness.poster.pasteCount == 1
         }
         XCTAssertTrue(didPaste)
+        XCTAssertEqual(fallbackRecorder.buildCount, 0)
+        XCTAssertEqual(
+            harness.pasteboard.successfulWrites.first?
+                .first?
+                .representations
+                .first?
+                .data,
+            Data("native glyph".utf8)
+        )
+    }
+
+    func testCaptureCancellationDoesNotWaitForStaticGlyphBuildAndDropsResult()
+        async throws
+    {
+        let sourceRoot = try TestSupport.makeTemporaryDirectory()
+        temporaryRoots.append(sourceRoot)
+        let pngURL = try TestSupport.writeImage(
+            to: sourceRoot.appendingPathComponent("blocked.png"),
+            width: 16,
+            height: 12
+        )
+        let png = try Data(contentsOf: pngURL)
+        let fixture = try makeMediaFixture(
+            data: png,
+            filename: "blocked.png"
+        )
+        let buildStarted = expectation(description: "glyph build started")
+        let allowBuildToFinish = DispatchSemaphore(value: 0)
+        let service = AdaptiveGlyphPayloadService(
+            queueLabel:
+                "com.rajjoshi.MojiPond.tests.blocked-glyph.\(UUID())",
+            builder: { _ in
+                buildStarted.fulfill()
+                allowBuildToFinish.wait()
+                return .text("late glyph payload")
+            }
+        )
+        defer {
+            allowBuildToFinish.signal()
+        }
+        let harness = try makeHarness(
+            items: [
+                mediaEmoji(
+                    shortcode: "bufo",
+                    mediaType: .png,
+                    relativePath: fixture.relativePath,
+                    data: png
+                )
+            ],
+            targetText: ":bu",
+            bundleIdentifier: messages,
+            managedMediaRoot: fixture.root,
+            adaptiveGlyphPayloadService: service
+        )
+
+        harness.worker.setCaptureEnabled(true)
+        type(":bu", into: harness.worker)
+        let didShowSuggestion = await eventually {
+            harness.presenter.latestSuggestion?.rows
+                .contains(where: { $0.shortcode == "bufo" }) == true
+        }
+        XCTAssertTrue(didShowSuggestion)
+
+        harness.worker.enqueue(
+            keySnapshot(keyCode: RuntimeKeyboardKeyCode.tab)
+        )
+        await fulfillment(of: [buildStarted], timeout: 2)
+        XCTAssertEqual(harness.poster.pasteCount, 0)
+
+        // A synchronous glyph build would hold the runtime queue here. Put
+        // the gate in a visible state so only the queued permission shutdown
+        // can hide it while the dedicated build queue remains blocked.
+        harness.gate.setMode(
+            .suggestions,
+            acceptsTab: true,
+            acceptsReturn: true
+        )
+        harness.worker.setCaptureEnabled(false)
+        let didDisableCapture = await eventually {
+            harness.gate.mode == .hidden
+        }
+        XCTAssertTrue(didDisableCapture)
+
+        allowBuildToFinish.signal()
+        let serviceDrained = expectation(description: "glyph service drained")
+        service.prepare(
+            AdaptiveGlyphPayloadRequest(
+                sourceData: png,
+                sourceType: .png,
+                contentIdentifier:
+                    "mojipond:\(digest(png)):bufo",
+                accessibilityDescription: ":bufo:",
+                plainTextFallback: ":bufo:"
+            )
+        ) {
+            serviceDrained.fulfill()
+        }
+        await fulfillment(of: [serviceDrained], timeout: 2)
+
+        // Both operations use serial queues: the service barrier runs after
+        // its late completion is submitted, and the browser command runs
+        // after that completion is handled by the runtime queue.
+        harness.worker.setCaptureEnabled(true)
+        harness.worker.openBrowser()
+        let didDrainRuntime = await eventually {
+            harness.gate.mode == .browser
+        }
+        XCTAssertTrue(didDrainRuntime)
+        await Task.yield()
+        XCTAssertEqual(harness.poster.pasteCount, 0)
+    }
+
+    func testCaptureCancellationDoesNotWaitForManagedMediaResolveAndDropsResult()
+        async throws
+    {
+        let gif = validGIFData
+        let fixture = try makeMediaFixture(
+            data: gif,
+            filename: "blocked-resolve.gif"
+        )
+        let resolveStarted = expectation(
+            description: "managed media resolve started"
+        )
+        let resolveFinished = expectation(
+            description: "managed media resolve finished"
+        )
+        let allowResolveToFinish = DispatchSemaphore(value: 0)
+        let resolver = RuntimeManagedMediaResolverStub { _, _ in
+            resolveStarted.fulfill()
+            allowResolveToFinish.wait()
+            resolveFinished.fulfill()
+            return RuntimeResolvedManagedMedia(
+                originalData: gif,
+                uniformType: .gif,
+                suggestedFilename: "blocked-resolve.gif",
+                insertionPolicy: .automatic
+            )
+        }
+        defer {
+            allowResolveToFinish.signal()
+        }
+        let harness = try makeHarness(
+            items: [
+                mediaEmoji(
+                    shortcode: "bufo",
+                    mediaType: .gif,
+                    relativePath: fixture.relativePath,
+                    data: gif
+                )
+            ],
+            targetText: ":bu",
+            bundleIdentifier: messages,
+            managedMediaResolver: resolver,
+            managedMediaRoot: fixture.root
+        )
+
+        harness.worker.setCaptureEnabled(true)
+        type(":bu", into: harness.worker)
+        let didShowSuggestion = await eventually {
+            harness.presenter.latestSuggestion?.rows
+                .contains(where: { $0.shortcode == "bufo" }) == true
+        }
+        XCTAssertTrue(didShowSuggestion)
+
+        harness.worker.enqueue(
+            keySnapshot(keyCode: RuntimeKeyboardKeyCode.tab)
+        )
+        await fulfillment(of: [resolveStarted], timeout: 2)
+        XCTAssertEqual(harness.poster.pasteCount, 0)
+
+        // Only the queued permission shutdown can hide this manually armed
+        // gate while custom-asset validation remains blocked off-worker.
+        harness.gate.setMode(
+            .suggestions,
+            acceptsTab: true,
+            acceptsReturn: true
+        )
+        harness.worker.setCaptureEnabled(false)
+        let didDisableCapture = await eventually {
+            harness.gate.mode == .hidden
+        }
+        XCTAssertTrue(didDisableCapture)
+        XCTAssertEqual(harness.poster.pasteCount, 0)
+
+        allowResolveToFinish.signal()
+        await fulfillment(of: [resolveFinished], timeout: 2)
+        await Task.yield()
+
+        // The browser command is a runtime-queue barrier after the resolver's
+        // late callback. A cancelled transaction must discard that callback.
+        harness.worker.setCaptureEnabled(true)
+        harness.worker.openBrowser()
+        let didDrainRuntime = await eventually {
+            harness.gate.mode == .browser
+        }
+        XCTAssertTrue(didDrainRuntime)
+        await Task.yield()
+        XCTAssertEqual(harness.poster.pasteCount, 0)
+    }
+
+    func testStaticGlyphFailureFallsBackToOriginalImagePayload()
+        async throws
+    {
+        let png = Data([
+            0x89, 0x50, 0x4E, 0x47,
+            0x0D, 0x0A, 0x1A, 0x0A,
+            0x01
+        ])
+        let fixture = try makeMediaFixture(
+            data: png,
+            filename: "unreadable.png"
+        )
+        let harness = try makeHarness(
+            items: [
+                mediaEmoji(
+                    shortcode: "unreadable",
+                    mediaType: .png,
+                    relativePath: fixture.relativePath,
+                    data: png
+                )
+            ],
+            targetText: ":unreadable:",
+            bundleIdentifier: messages,
+            managedMediaRoot: fixture.root
+        )
+
+        harness.worker.setCaptureEnabled(true)
+        type(":unreadable:", into: harness.worker)
+
+        let didPaste = await eventually {
+            harness.poster.pasteCount == 1
+        }
+        XCTAssertTrue(didPaste)
+        let temporaryPayload = try XCTUnwrap(
+            harness.pasteboard.successfulWrites.first?.first
+        )
+        XCTAssertEqual(
+            temporaryPayload.representations.first?.typeIdentifier,
+            UTType.png.identifier
+        )
+        XCTAssertEqual(
+            temporaryPayload.representations.first?.data,
+            png
+        )
+        XCTAssertFalse(
+            temporaryPayload.representations.contains {
+                $0.typeIdentifier
+                    == NSPasteboard.PasteboardType.rtfd.rawValue
+            }
+        )
     }
 
     func testSuccessfulPasteSurfacesClipboardRestoreFailure() async throws {
@@ -639,7 +983,15 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
         items: [EmojiItem] = [],
         targetText: String,
         bundleIdentifier: String,
+        managedMediaResolver:
+            any RuntimeManagedMediaResolving =
+                RuntimeManagedMediaResolver(),
         managedMediaRoot: URL? = nil,
+        adaptiveGlyphPayloadService:
+            AdaptiveGlyphPayloadService = AdaptiveGlyphPayloadService(),
+        managedMediaPayloadBuilder:
+            @escaping @Sendable (RuntimeResolvedManagedMedia) ->
+                PasteboardItemPayload = { $0.pasteboardPayload },
         mediaCoordinator:
             (any RuntimeMediaCommandCoordinating)? = nil,
         networkOptions: MediaCommandNetworkOptions = .offlineOnly,
@@ -706,7 +1058,10 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
             frontmostApplication: FixedFrontmostApplicationProvider(
                 value: bundleIdentifier
             ),
+            managedMediaResolver: managedMediaResolver,
             managedMediaRoot: managedMediaRoot,
+            adaptiveGlyphPayloadService: adaptiveGlyphPayloadService,
+            managedMediaPayloadBuilder: managedMediaPayloadBuilder,
             mediaCommandCoordinator: mediaCoordinator,
             diagnosticHandler: { diagnostic in
                 diagnostics.append(diagnostic)
@@ -964,6 +1319,53 @@ private struct FixedFrontmostApplicationProvider:
 
     func bundleIdentifier() -> String? {
         value
+    }
+}
+
+private struct RuntimeManagedMediaResolverStub:
+    RuntimeManagedMediaResolving,
+    Sendable
+{
+    let handler: @Sendable (
+        MediaEmojiContent,
+        URL
+    ) throws -> RuntimeResolvedManagedMedia
+
+    init(
+        handler: @escaping @Sendable (
+            MediaEmojiContent,
+            URL
+        ) throws -> RuntimeResolvedManagedMedia
+    ) {
+        self.handler = handler
+    }
+
+    func resolve(
+        _ media: MediaEmojiContent,
+        beneath managedRoot: URL
+    ) throws -> RuntimeResolvedManagedMedia {
+        try handler(media, managedRoot)
+    }
+}
+
+private final class RuntimeMediaPayloadBuilderRecorder:
+    @unchecked Sendable
+{
+    private let lock = NSLock()
+    private var storage = 0
+
+    var buildCount: Int {
+        lock.withLock { storage }
+    }
+
+    func build(
+        _ resolved: RuntimeResolvedManagedMedia
+    ) -> PasteboardItemPayload {
+        _ = resolved
+        lock.withLock {
+            storage += 1
+        }
+        return .text("photo fallback")
     }
 }
 

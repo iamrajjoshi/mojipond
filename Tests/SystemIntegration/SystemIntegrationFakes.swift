@@ -205,6 +205,7 @@ final class FakePasteboard: PasteboardAccessing {
     var failedWriteKeepsAttemptedContents = false
     var failedWriteReplacement: [PasteboardItemPayload]?
     private(set) var writeAttempts = 0
+    private(set) var successfulWrites: [[PasteboardItemPayload]] = []
 
     init(items: [PasteboardItemPayload] = []) {
         self.items = items
@@ -246,6 +247,7 @@ final class FakePasteboard: PasteboardAccessing {
             }
             return false
         }
+        successfulWrites.append(items)
         self.items = items
         changeCount += 1
         return true

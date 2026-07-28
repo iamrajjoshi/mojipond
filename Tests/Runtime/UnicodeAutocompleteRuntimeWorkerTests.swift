@@ -76,6 +76,193 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         XCTAssertTrue(selectedInserted)
     }
 
+    func testSuggestionRefreshKeepsVisiblePanelUntilUpdated() async throws {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":fr",
+            settleDelayMilliseconds: 80
+        )
+        harness.worker.setCaptureEnabled(true)
+        type(":f", into: harness.worker)
+        let initialShown = await eventually {
+            harness.gate.mode == .suggestions
+        }
+        XCTAssertTrue(initialShown)
+
+        let updateStart = harness.presenter.updates.count
+        harness.worker.enqueue(
+            keySnapshot(keyCode: 15, characters: "r")
+        )
+        let interceptionSuspended = await eventually(
+            timeout: .milliseconds(50)
+        ) {
+            harness.gate.mode == .hidden
+        }
+        XCTAssertTrue(interceptionSuspended)
+        XCTAssertFalse(
+            harness.presenter.updates.dropFirst(updateStart).contains {
+                guard case .hide = $0 else {
+                    return false
+                }
+                return true
+            }
+        )
+
+        let refreshed = await eventually {
+            harness.presenter.updates.dropFirst(updateStart).contains {
+                guard case .show = $0 else {
+                    return false
+                }
+                return true
+            }
+        }
+        XCTAssertTrue(refreshed)
+
+        let refreshUpdates = harness.presenter.updates.dropFirst(updateStart)
+        XCTAssertFalse(
+            refreshUpdates.contains {
+                guard case .hide = $0 else {
+                    return false
+                }
+                return true
+            }
+        )
+        XCTAssertEqual(harness.gate.mode, .suggestions)
+    }
+
+    func testDelayedStaleRefreshCannotRepaintAfterNewerCharacter()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":fro",
+            presentationDelayMilliseconds: 120
+        )
+        harness.worker.setCaptureEnabled(true)
+        type(":f", into: harness.worker)
+        let initialShown = await eventually {
+            harness.gate.mode == .suggestions
+        }
+        XCTAssertTrue(initialShown)
+
+        let updateStart = harness.presenter.updates.count
+        let captureStart = harness.captureProvider.captureCount
+        harness.worker.enqueue(
+            keySnapshot(keyCode: 15, characters: "r")
+        )
+        let firstRefreshCaptured = await eventually {
+            harness.captureProvider.captureCount > captureStart
+        }
+        XCTAssertTrue(firstRefreshCaptured)
+
+        harness.worker.enqueue(
+            keySnapshot(keyCode: 31, characters: "o")
+        )
+        let didRetainPresentation = await eventually {
+            harness.presenter.updates.dropFirst(updateStart).contains {
+                guard case .retain = $0 else {
+                    return false
+                }
+                return true
+            }
+        }
+        XCTAssertTrue(didRetainPresentation)
+        let revision = try XCTUnwrap(
+            harness.presenter.updates.dropFirst(updateStart)
+                .compactMap { update -> UInt64? in
+                    guard case let .retain(revision) = update else {
+                        return nil
+                    }
+                    return revision
+                }
+                .max()
+        )
+        let latestRefreshShown = await eventually(
+            timeout: .milliseconds(400)
+        ) {
+            harness.presenter.updates.dropFirst(updateStart).contains {
+                guard case let .show(snapshot, _) = $0 else {
+                    return false
+                }
+                return snapshot.revision > revision
+            }
+        }
+
+        XCTAssertTrue(latestRefreshShown)
+        XCTAssertFalse(
+            harness.presenter.updates.dropFirst(updateStart).contains {
+                guard case let .show(snapshot, _) = $0 else {
+                    return false
+                }
+                return snapshot.revision < revision
+            }
+        )
+    }
+
+    func testSuggestionRefreshHidesPanelWhenResultsBecomeEmpty()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":fz"
+        )
+        harness.worker.setCaptureEnabled(true)
+        type(":f", into: harness.worker)
+        let initialShown = await eventually {
+            harness.gate.mode == .suggestions
+        }
+        XCTAssertTrue(initialShown)
+
+        let updateStart = harness.presenter.updates.count
+        harness.worker.enqueue(
+            keySnapshot(keyCode: 6, characters: "z")
+        )
+        let hidden = await eventually {
+            harness.presenter.updates.dropFirst(updateStart).contains {
+                guard case .hide = $0 else {
+                    return false
+                }
+                return true
+            }
+        }
+
+        XCTAssertTrue(hidden)
+        XCTAssertEqual(harness.gate.mode, .hidden)
+    }
+
+    func testSuggestionRefreshCaptureFailureHidesVisiblePanelAndDisablesInterception()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":fr"
+        )
+        harness.worker.setCaptureEnabled(true)
+        type(":f", into: harness.worker)
+        let initialShown = await eventually {
+            harness.gate.mode == .suggestions
+        }
+        XCTAssertTrue(initialShown)
+
+        let updateStart = harness.presenter.updates.count
+        harness.captureProvider.setError(.invalidTokenContext)
+        harness.worker.enqueue(
+            keySnapshot(keyCode: 15, characters: "r")
+        )
+        let hidden = await eventually {
+            harness.presenter.updates.dropFirst(updateStart).contains {
+                guard case .hide = $0 else {
+                    return false
+                }
+                return true
+            }
+        }
+
+        XCTAssertTrue(hidden)
+        try? await Task.sleep(for: .milliseconds(40))
+        XCTAssertEqual(harness.gate.mode, .hidden)
+    }
+
     func testDoubleTriggerOpensLargerLocalBrowser() async throws {
         let harness = try makeHarness(
             items: [
@@ -547,6 +734,7 @@ private struct RuntimeWorkerHarness {
 private final class RuntimeRecordingPresenter: RuntimeSuggestionPresenting {
     private(set) var updates: [RuntimeSuggestionPanelUpdate] = []
     var allowsPresentation = true
+    private var latestRevision: UInt64 = 0
 
     var latestShown: RuntimeSuggestionPanelSnapshot? {
         updates.reversed().lazy.compactMap { update in
@@ -558,6 +746,10 @@ private final class RuntimeRecordingPresenter: RuntimeSuggestionPresenting {
     }
 
     func apply(_ update: RuntimeSuggestionPanelUpdate) {
+        guard update.revision >= latestRevision else {
+            return
+        }
+        latestRevision = update.revision
         updates.append(update)
     }
 
@@ -576,8 +768,8 @@ private final class FixedRuntimeTextCaptureProvider:
     private let target: AccessibilityTextTarget
     private let selectionLocation: Int
     private let caretBounds: CGRect?
-    private let error: RuntimeTextCaptureError?
     private let lock = NSLock()
+    private var error: RuntimeTextCaptureError?
     private var storedCaptureCount = 0
 
     init(
@@ -598,16 +790,23 @@ private final class FixedRuntimeTextCaptureProvider:
         }
     }
 
+    func setError(_ error: RuntimeTextCaptureError?) {
+        lock.withLock {
+            self.error = error
+        }
+    }
+
     func capture(
         expectedToken: String,
         trigger: Character
     ) throws -> RuntimeTextCapture {
         _ = trigger
-        lock.withLock {
+        let capturedError = lock.withLock {
             storedCaptureCount += 1
+            return error
         }
-        if let error {
-            throw error
+        if let capturedError {
+            throw capturedError
         }
         let length = expectedToken.utf16.count
         let tokenLocation = selectionLocation - length

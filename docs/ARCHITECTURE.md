@@ -212,6 +212,16 @@ SHA-256, and magic-byte checks against the imported asset. Remote downloads
 are likewise size-, content-type-, and signature-checked. Failure leaves the
 source token intact and publishes a copy-fallback diagnostic.
 
+On macOS 15 or later, a single-frame custom image then passes through the
+adaptive-glyph bridge. It is orientation-normalized, bounded while preserving
+its aspect ratio, encoded as a metadata-bearing HEIC, validated by
+`NSAdaptiveImageGlyph`, and exposed to Messages as RTFD plus a plain-text
+shortcode fallback. The successful pasteboard item deliberately omits raw
+PNG/TIFF representations so Messages does not prefer photo semantics.
+Multi-frame assets, macOS 14, and any rejected conversion use the unchanged
+validated media payload instead. This path adds no permission beyond the
+existing Accessibility, Input Monitoring, and Event Posting requirements.
+
 ## Network boundaries
 
 Every online feature has its own preference and defaults to off:
