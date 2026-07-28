@@ -6,19 +6,7 @@ struct MojiPondApp: App {
 
     var body: some Scene {
         Settings {
-            SettingsPlaceholderView()
+            SettingsRootView(appState: appDelegate.appState)
         }
     }
 }
-
-private struct SettingsPlaceholderView: View {
-    var body: some View {
-        ContentUnavailableView {
-            Label("MojiPond is getting ready", systemImage: "water.waves")
-        } description: {
-            Text("Open MojiPond from the menu bar.")
-        }
-        .frame(width: 520, height: 360)
-    }
-}
-

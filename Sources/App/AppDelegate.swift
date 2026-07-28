@@ -3,12 +3,20 @@ import SwiftUI
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    let appState = AppState()
+
     private var statusItem: NSStatusItem?
-    private var welcomeWindow: NSWindow?
+    private var onboardingWindow: NSWindow?
+    private var libraryWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        appState.start()
         configureStatusItem()
-        showWelcome()
+        if appState.hasCompletedOnboarding {
+            showLibrary()
+        } else {
+            showOnboarding()
+        }
     }
 
     private func configureStatusItem() {
@@ -20,7 +28,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.toolTip = "MojiPond"
 
         let menu = NSMenu()
-        menu.addItem(withTitle: "Open MojiPond", action: #selector(showWelcome), keyEquivalent: "")
+        let enabledItem = NSMenuItem(
+            title: "MojiPond Enabled",
+            action: #selector(toggleEnabled),
+            keyEquivalent: ""
+        )
+        enabledItem.state = appState.isEnabled ? .on : .off
+        menu.addItem(enabledItem)
+        menu.addItem(
+            withTitle: appState.statusSummary,
+            action: nil,
+            keyEquivalent: ""
+        ).isEnabled = false
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Open Library", action: #selector(showLibrary), keyEquivalent: "o")
+        menu.addItem(withTitle: "Setup & Permissions", action: #selector(showOnboarding), keyEquivalent: "")
+        menu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit MojiPond", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.menu = menu
@@ -28,58 +51,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc
-    private func showWelcome() {
-        if let welcomeWindow {
-            welcomeWindow.makeKeyAndOrderFront(nil)
+    private func toggleEnabled(_ sender: NSMenuItem) {
+        appState.isEnabled.toggle()
+        sender.state = appState.isEnabled ? .on : .off
+        rebuildStatusMenu()
+    }
+
+    @objc
+    private func showOnboarding() {
+        if let onboardingWindow {
+            onboardingWindow.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
 
-        let controller = NSHostingController(rootView: WelcomeView())
+        let controller = NSHostingController(
+            rootView: OnboardingView(appState: appState) { [weak self] in
+                self?.onboardingWindow?.orderOut(nil)
+                self?.showLibrary()
+            }
+        )
         let window = NSWindow(contentViewController: controller)
-        window.title = "MojiPond"
+        window.title = "Set Up MojiPond"
         window.styleMask = [.titled, .closable, .miniaturizable]
-        window.setContentSize(NSSize(width: 720, height: 480))
+        window.setContentSize(NSSize(width: 760, height: 570))
         window.center()
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        welcomeWindow = window
+        onboardingWindow = window
     }
-}
 
-private struct WelcomeView: View {
-    var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "water.waves")
-                .font(.system(size: 54, weight: .medium))
-                .foregroundStyle(.tint)
-                .accessibilityHidden(true)
-
-            VStack(spacing: 8) {
-                Text("Welcome to MojiPond")
-                    .font(.largeTitle.weight(.semibold))
-                Text("Your pond for every emote.")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-            }
-
-            Text("Type familiar shortcodes anywhere on your Mac, and keep your own custom emoji packs close at hand.")
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 470)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 12) {
-                Label("Local first", systemImage: "lock.shield")
-                Label("Keyboard driven", systemImage: "keyboard")
-                Label("Custom packs", systemImage: "square.grid.2x2")
-            }
-            .font(.callout)
-            .foregroundStyle(.secondary)
+    @objc
+    private func showLibrary() {
+        if let libraryWindow {
+            libraryWindow.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
         }
-        .padding(48)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.background)
+
+        let controller = NSHostingController(
+            rootView: LibraryShellView(appState: appState)
+        )
+        let window = NSWindow(contentViewController: controller)
+        window.title = "MojiPond Library"
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.setContentSize(NSSize(width: 960, height: 660))
+        window.minSize = NSSize(width: 840, height: 560)
+        window.center()
+        window.isReleasedWhenClosed = false
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        libraryWindow = window
+    }
+
+    @objc
+    private func showSettings() {
+        NSApp.sendAction(
+            Selector(("showSettingsWindow:")),
+            to: nil,
+            from: nil
+        )
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func rebuildStatusMenu() {
+        statusItem?.menu = nil
+        statusItem = nil
+        configureStatusItem()
     }
 }
-
