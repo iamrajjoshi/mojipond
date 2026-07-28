@@ -60,17 +60,18 @@ enum EmojiLibrarySearchAdapter {
             source = .local
         }
 
-        let items = try pack.items.enumerated().map { order, libraryItem in
+        let items = try pack.items.map { libraryItem in
             EmojiItem(
                 id: libraryItem.id.uuidString,
                 shortcode: libraryItem.shortcode,
                 name: libraryItem.displayName ?? libraryItem.shortcode.rawValue,
                 aliases: libraryItem.aliases.map(\.rawValue),
-                category: "Custom",
+                keywords: libraryItem.tags,
+                category: libraryItem.category ?? "Custom",
                 content: try content(from: libraryItem),
                 packID: packID,
                 packPriority: priority,
-                order: order
+                order: libraryItem.order
             )
         }
 

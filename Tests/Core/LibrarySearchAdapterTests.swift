@@ -16,11 +16,15 @@ final class LibrarySearchAdapterTests: XCTestCase {
                     shortcode: try Shortcode(validating: "wave"),
                     aliases: [try Shortcode(validating: "hello")],
                     displayName: "Waving hand",
+                    tags: ["greeting", "hello"],
+                    category: "Gestures",
+                    order: 7,
                     payload: .unicode("👋")
                 ),
                 LibraryEmoji(
                     id: secondID,
                     shortcode: try Shortcode(validating: "lizard"),
+                    order: 12,
                     payload: .unicode("🦎")
                 )
             ]
@@ -41,9 +45,12 @@ final class LibrarySearchAdapterTests: XCTestCase {
         XCTAssertEqual(catalog[0].id, packID.uuidString)
         XCTAssertEqual(catalog[0].priority, 9)
         XCTAssertEqual(catalog[0].items.map(\.id), [firstID.uuidString, secondID.uuidString])
-        XCTAssertEqual(catalog[0].items.map(\.order), [0, 1])
+        XCTAssertEqual(catalog[0].items.map(\.order), [7, 12])
         XCTAssertEqual(catalog[0].items[0].aliases, ["hello"])
         XCTAssertEqual(catalog[0].items[0].name, "Waving hand")
+        XCTAssertEqual(catalog[0].items[0].keywords, ["greeting", "hello"])
+        XCTAssertEqual(catalog[0].items[0].category, "Gestures")
+        XCTAssertEqual(catalog[0].items[1].category, "Custom")
         XCTAssertEqual(catalog[0].items[0].packPriority, 9)
         guard case let .unicode(content) = catalog[0].items[0].content else {
             return XCTFail("Expected Unicode content")
