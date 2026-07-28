@@ -5,6 +5,11 @@ protocol GiphyAPIKeyProviding: Sendable {
     func apiKey() throws -> String
 }
 
+protocol GiphyAPIKeyStoring: GiphyAPIKeyProviding {
+    func save(_ value: String) throws
+    func delete() throws
+}
+
 struct EnvironmentGiphyAPIKeyProvider: GiphyAPIKeyProviding {
     private let environment: @Sendable () -> [String: String]
 
@@ -24,7 +29,10 @@ struct EnvironmentGiphyAPIKeyProvider: GiphyAPIKeyProviding {
     }
 }
 
-final class KeychainGiphyAPIKeyStore: GiphyAPIKeyProviding, @unchecked Sendable {
+final class KeychainGiphyAPIKeyStore:
+    GiphyAPIKeyStoring,
+    @unchecked Sendable
+{
     private let service: String
     private let account: String
 
