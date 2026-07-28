@@ -212,6 +212,219 @@ actor LibraryStore {
         return installedPack
     }
 
+    /// Appends reviewed import candidates to an existing pack. New files are
+    /// validated into a private staging directory before any managed asset is
+    /// moved. If persistence fails, every newly-created managed file is removed.
+    @discardableResult
+    func append(
+        _ resolved: ResolvedPackImport,
+        to packID: UUID
+    ) throws -> EmojiPack {
+        var library = try loadIfNeeded()
+        guard library.packs.contains(where: { $0.id == packID }) else {
+            throw LibraryStoreError.packNotFound(packID)
+        }
+
+        try prepareDirectories()
+        let packAssetsURL = assetsURL.appendingPathComponent(
+            packID.uuidString.lowercased(),
+            isDirectory: true
+        )
+        try ensureSafeDirectory(packAssetsURL)
+        let stagingURL = rootURL.appendingPathComponent(
+            ".staging-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try fileManager.createDirectory(
+            at: stagingURL,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        defer { try? fileManager.removeItem(at: stagingURL) }
+
+        let appendedItems = try stageImportedItems(
+            resolved.pack.items,
+            for: packID,
+            at: stagingURL
+        )
+        for index in library.packs.indices {
+            library.packs[index].items.removeAll {
+                resolved.existingItemIDsToReplace.contains($0.id)
+            }
+        }
+        guard let targetIndex = library.packs.firstIndex(where: { $0.id == packID }) else {
+            throw LibraryStoreError.packNotFound(packID)
+        }
+        library.packs[targetIndex].items.append(contentsOf: appendedItems)
+        for index in library.packs[targetIndex].items.indices {
+            library.packs[targetIndex].items[index].order = index
+        }
+        try touchPack(at: targetIndex, in: &library)
+        library.updatedAt = Date()
+        _ = try library.validated()
+
+        var createdURLs: [URL] = []
+        do {
+            for filename in Set(
+                appendedItems.compactMap { $0.payload.asset?.relativePath }
+                    .map { URL(fileURLWithPath: $0).lastPathComponent }
+            ) {
+                let stagedURL = stagingURL.appendingPathComponent(filename)
+                let finalURL = packAssetsURL.appendingPathComponent(filename)
+                if fileManager.fileExists(atPath: finalURL.path) {
+                    let expected = try validator.validate(fileAt: stagedURL)
+                    guard try validator.validate(fileAt: finalURL) == expected else {
+                        throw LibraryStoreError.copyVerificationFailed(filename)
+                    }
+                } else {
+                    try fileManager.moveItem(at: stagedURL, to: finalURL)
+                    createdURLs.append(finalURL)
+                }
+            }
+            try persist(library)
+        } catch {
+            for url in createdURLs {
+                try? fileManager.removeItem(at: url)
+            }
+            throw error
+        }
+        cachedLibrary = library
+        try cleanupUnreferencedAssets(in: library)
+        return library.packs[targetIndex]
+    }
+
+    /// Replaces the contents of an existing pack after a reviewed re-import.
+    /// The pack's runtime identity, order, enabled state, and existing
+    /// attribution remain stable. Its entire asset directory is swapped before
+    /// the manifest is committed and restored if persistence fails.
+    @discardableResult
+    func replacePackContents(
+        _ resolved: ResolvedPackImport,
+        in packID: UUID
+    ) throws -> EmojiPack {
+        var library = try loadIfNeeded()
+        guard let targetIndex = library.packs.firstIndex(where: { $0.id == packID }) else {
+            throw LibraryStoreError.packNotFound(packID)
+        }
+        let existingPack = library.packs[targetIndex]
+
+        try prepareDirectories()
+        let stagingURL = rootURL.appendingPathComponent(
+            ".staging-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        let backupURL = rootURL.appendingPathComponent(
+            ".backup-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        let finalPackAssetsURL = assetsURL.appendingPathComponent(
+            packID.uuidString.lowercased(),
+            isDirectory: true
+        )
+        try fileManager.createDirectory(
+            at: stagingURL,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        var stagingStillExists = true
+        var backupStillExists = false
+        defer {
+            if stagingStillExists {
+                try? fileManager.removeItem(at: stagingURL)
+            }
+            if backupStillExists {
+                try? fileManager.removeItem(at: backupURL)
+            }
+        }
+
+        var replacementItems = try stageImportedItems(
+            resolved.pack.items,
+            for: packID,
+            at: stagingURL
+        )
+        for index in replacementItems.indices {
+            replacementItems[index].order = index
+        }
+
+        for index in library.packs.indices where index != targetIndex {
+            library.packs[index].items.removeAll {
+                resolved.existingItemIDsToReplace.contains($0.id)
+            }
+        }
+
+        var updatedManifest = existingPack.manifest
+        updatedManifest.version = resolved.pack.manifest.version
+        if updatedManifest.author == nil {
+            updatedManifest.author = resolved.pack.manifest.author
+        }
+        if updatedManifest.description == nil {
+            updatedManifest.description = resolved.pack.manifest.description
+        }
+        if updatedManifest.sourceURL == nil {
+            updatedManifest.sourceURL = resolved.pack.manifest.sourceURL
+        }
+        if updatedManifest.license == nil {
+            updatedManifest.license = resolved.pack.manifest.license
+        }
+        var updatedMetadata = existingPack.updateMetadata
+        updatedMetadata.lastUpdatedAt = Date()
+        updatedMetadata.lastCheckedAt = Date()
+        updatedMetadata.sourceRevision =
+            resolved.pack.updateMetadata.sourceRevision
+                ?? existingPack.updateMetadata.sourceRevision
+        updatedMetadata.sourceETag =
+            resolved.pack.updateMetadata.sourceETag
+                ?? existingPack.updateMetadata.sourceETag
+        updatedMetadata.contentSHA256 = Self.packDigest(items: replacementItems)
+
+        library.packs[targetIndex] = EmojiPack(
+            id: existingPack.id,
+            name: existingPack.name,
+            manifest: updatedManifest,
+            priority: existingPack.priority,
+            isEnabled: existingPack.isEnabled,
+            source: existingPack.source,
+            updateMetadata: updatedMetadata,
+            items: replacementItems
+        )
+        library.updatedAt = Date()
+        _ = try library.validated()
+
+        let hadExistingAssets = fileManager.fileExists(
+            atPath: finalPackAssetsURL.path
+        )
+        if hadExistingAssets {
+            try ensureSafeDirectory(finalPackAssetsURL)
+            try fileManager.moveItem(at: finalPackAssetsURL, to: backupURL)
+            backupStillExists = true
+        }
+        do {
+            try fileManager.moveItem(at: stagingURL, to: finalPackAssetsURL)
+            stagingStillExists = false
+            try persist(library)
+        } catch {
+            try? fileManager.removeItem(at: finalPackAssetsURL)
+            if backupStillExists {
+                try? fileManager.moveItem(at: backupURL, to: finalPackAssetsURL)
+                backupStillExists = false
+            }
+            throw error
+        }
+
+        cachedLibrary = library
+        if backupStillExists {
+            do {
+                try fileManager.removeItem(at: backupURL)
+                backupStillExists = false
+            } catch {
+                // The committed pack is valid. The deferred cleanup gets one
+                // more chance without reporting a failed update after commit.
+            }
+        }
+        try cleanupUnreferencedAssets(in: library)
+        return library.packs[targetIndex]
+    }
+
     func setPackEnabled(_ packID: UUID, isEnabled: Bool) throws {
         var library = try loadIfNeeded()
         guard let index = library.packs.firstIndex(where: { $0.id == packID }) else {
@@ -734,6 +947,71 @@ actor LibraryStore {
                     )
                 }
             }
+        }
+    }
+
+    private func stageImportedItems(
+        _ candidates: [PreparedEmoji],
+        for packID: UUID,
+        at stagingURL: URL
+    ) throws -> [LibraryEmoji] {
+        var copiedFilenames = Set<String>()
+        return try candidates.enumerated().map { index, candidate in
+            let currentValidation = try validator.validate(
+                fileAt: candidate.sourceURL
+            )
+            guard currentValidation == candidate.asset else {
+                throw LibraryStoreError.sourceChanged(candidate.sourceURL)
+            }
+            let filename = [
+                currentValidation.digest.sha256,
+                currentValidation.format.preferredFilenameExtension
+            ].joined(separator: ".")
+            let stagedAssetURL = stagingURL.appendingPathComponent(
+                filename,
+                isDirectory: false
+            )
+            if copiedFilenames.insert(filename).inserted {
+                try fileManager.copyItem(
+                    at: candidate.sourceURL,
+                    to: stagedAssetURL
+                )
+                try fileManager.setAttributes(
+                    [.posixPermissions: 0o600],
+                    ofItemAtPath: stagedAssetURL.path
+                )
+                guard try validator.validate(fileAt: stagedAssetURL)
+                    == currentValidation else {
+                    throw LibraryStoreError.copyVerificationFailed(
+                        candidate.sourceFilename
+                    )
+                }
+            }
+            return LibraryEmoji(
+                id: candidate.id,
+                shortcode: candidate.shortcode,
+                aliases: candidate.aliases,
+                displayName: candidate.displayName,
+                tags: candidate.tags,
+                category: candidate.category,
+                order: index,
+                sourceFilename: candidate.sourceFilename,
+                payload: .asset(
+                    StoredAsset(
+                        relativePath: [
+                            "assets",
+                            packID.uuidString.lowercased(),
+                            filename
+                        ].joined(separator: "/"),
+                        format: currentValidation.format,
+                        sha256: currentValidation.digest.sha256,
+                        byteCount: currentValidation.digest.byteCount,
+                        pixelWidth: currentValidation.pixelWidth,
+                        pixelHeight: currentValidation.pixelHeight,
+                        frameCount: currentValidation.frameCount
+                    )
+                )
+            )
         }
     }
 
