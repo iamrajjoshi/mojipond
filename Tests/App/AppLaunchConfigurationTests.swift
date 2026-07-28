@@ -20,6 +20,7 @@ final class AppLaunchConfigurationTests: XCTestCase {
             configuration.uiTestPermissionScenario,
             .notRequested
         )
+        XCTAssertNil(configuration.uiTestAppearance)
         XCTAssertNil(configuration.ephemeralRootURL)
         XCTAssertEqual(
             configuration.initialPresentation(
@@ -45,6 +46,7 @@ final class AppLaunchConfigurationTests: XCTestCase {
             configuration.uiTestPermissionScenario,
             .notRequested
         )
+        XCTAssertEqual(configuration.uiTestAppearance, .light)
         XCTAssertEqual(
             configuration.ephemeralRootURL,
             URL(
@@ -86,7 +88,9 @@ final class AppLaunchConfigurationTests: XCTestCase {
                 AppLaunchConfiguration.uiTestScreenArgument,
                 "import-preview",
                 AppLaunchConfiguration.uiTestPermissionArgument,
-                "revoked"
+                "revoked",
+                AppLaunchConfiguration.uiTestAppearanceArgument,
+                "dark"
             ],
             processIdentifier: 8,
             temporaryDirectory: URL(fileURLWithPath: "/private/tmp")
@@ -98,6 +102,7 @@ final class AppLaunchConfigurationTests: XCTestCase {
             configuration.uiTestPermissionScenario,
             .revoked
         )
+        XCTAssertEqual(configuration.uiTestAppearance, .dark)
         let appState = configuration.makeAppState()
         XCTAssertFalse(appState.launchAtLoginEnabled)
     }
@@ -110,6 +115,8 @@ final class AppLaunchConfigurationTests: XCTestCase {
                 AppLaunchConfiguration.uiTestScreenArgument,
                 "unknown",
                 AppLaunchConfiguration.uiTestPermissionArgument,
+                "unknown",
+                AppLaunchConfiguration.uiTestAppearanceArgument,
                 "unknown"
             ],
             processIdentifier: 9,
@@ -121,6 +128,7 @@ final class AppLaunchConfigurationTests: XCTestCase {
             configuration.uiTestPermissionScenario,
             .notRequested
         )
+        XCTAssertEqual(configuration.uiTestAppearance, .light)
     }
 
     func testCompletedProductionLaunchStaysInMenuBarByDefault() {

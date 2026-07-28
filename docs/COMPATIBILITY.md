@@ -108,18 +108,18 @@ Signing identities installed: none
 
 | Capability | State | Evidence or remaining proof |
 | --- | --- | --- |
-| Onboarding permission states and library-only path | Automated | App-state and permission-center tests |
+| Onboarding permission states and library-only path | Manually verified | The unlocked five-test app UI suite rendered and captured onboarding, not-requested, denied, granted, revoked, and library-only states without opening System Settings or requesting TCC access |
 | Installed Release permission preflight | Manually verified | `/Applications/MojiPond.app --print-permissions-and-quit` reported Accessibility, Input Monitoring, and Event Posting granted after the final Release install; denial, revocation, and re-grant still require an interactive System Settings audit |
-| First install, denial, grant, revocation, re-grant, and relaunch | Pending | Deterministic permission providers cover every rendered state, and the installed app currently preflights all three permissions as granted; changing real TCC state requires explicit user action in System Settings and has not been recorded |
+| First install, denial, grant, revocation, re-grant, and relaunch | Pending | The UI suite now proves every rendered state and the installed app currently preflights all three permissions as granted; changing real TCC state still requires explicit user action in System Settings and has not been recorded |
 | Settings persistence and legacy migration | Automated | Preferences-store tests |
 | GIPHY Keychain settings editor | Pending | Model add, replace, status, and remove behavior is covered by the recorded deterministic suite; a real Keychain/UI check remains pending |
 | Keyboard navigation of suggestion surface | Automated | Runtime keyboard, parser, and worker tests |
-| VoiceOver labels and traversal | Pending | Deterministic tests cover runtime preview labels, selected-state announcements, loading, and failure semantics; an interactive VoiceOver traversal audit is not yet recorded |
-| Light and dark appearance | Pending | No screenshot audit recorded |
-| Required documentation screenshot set | Pending | Deterministic routes exist for onboarding permission states, Library, import preview, Settings, caret suggestions, and the full browser in light/dark appearances; the UI-test targets compile, but an unlocked run, visual inspection, and committed screenshots have not yet been completed |
+| VoiceOver labels and traversal | Pending | Deterministic tests cover runtime preview labels, selected-state announcements, loading, and failure semantics. The unlocked UI suite additionally requires exactly one accessible `Import Pack` action after removing a duplicate toolbar accessibility element; an interactive spoken VoiceOver traversal is still pending |
+| Light and dark appearance | Manually verified | The unlocked app UI suite rendered separate forced light and dark Library import surfaces, asserted that their PNG data differs, and passed 5/5. Every exported capture was visually inspected |
+| Required documentation screenshot set | Pending | Ten opaque, window-scoped captures for onboarding, permission state, Library, light/dark import, import preview, Settings, caret suggestions, browser, and the native fixture were visually accepted under `docs/screenshots/`. A real unsent-Messages GIF-behavior capture is still required |
 | Reduced Motion | Automated | Runtime animated media falls back to a validated static first frame and interaction transitions disable animation; deterministic policy tests passed, while a manual setting audit remains pending |
 | Reduced Transparency and increased contrast | Automated | Runtime surfaces provide solid-material and stronger-border fallbacks and adaptive colors. Deterministic tests verify warning/error text at 4.5:1 or greater against native light, dark, and high-contrast backgrounds; a manual setting audit remains pending |
-| Window resizing and smallest supported size | Automated | Onboarding, Library, and Settings use scrollable or adaptive layouts with explicit minimum sizes; both UI-test schemes compiled, while an unlocked screenshot and interaction audit remains pending |
+| Window resizing and smallest supported size | Automated | Onboarding, Library, and Settings use scrollable or adaptive layouts with explicit minimum sizes. The unlocked app suite passed 5/5 and the native-field fixture passed 2/2 with visually accepted window captures; interactive resizing across the full range remains pending |
 | Multi-display and scaled-display behavior | Pending | Geometry is automated; physical displays are not |
 
 ## Performance

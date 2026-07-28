@@ -30,7 +30,10 @@ final class IntegrationFixtureUITests: XCTestCase {
         XCTAssertTrue(
             secureTextField.waitForExistence(timeout: 5)
         )
-        attachScreen(named: "integration-fixture")
+        attachScreen(
+            named: "integration-fixture",
+            element: application.windows.firstMatch
+        )
 
         plainTextField.click()
         plainTextField.typeText("ordinary :wave:")
@@ -99,9 +102,12 @@ final class IntegrationFixtureUITests: XCTestCase {
         return application
     }
 
-    private func attachScreen(named name: String) {
+    private func attachScreen(
+        named name: String,
+        element: XCUIElement
+    ) {
         let attachment = XCTAttachment(
-            screenshot: XCUIScreen.main.screenshot()
+            screenshot: element.screenshot()
         )
         attachment.name = name
         attachment.lifetime = .keepAlways

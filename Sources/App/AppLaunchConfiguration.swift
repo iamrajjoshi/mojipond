@@ -17,10 +17,17 @@ struct AppLaunchConfiguration: Equatable {
         case revoked
     }
 
+    enum UITestAppearance: String {
+        case light
+        case dark
+    }
+
     static let uiTestingFlag = "--mojipond-ui-testing"
     static let uiTestScreenArgument = "--mojipond-ui-test-screen"
     static let uiTestPermissionArgument =
         "--mojipond-ui-test-permissions"
+    static let uiTestAppearanceArgument =
+        "--mojipond-ui-test-appearance"
     static let openLibraryArgument = "--mojipond-open-library"
 
     enum InitialPresentation: Equatable {
@@ -32,6 +39,7 @@ struct AppLaunchConfiguration: Equatable {
     let isUITesting: Bool
     let initialScreen: InitialScreen?
     let uiTestPermissionScenario: UITestPermissionScenario
+    let uiTestAppearance: UITestAppearance?
     let ephemeralRootURL: URL?
     let opensLibraryAtLaunch: Bool
 
@@ -53,6 +61,7 @@ struct AppLaunchConfiguration: Equatable {
                 isUITesting: false,
                 initialScreen: nil,
                 uiTestPermissionScenario: .notRequested,
+                uiTestAppearance: nil,
                 ephemeralRootURL: nil,
                 opensLibraryAtLaunch:
                     arguments.contains(openLibraryArgument)
@@ -70,6 +79,11 @@ struct AppLaunchConfiguration: Equatable {
             in: arguments
         ).flatMap(UITestPermissionScenario.init)
             ?? .notRequested
+        let appearance = value(
+            following: uiTestAppearanceArgument,
+            in: arguments
+        ).flatMap(UITestAppearance.init)
+            ?? .light
         let ephemeralRootURL = temporaryDirectory
             .appendingPathComponent(
                 "MojiPond-UI-Tests-\(processIdentifier)",
@@ -80,6 +94,7 @@ struct AppLaunchConfiguration: Equatable {
             isUITesting: true,
             initialScreen: initialScreen,
             uiTestPermissionScenario: permissionScenario,
+            uiTestAppearance: appearance,
             ephemeralRootURL: ephemeralRootURL,
             opensLibraryAtLaunch: initialScreen == .library
         )

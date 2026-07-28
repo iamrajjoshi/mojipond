@@ -69,6 +69,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if launchConfiguration.isUITesting {
+            if let appearance = launchConfiguration.uiTestAppearance {
+                NSApp.appearance = NSAppearance(
+                    named: appearance == .light
+                        ? .aqua
+                        : .darkAqua
+                )
+            }
             configureUITestServices()
             configureStatusItem()
             switch launchConfiguration.initialScreen {
