@@ -60,10 +60,15 @@ final class FakeAccessibilityTextSystem: AccessibilityTextSystem {
     var text = ""
     var selection = NSRange(location: 0, length: 0)
     var caretBounds: CGRect? = CGRect(x: 20, y: 30, width: 1, height: 18)
+    var boundsByRange: [NSRange: CGRect] = [:]
+    var missingBoundsRanges: Set<NSRange> = []
+    var boundsErrorsByRange: [NSRange: AccessibilityTextError] = [:]
     var subrole: String?
     var subroleError: Error?
     var supportsRangedStrings = true
+    var rangedStringError: AccessibilityTextError?
     var reportedCharacterCount: Int?
+    var characterCountError: AccessibilityTextError?
     var settableAttributes: Set<String> = [
         "AXSelectedTextRange",
         "AXSelectedText"
@@ -73,6 +78,7 @@ final class FakeAccessibilityTextSystem: AccessibilityTextSystem {
     private(set) var replacements: [String] = []
     private(set) var fullValueReadCount = 0
     private(set) var rangedStringReads: [NSRange] = []
+    private(set) var boundsReads: [NSRange] = []
 
     init() {
         focusedElementReference = primaryElement
@@ -106,13 +112,19 @@ final class FakeAccessibilityTextSystem: AccessibilityTextSystem {
     func numberOfCharacters(
         in element: AccessibilityElementReference
     ) throws -> Int? {
-        reportedCharacterCount ?? text.utf16.count
+        if let characterCountError {
+            throw characterCountError
+        }
+        return reportedCharacterCount ?? text.utf16.count
     }
 
     func string(
         for range: NSRange,
         in element: AccessibilityElementReference
     ) throws -> String? {
+        if let rangedStringError {
+            throw rangedStringError
+        }
         guard supportsRangedStrings else {
             return nil
         }
@@ -131,7 +143,17 @@ final class FakeAccessibilityTextSystem: AccessibilityTextSystem {
         for range: NSRange,
         in element: AccessibilityElementReference
     ) throws -> CGRect? {
-        caretBounds
+        boundsReads.append(range)
+        if let error = boundsErrorsByRange[range] {
+            throw error
+        }
+        if missingBoundsRanges.contains(range) {
+            return nil
+        }
+        if let bounds = boundsByRange[range] {
+            return bounds
+        }
+        return caretBounds
     }
 
     func subrole(

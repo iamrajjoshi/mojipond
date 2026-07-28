@@ -126,6 +126,31 @@ final class AccessibilityTextAdapterTests: XCTestCase {
         }
     }
 
+    func testMissingSubroleIsTreatedAsOrdinaryEditableText() throws {
+        let missingSubroleErrors: [AccessibilityTextError] = [
+            .unsupportedAttribute(kAXSubroleAttribute),
+            .axFailure(
+                operation: "read text target subrole",
+                code: AXError.noValue.rawValue
+            )
+        ]
+
+        for error in missingSubroleErrors {
+            let system = FakeAccessibilityTextSystem()
+            system.text = ":frog:"
+            system.selection = NSRange(location: 6, length: 0)
+            system.subroleError = error
+            let adapter = AccessibilityTextAdapter(system: system)
+            let target = try adapter.focusedTarget()
+
+            XCTAssertFalse(try adapter.secureStatus(of: target))
+            XCTAssertEqual(
+                try adapter.context(for: target).tokenRange,
+                NSRange(location: 0, length: 6)
+            )
+        }
+    }
+
     func testReplacementCancelsWhenFocusedElementChanges() throws {
         let system = FakeAccessibilityTextSystem()
         system.text = ":frog:"
@@ -157,6 +182,109 @@ final class AccessibilityTextAdapterTests: XCTestCase {
         XCTAssertEqual(context.caretBounds, system.caretBounds)
         XCTAssertEqual(context.tokenRange, NSRange(location: 4, length: 5))
         XCTAssertEqual(context.textFragment, "Say :frog")
+        XCTAssertEqual(system.fullValueReadCount, 0)
+    }
+
+    func testContextFallsBackToPreviousCharacterWhenCollapsedCaretHasNoGeometry()
+        throws
+    {
+        let unavailableErrors = [
+            AXError.noValue,
+            AXError.notEnoughPrecision
+        ]
+
+        for error in unavailableErrors {
+            let system = FakeAccessibilityTextSystem()
+            system.text = "Say :w"
+            system.selection = NSRange(location: 6, length: 0)
+            let collapsedRange = NSRange(location: 6, length: 0)
+            let previousCharacterRange = NSRange(location: 5, length: 1)
+            system.boundsErrorsByRange[collapsedRange] = .axFailure(
+                operation: "read bounds for text range",
+                code: error.rawValue
+            )
+            system.boundsByRange[previousCharacterRange] = CGRect(
+                x: 14,
+                y: 20,
+                width: 8,
+                height: 18
+            )
+            let adapter = AccessibilityTextAdapter(system: system)
+
+            let context = try adapter.context(for: adapter.focusedTarget())
+
+            XCTAssertEqual(
+                context.caretBounds,
+                CGRect(x: 22, y: 20, width: 0, height: 18)
+            )
+            XCTAssertEqual(context.tokenRange, NSRange(location: 4, length: 2))
+            XCTAssertEqual(
+                system.boundsReads,
+                [collapsedRange, previousCharacterRange]
+            )
+        }
+    }
+
+    func testContextFallsBackToBoundedValueWhenRangedStringHasNoValue() throws {
+        let system = FakeAccessibilityTextSystem()
+        system.text = "Say :w"
+        system.selection = NSRange(location: 6, length: 0)
+        system.rangedStringError = .axFailure(
+            operation: "read string for text range",
+            code: AXError.noValue.rawValue
+        )
+        let adapter = AccessibilityTextAdapter(
+            system: system,
+            maximumFallbackDocumentLength: 64
+        )
+
+        let context = try adapter.context(for: adapter.focusedTarget())
+
+        XCTAssertEqual(context.tokenRange, NSRange(location: 4, length: 2))
+        XCTAssertEqual(context.textFragment, "Say :w")
+        XCTAssertEqual(system.fullValueReadCount, 1)
+    }
+
+    func testNoValueCharacterCountFailsClosedWithoutReadingFullValue() throws {
+        let system = FakeAccessibilityTextSystem()
+        system.text = "Say :w"
+        system.selection = NSRange(location: 6, length: 0)
+        system.supportsRangedStrings = false
+        system.characterCountError = .axFailure(
+            operation: "read text character count",
+            code: AXError.noValue.rawValue
+        )
+        let adapter = AccessibilityTextAdapter(system: system)
+
+        XCTAssertThrowsError(
+            try adapter.context(for: adapter.focusedTarget())
+        ) {
+            XCTAssertEqual(
+                $0 as? AccessibilityTextError,
+                .unsupportedAttribute(kAXStringForRangeParameterizedAttribute)
+            )
+        }
+        XCTAssertEqual(system.fullValueReadCount, 0)
+    }
+
+    func testActionableCaretGeometryFailureStillFailsClosed() throws {
+        let system = FakeAccessibilityTextSystem()
+        system.text = "Say :w"
+        system.selection = NSRange(location: 6, length: 0)
+        let collapsedRange = NSRange(location: 6, length: 0)
+        let expectedError = AccessibilityTextError.axFailure(
+            operation: "read bounds for text range",
+            code: AXError.cannotComplete.rawValue
+        )
+        system.boundsErrorsByRange[collapsedRange] = expectedError
+        let adapter = AccessibilityTextAdapter(system: system)
+
+        XCTAssertThrowsError(
+            try adapter.context(for: adapter.focusedTarget())
+        ) {
+            XCTAssertEqual($0 as? AccessibilityTextError, expectedError)
+        }
+        XCTAssertEqual(system.boundsReads, [collapsedRange])
         XCTAssertEqual(system.fullValueReadCount, 0)
     }
 
