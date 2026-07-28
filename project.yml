@@ -29,11 +29,11 @@ targets:
     platform: macOS
     sources:
       - path: Sources
-    resources:
       - path: Resources
         excludes:
           - Info.plist
           - MojiPond.entitlements
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.rajjoshi.MojiPond
@@ -76,4 +76,3 @@ targets:
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: "-"
         DEVELOPMENT_TEAM: ""
-

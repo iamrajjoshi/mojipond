@@ -11,7 +11,7 @@ actor MediaDiskCache {
         maximumBytes: Int64 = 250 * 1_024 * 1_024,
         fileManager: FileManager = .default
     ) {
-        self.rootURL = rootURL.standardizedFileURL
+        self.rootURL = rootURL.standardizedFileURL.resolvingSymlinksInPath()
         self.maximumBytes = maximumBytes
         self.fileManager = fileManager
     }
@@ -31,7 +31,13 @@ actor MediaDiskCache {
             [.modificationDate: Date()],
             ofItemAtPath: match.path
         )
-        return match
+        // Directory enumeration may canonicalize `/var` to `/private/var`.
+        // Return a URL in the caller's cache-root namespace so repeated cache
+        // operations have stable URL identity.
+        return baseURL.appendingPathComponent(
+            match.lastPathComponent,
+            isDirectory: false
+        )
     }
 
     @discardableResult
@@ -83,7 +89,7 @@ actor MediaDiskCache {
                 attributes: [.posixPermissions: 0o700]
             )
         }
-        return rootURL
+        return rootURL.resolvingSymlinksInPath()
     }
 
     private func pruneIfNeeded() throws {
@@ -125,4 +131,3 @@ actor MediaDiskCache {
             .joined()
     }
 }
-
