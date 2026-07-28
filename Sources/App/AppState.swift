@@ -9,6 +9,7 @@ final class AppState: ObservableObject {
     }
 
     let permissions: SystemPermissionCenter
+    let updates: AppUpdateController
     private let preferencesStore: any PreferencesPersisting
 
     @Published var preferences: MojiPondPreferences {
@@ -34,10 +35,12 @@ final class AppState: ObservableObject {
     init(
         permissions: SystemPermissionCenter = SystemPermissionCenter(),
         preferencesStore: any PreferencesPersisting =
-            UserDefaultsPreferencesStore()
+            UserDefaultsPreferencesStore(),
+        updates: AppUpdateController = AppUpdateController()
     ) {
         self.permissions = permissions
         self.preferencesStore = preferencesStore
+        self.updates = updates
         preferences = preferencesStore.load()
         hasCompletedOnboarding = UserDefaults.standard.bool(
             forKey: Key.completedOnboarding
@@ -84,6 +87,9 @@ final class AppState: ObservableObject {
 
     func start() {
         permissions.startLiveUpdates()
+        updates.start(
+            automaticChecksEnabled: preferences.network.allowsUpdateChecks
+        )
     }
 
     func setEnabled(_ enabled: Bool) {

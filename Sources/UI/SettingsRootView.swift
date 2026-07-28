@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct SettingsRootView: View {
     @ObservedObject var appState: AppState
     @ObservedObject private var permissions: SystemPermissionCenter
+    @ObservedObject private var updates: AppUpdateController
 
     @State private var domainDraft = ""
     @State private var exclusionError: String?
@@ -12,6 +13,7 @@ struct SettingsRootView: View {
     init(appState: AppState) {
         self.appState = appState
         permissions = appState.permissions
+        updates = appState.updates
     }
 
     var body: some View {
@@ -274,10 +276,28 @@ struct SettingsRootView: View {
                     forInfoDictionaryKey: "CFBundleShortVersionString"
                 ) as? String ?? "Development"
             )
-            LabeledContent(
-                "Updates",
-                value: "Disabled until a signed feed is configured"
-            )
+            LabeledContent("Updates", value: updates.statusSummary)
+            if case let .failed(message) = updates.state {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+            if case let .available(metadata) = updates.state,
+               let releaseNotesURL = metadata.releaseNotesURL {
+                Link(
+                    "Read release notes for \(metadata.version)",
+                    destination: releaseNotesURL
+                )
+            }
+            Button(
+                updates.isChecking ? "Checking…" : "Check for Updates…"
+            ) {
+                updates.checkManually(
+                    automaticChecksEnabled:
+                        appState.preferences.network.allowsUpdateChecks
+                )
+            }
+            .disabled(updates.isChecking)
             Link(
                 "View private source repository",
                 destination: URL(
