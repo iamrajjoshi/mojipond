@@ -126,6 +126,17 @@ struct RuntimeSessionSafetyPolicy: Sendable {
 struct RuntimeTextCapture: @unchecked Sendable {
     let target: AccessibilityTextTarget
     let context: AccessibilityTextContext
+    let bundleIdentifier: String?
+
+    init(
+        target: AccessibilityTextTarget,
+        context: AccessibilityTextContext,
+        bundleIdentifier: String? = nil
+    ) {
+        self.target = target
+        self.context = context
+        self.bundleIdentifier = bundleIdentifier
+    }
 }
 
 enum RuntimeTextCaptureError: Error, Equatable, Sendable {
@@ -265,13 +276,21 @@ final class RuntimeAccessibilityTextContextProvider:
 
         let context: AccessibilityTextContext
         do {
-            context = try accessibility.context(
+            let capturedContext = try accessibility.context(
                 for: target,
                 trigger: trigger,
                 locateShortcodeToken: true
             )
+            context = trigger == "/"
+                ? try Self.mediaCommandContext(
+                    capturedContext,
+                    expectedToken: expectedToken
+                )
+                : capturedContext
         } catch AccessibilityTextError.secureTextField {
             throw RuntimeTextCaptureError.denied(.secureField)
+        } catch RuntimeTextCaptureError.invalidTokenContext {
+            throw RuntimeTextCaptureError.invalidTokenContext
         } catch {
             throw RuntimeTextCaptureError.inaccessibleTarget
         }
@@ -279,7 +298,50 @@ final class RuntimeAccessibilityTextContextProvider:
         guard Self.context(context, containsExactly: expectedToken) else {
             throw RuntimeTextCaptureError.invalidTokenContext
         }
-        return RuntimeTextCapture(target: target, context: context)
+        return RuntimeTextCapture(
+            target: target,
+            context: context,
+            bundleIdentifier: bundleIdentifier
+        )
+    }
+
+    private static func mediaCommandContext(
+        _ context: AccessibilityTextContext,
+        expectedToken: String
+    ) throws -> AccessibilityTextContext {
+        let expectedLength = expectedToken.utf16.count
+        guard
+            expectedLength > 0,
+            expectedLength <= AccessibilityTextAdapter
+                .maximumShortcodeContextLength,
+            context.selection.length == 0,
+            context.selection.location >= expectedLength,
+            context.textFragmentRange.location
+                + context.textFragmentRange.length
+                == context.selection.location,
+            context.textFragment.utf16.count >= expectedLength
+        else {
+            throw RuntimeTextCaptureError.invalidTokenContext
+        }
+
+        let fragment = context.textFragment as NSString
+        let localRange = NSRange(
+            location: fragment.length - expectedLength,
+            length: expectedLength
+        )
+        guard fragment.substring(with: localRange) == expectedToken else {
+            throw RuntimeTextCaptureError.invalidTokenContext
+        }
+        return AccessibilityTextContext(
+            selection: context.selection,
+            caretBounds: context.caretBounds,
+            textFragment: context.textFragment,
+            textFragmentRange: context.textFragmentRange,
+            tokenRange: NSRange(
+                location: context.selection.location - expectedLength,
+                length: expectedLength
+            )
+        )
     }
 
     private static func context(

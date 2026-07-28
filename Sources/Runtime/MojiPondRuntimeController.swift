@@ -66,6 +66,33 @@ private final class MojiPondRuntimeDiagnosticRelay: @unchecked Sendable {
     }
 }
 
+private final class MojiPondRuntimeMediaDiagnosticRelay:
+    @unchecked Sendable
+{
+    private let lock = NSLock()
+    private var sink:
+        (@Sendable (RuntimeMediaCopyFallbackDiagnostic) -> Void)?
+
+    func setSink(
+        _ sink: @escaping @Sendable (
+            RuntimeMediaCopyFallbackDiagnostic
+        ) -> Void
+    ) {
+        lock.withLock {
+            self.sink = sink
+        }
+    }
+
+    func emit(_ diagnostic: RuntimeMediaCopyFallbackDiagnostic) {
+        let currentSink:
+            (@Sendable (RuntimeMediaCopyFallbackDiagnostic) -> Void)? =
+                lock.withLock {
+                    sink
+                }
+        currentSink?(diagnostic)
+    }
+}
+
 /// AppDelegate-facing lifecycle for global Unicode autocomplete. Starting this
 /// controller performs preflight checks only; permission prompts remain an
 /// explicit onboarding/settings action.
@@ -73,8 +100,12 @@ private final class MojiPondRuntimeDiagnosticRelay: @unchecked Sendable {
 final class MojiPondRuntimeController: ObservableObject {
     @Published private(set) var state: MojiPondRuntimeState = .stopped
     @Published private(set) var lastDiagnostic: MojiPondRuntimeDiagnostic?
+    @Published private(set) var lastMediaCopyFallback:
+        RuntimeMediaCopyFallbackDiagnostic?
 
     var onDiagnostic: ((MojiPondRuntimeDiagnostic) -> Void)?
+    var onMediaCopyFallback:
+        ((RuntimeMediaCopyFallbackDiagnostic) -> Void)?
 
     private let permissionChecker: any RuntimePermissionChecking
     private let usageStore: (any EmojiUsageStore)?
@@ -82,6 +113,8 @@ final class MojiPondRuntimeController: ObservableObject {
     private let worker: UnicodeAutocompleteRuntimeWorker
     private let eventTap: any RuntimeEventMonitoring
     private let diagnosticRelay: MojiPondRuntimeDiagnosticRelay
+    private let mediaDiagnosticRelay:
+        MojiPondRuntimeMediaDiagnosticRelay
 
     private var configuration: UnicodeAutocompleteRuntimeConfiguration
     private var wantsToRun = false
@@ -93,6 +126,8 @@ final class MojiPondRuntimeController: ObservableObject {
         bundle: Bundle = .main,
         preferences: MojiPondPreferences = .defaults,
         usageStore: (any EmojiUsageStore)? = nil,
+        managedMediaRoot: URL? = nil,
+        mediaCacheRoot: URL? = nil,
         onCatalogLoadError:
             ((MojiPondRuntimeDiagnostic) -> Void)? = nil
     ) throws {
@@ -110,7 +145,15 @@ final class MojiPondRuntimeController: ObservableObject {
         self.init(
             searchIndex: searchIndex,
             preferences: preferences,
-            usageStore: usageStore
+            usageStore: usageStore,
+            managedMediaRoot: managedMediaRoot,
+            mediaCommandCoordinator:
+                try? RuntimeMediaNetworkPolicy.liveCoordinator(
+                    bundle: bundle
+                ),
+            remoteMediaCache: mediaCacheRoot.map {
+                RuntimeNotoMediaDiskCache(rootURL: $0)
+            }
         )
     }
 
@@ -127,10 +170,23 @@ final class MojiPondRuntimeController: ObservableObject {
         presenter: (any RuntimeSuggestionPresenting)? = nil,
         accessibility: AccessibilityTextAdapter = AccessibilityTextAdapter(),
         insertionEngine: InsertionEngine? = nil,
-        eventMonitor: (any RuntimeEventMonitoring)? = nil
+        eventMonitor: (any RuntimeEventMonitoring)? = nil,
+        managedMediaRoot: URL? = nil,
+        managedMediaResolver:
+            any RuntimeManagedMediaResolving =
+                RuntimeManagedMediaResolver(),
+        mediaCommandCoordinator:
+            (any RuntimeMediaCommandCoordinating)? = nil,
+        remoteMediaCache:
+            (any RuntimeRemoteMediaCaching)? = nil,
+        frontmostApplication:
+            any RuntimeFrontmostApplicationProviding =
+                MacRuntimeFrontmostApplicationProvider()
     ) {
         let gate = RuntimeInterceptionGate()
         let diagnostics = MojiPondRuntimeDiagnosticRelay()
+        let mediaDiagnostics =
+            MojiPondRuntimeMediaDiagnosticRelay()
         let resolvedPresenter = presenter
             ?? RuntimeSuggestionPanelController()
         let resolvedInsertionEngine = insertionEngine
@@ -156,12 +212,20 @@ final class MojiPondRuntimeController: ObservableObject {
             contextProvider: contextProvider,
             mainActorBridge: bridge,
             usageStore: usageStore,
-            diagnosticHandler: { [diagnostics] diagnostic in
+            frontmostApplication: frontmostApplication,
+            managedMediaResolver: managedMediaResolver,
+            managedMediaRoot: managedMediaRoot,
+            mediaCommandCoordinator: mediaCommandCoordinator,
+            remoteMediaCache: remoteMediaCache,
+            diagnosticHandler: {
+                [diagnostics, mediaDiagnostics] diagnostic in
                 switch diagnostic {
                 case .unsupportedTarget:
                     diagnostics.emit(.unsupportedTarget)
                 case let .sessionDenied(denial):
                     diagnostics.emit(.sessionDenied(denial))
+                case let .mediaCopyFallbackAvailable(fallback):
+                    mediaDiagnostics.emit(fallback)
                 }
             }
         )
@@ -173,6 +237,7 @@ final class MojiPondRuntimeController: ObservableObject {
         self.configuration = configuration
         userEnabled = preferences.activationMode == .enabled
         diagnosticRelay = diagnostics
+        mediaDiagnosticRelay = mediaDiagnostics
         eventTap = eventMonitor
             ?? SessionEventTapService(
                 eventTypes: [
@@ -225,6 +290,11 @@ final class MojiPondRuntimeController: ObservableObject {
                 self?.publish(diagnostic)
             }
         }
+        mediaDiagnostics.setSink { [weak self] diagnostic in
+            Task { @MainActor [weak self] in
+                self?.publishMediaCopyFallback(diagnostic)
+            }
+        }
     }
 
     func start() {
@@ -271,6 +341,16 @@ final class MojiPondRuntimeController: ObservableObject {
 
     func updateSearchIndex(_ searchIndex: EmojiSearchIndex) {
         worker.updateSearchIndex(searchIndex)
+    }
+
+    func setManagedMediaRoot(_ root: URL?) {
+        worker.updateManagedMediaRoot(root)
+    }
+
+    func updateMediaNetworkOptions(
+        _ options: MediaCommandNetworkOptions
+    ) {
+        worker.updateMediaNetworkOptions(options)
     }
 
     func openBrowser() {
@@ -345,6 +425,13 @@ final class MojiPondRuntimeController: ObservableObject {
     private func publish(_ diagnostic: MojiPondRuntimeDiagnostic) {
         lastDiagnostic = diagnostic
         onDiagnostic?(diagnostic)
+    }
+
+    private func publishMediaCopyFallback(
+        _ diagnostic: RuntimeMediaCopyFallbackDiagnostic
+    ) {
+        lastMediaCopyFallback = diagnostic
+        onMediaCopyFallback?(diagnostic)
     }
 
     private func registerWorkspaceObservers() {
