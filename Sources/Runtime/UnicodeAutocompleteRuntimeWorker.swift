@@ -781,7 +781,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                 .permissionLost
             case .secureEventInput, .secureField, .secureStatusUnknown:
                 .secureInput
-            case .applicationUnknown, .excludedApplication:
+            case .applicationUnknown, .excludedApplication, .excludedDomain:
                 .applicationChanged
             }
         case .inaccessibleTarget:

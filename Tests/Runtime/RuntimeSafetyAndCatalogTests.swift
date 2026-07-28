@@ -78,6 +78,53 @@ final class RuntimeSafetyAndCatalogTests: XCTestCase {
         )
     }
 
+    func testSafetyPolicyHonorsExactAndSubdomainExclusions() throws {
+        let parentDomain = try XCTUnwrap(
+            DomainExclusion(
+                domain: "example.com",
+                includesSubdomains: true
+            )
+        )
+        let exactDomain = try XCTUnwrap(
+            DomainExclusion(
+                domain: "private.test",
+                includesSubdomains: false
+            )
+        )
+        let policy = RuntimeSessionSafetyPolicy(
+            exclusions: ExclusionPreferences(
+                domains: [parentDomain, exactDomain]
+            )
+        )
+        let permissions = RuntimePermissionPreflight(
+            inputMonitoringGranted: true,
+            accessibilityGranted: true
+        )
+
+        func denial(for domain: String?) -> RuntimeSessionDenial? {
+            policy.evaluate(
+                RuntimeSessionSafetyInput(
+                    permissions: permissions,
+                    secureEventInputEnabled: false,
+                    focusedElementIsSecure: false,
+                    bundleIdentifier: "com.apple.Safari",
+                    domain: domain
+                )
+            )
+        }
+
+        XCTAssertEqual(
+            denial(for: "chat.example.com"),
+            .excludedDomain("example.com")
+        )
+        XCTAssertEqual(
+            denial(for: "private.test"),
+            .excludedDomain("private.test")
+        )
+        XCTAssertNil(denial(for: "sub.private.test"))
+        XCTAssertNil(denial(for: nil))
+    }
+
     func testReplacementFactoryRequiresSameProcessAndExactUTF16Range() {
         let originalTarget = AccessibilityTextTarget(
             element: AccessibilityElementReference(rawValue: NSObject()),
