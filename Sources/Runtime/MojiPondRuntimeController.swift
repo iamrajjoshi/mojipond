@@ -285,6 +285,10 @@ final class MojiPondRuntimeController: ObservableObject {
         reconcileRuntime()
     }
 
+    func reloadUsageSnapshot() {
+        loadUsageSnapshot()
+    }
+
     private func reconcileRuntime() {
         guard wantsToRun else {
             return
