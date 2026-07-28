@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum PondDesign {
@@ -30,16 +31,12 @@ struct PondMark: View {
     var size: CGFloat = 72
 
     var body: some View {
-        ZStack {
-            Circle()
-                .fill(PondDesign.pond.gradient)
-            Image(systemName: "water.waves")
-                .font(.system(size: size * 0.43, weight: .semibold))
-                .foregroundStyle(.white)
-        }
+        Image(nsImage: NSApplication.shared.applicationIconImage)
+            .resizable()
+            .interpolation(.high)
+            .aspectRatio(contentMode: .fit)
         .frame(width: size, height: size)
         .shadow(color: PondDesign.pond.opacity(0.22), radius: 16, y: 8)
         .accessibilityHidden(true)
     }
 }
-
