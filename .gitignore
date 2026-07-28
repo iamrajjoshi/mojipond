@@ -1,0 +1,40 @@
+.DS_Store
+
+# Xcode
+DerivedData/
+build/
+*.xcarchive
+*.dSYM
+*.dSYM.zip
+*.ipa
+*.xcuserstate
+xcuserdata/
+*.xccheckout
+*.moved-aside
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# Generated and local artifacts
+Artifacts/
+LocalPacks/
+Screenshots/Local/
+*.app
+*.dmg
+*.zip
+
+# Secrets and signing material
+.env
+.env.*
+!.env.example
+Secrets.xcconfig
+*.p8
+*.p12
+*.cer
+*.mobileprovision
+*.provisionprofile
+sparkle_private_key*
+notarytool-profile*
+
