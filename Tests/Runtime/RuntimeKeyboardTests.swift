@@ -119,6 +119,34 @@ final class RuntimeKeyboardTests: XCTestCase {
             ),
             .intercept
         )
+        XCTAssertEqual(
+            gate.decision(
+                for: snapshot(keyCode: 3, characters: "f")
+            ),
+            .intercept
+        )
+        XCTAssertEqual(
+            gate.decision(
+                for: snapshot(keyCode: RuntimeKeyboardKeyCode.delete)
+            ),
+            .intercept
+        )
+        XCTAssertEqual(
+            gate.decision(
+                for: snapshot(keyCode: 49, characters: " ")
+            ),
+            .passThrough
+        )
+        XCTAssertEqual(
+            gate.decision(
+                for: snapshot(
+                    keyCode: 3,
+                    flags: [.maskCommand],
+                    characters: "f"
+                )
+            ),
+            .passThrough
+        )
     }
 
     func testMediaGridOwnsHorizontalAndVerticalNavigationOnlyWhileVisible() {

@@ -170,6 +170,7 @@ struct ImportScanner: Sendable {
         }
 
         let root = manifestURL.deletingLastPathComponent().standardizedFileURL
+        let canonicalRoot = root.resolvingSymlinksInPath().standardizedFileURL
         let manifest = try PortablePackManifest.decode(
             Data(contentsOf: manifestURL, options: [.mappedIfSafe])
         )
@@ -183,20 +184,41 @@ struct ImportScanner: Sendable {
         var preparedItems: [PreparedEmoji] = []
         var totalBytes: Int64 = 0
         for (index, entry) in manifest.emoji.enumerated() {
-            let assetURL = root.appendingPathComponent(entry.file).standardizedFileURL
-            guard Self.isDescendant(assetURL, of: root) else {
-                throw PortablePackManifestError.assetOutsidePack(entry.file)
+            if let unicode = entry.unicode {
+                preparedItems.append(
+                    PreparedEmoji(
+                        shortcode: entry.shortcode,
+                        aliases: entry.aliases,
+                        displayName: entry.displayName,
+                        tags: entry.tags,
+                        category: entry.category,
+                        order: entry.order ?? index,
+                        unicode: unicode,
+                        sourceURL: manifestURL,
+                        sourceFilename: "Unicode emoji"
+                    )
+                )
+                continue
             }
-            guard FileManager.default.fileExists(atPath: assetURL.path) else {
-                throw PortablePackManifestError.missingAsset(entry.file)
+            guard let file = entry.file else {
+                // PortablePackManifest.validated() guarantees exactly one
+                // content field. Keep this guard so future schema changes fail
+                // closed instead of inventing an import payload.
+                throw PortablePackManifestError.missingEmojiContent(
+                    entry.shortcode
+                )
             }
+            let assetURL = try Self.portableAssetURL(
+                for: file,
+                below: canonicalRoot
+            )
 
             let asset: ValidatedAsset
             do {
                 asset = try validator.validate(fileAt: assetURL)
             } catch {
                 throw PortablePackManifestError.assetRejected(
-                    entry.file,
+                    file,
                     error.localizedDescription
                 )
             }
@@ -216,7 +238,7 @@ struct ImportScanner: Sendable {
                     category: entry.category,
                     order: entry.order ?? index,
                     sourceURL: assetURL,
-                    sourceFilename: entry.file,
+                    sourceFilename: file,
                     asset: asset
                 )
             )
@@ -359,6 +381,48 @@ struct ImportScanner: Sendable {
 
     private static func displayName(for shortcode: Shortcode) -> String {
         shortcode.rawValue.replacingOccurrences(of: "_", with: " ")
+    }
+
+    private static func portableAssetURL(
+        for relativePath: String,
+        below canonicalRoot: URL
+    ) throws -> URL {
+        let components = relativePath.split(separator: "/").map(String.init)
+        var candidate = canonicalRoot
+        for (index, component) in components.enumerated() {
+            candidate.appendPathComponent(
+                component,
+                isDirectory: index < components.count - 1
+            )
+            let values: URLResourceValues
+            do {
+                values = try candidate.resourceValues(forKeys: [
+                    .isDirectoryKey,
+                    .isRegularFileKey,
+                    .isSymbolicLinkKey
+                ])
+            } catch {
+                throw PortablePackManifestError.missingAsset(relativePath)
+            }
+            guard values.isSymbolicLink != true else {
+                throw PortablePackManifestError.assetRejected(
+                    relativePath,
+                    "Symbolic links are not imported."
+                )
+            }
+            if index < components.count - 1,
+               values.isDirectory != true {
+                throw PortablePackManifestError.missingAsset(relativePath)
+            }
+        }
+
+        let resolvedCandidate = candidate
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+        guard Self.isDescendant(resolvedCandidate, of: canonicalRoot) else {
+            throw PortablePackManifestError.assetOutsidePack(relativePath)
+        }
+        return resolvedCandidate
     }
 
     private static func isDescendant(_ candidate: URL, of root: URL) -> Bool {

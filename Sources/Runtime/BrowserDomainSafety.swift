@@ -353,7 +353,7 @@ struct AXBrowserDomainProvider: BrowserDomainProviding {
         for bundleIdentifier: String,
         processIdentifier: pid_t
     ) throws -> String? {
-        guard let family = family(for: bundleIdentifier) else {
+        guard let family = Self.family(for: bundleIdentifier) else {
             return nil
         }
         guard
@@ -417,7 +417,15 @@ struct AXBrowserDomainProvider: BrowserDomainProviding {
         return nil
     }
 
-    private func family(for bundleIdentifier: String) -> BrowserFamily? {
+    static func supportsDomainLookup(
+        for bundleIdentifier: String
+    ) -> Bool {
+        family(for: bundleIdentifier) != nil
+    }
+
+    private static func family(
+        for bundleIdentifier: String
+    ) -> BrowserFamily? {
         let normalized = bundleIdentifier.lowercased(
             with: Locale(identifier: "en_US_POSIX")
         )

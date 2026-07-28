@@ -70,6 +70,18 @@ struct ImportOrchestrator: Sendable {
         _ request: ImportRequest,
         against library: MojiPondLibrary
     ) async throws -> ImportPreparation {
+        try await prepare(
+            request,
+            against: library,
+            reservedShortcodeOwners: []
+        )
+    }
+
+    func prepare(
+        _ request: ImportRequest,
+        against library: MojiPondLibrary,
+        reservedShortcodeOwners: [ReservedShortcodeOwner]
+    ) async throws -> ImportPreparation {
         try Task.checkCancellation()
         let workspaceURL = try makeWorkspace()
         var shouldCleanUp = true
@@ -116,7 +128,8 @@ struct ImportOrchestrator: Sendable {
 
         let preview = ImportCollisionAnalyzer.makePreview(
             scanResult: scanResult,
-            library: library
+            library: library,
+            reservedShortcodeOwners: reservedShortcodeOwners
         )
         let duplicateContent = Self.duplicateContent(
             in: preview,
@@ -125,7 +138,8 @@ struct ImportOrchestrator: Sendable {
         let preparation = ImportPreparation(
             preview: preview,
             duplicateContent: duplicateContent,
-            workspaceURL: workspaceURL
+            workspaceURL: workspaceURL,
+            reservedShortcodeOwners: reservedShortcodeOwners
         )
         shouldCleanUp = false
         return preparation
@@ -376,7 +390,10 @@ struct ImportOrchestrator: Sendable {
     ) -> [ImportDuplicateContentGroup] {
         var incomingByDigest: [String: [UUID]] = [:]
         for item in preview.preparedPack.items {
-            incomingByDigest[item.asset.digest.sha256, default: []].append(item.id)
+            guard let asset = item.asset else {
+                continue
+            }
+            incomingByDigest[asset.digest.sha256, default: []].append(item.id)
         }
 
         var existingByDigest: [String: [ImportDuplicateContentOwner]] = [:]
@@ -428,28 +445,33 @@ actor ImportPreparation {
     nonisolated let workingDirectoryURL: URL
 
     private let workspaceLease: ImportWorkspaceLease
+    private let previewReservedShortcodeOwners: [ReservedShortcodeOwner]
     private var state = State.ready
 
     init(
         preview: ImportPreview,
         duplicateContent: [ImportDuplicateContentGroup],
-        workspaceURL: URL
+        workspaceURL: URL,
+        reservedShortcodeOwners: [ReservedShortcodeOwner] = []
     ) {
         self.preview = preview
         self.duplicateContent = duplicateContent
         workingDirectoryURL = workspaceURL
         workspaceLease = ImportWorkspaceLease(url: workspaceURL)
+        previewReservedShortcodeOwners = reservedShortcodeOwners
     }
 
     func install(
         into store: LibraryStore,
-        decisions: [UUID: CollisionDecision] = [:]
+        decisions: [UUID: CollisionDecision] = [:],
+        reservedShortcodeOwners: [ReservedShortcodeOwner]? = nil
     ) async throws -> EmojiPack {
         try beginInstall()
         do {
             let resolved = try await resolve(
                 using: store,
-                decisions: decisions
+                decisions: decisions,
+                reservedShortcodeOwners: reservedShortcodeOwners
             )
             let pack = try await store.install(resolved)
             finishInstall()
@@ -463,13 +485,15 @@ actor ImportPreparation {
     func append(
         into store: LibraryStore,
         packID: UUID,
-        decisions: [UUID: CollisionDecision] = [:]
+        decisions: [UUID: CollisionDecision] = [:],
+        reservedShortcodeOwners: [ReservedShortcodeOwner]? = nil
     ) async throws -> EmojiPack {
         try beginInstall()
         do {
             let resolved = try await resolve(
                 using: store,
-                decisions: decisions
+                decisions: decisions,
+                reservedShortcodeOwners: reservedShortcodeOwners
             )
             let pack = try await store.append(resolved, to: packID)
             finishInstall()
@@ -483,13 +507,15 @@ actor ImportPreparation {
     func replacePackContents(
         in store: LibraryStore,
         packID: UUID,
-        decisions: [UUID: CollisionDecision] = [:]
+        decisions: [UUID: CollisionDecision] = [:],
+        reservedShortcodeOwners: [ReservedShortcodeOwner]? = nil
     ) async throws -> EmojiPack {
         try beginInstall()
         do {
             let resolved = try await resolve(
                 using: store,
                 decisions: decisions,
+                reservedShortcodeOwners: reservedShortcodeOwners,
                 excludingPackID: packID
             )
             let pack = try await store.replacePackContents(
@@ -518,6 +544,7 @@ actor ImportPreparation {
     private func resolve(
         using store: LibraryStore,
         decisions: [UUID: CollisionDecision],
+        reservedShortcodeOwners: [ReservedShortcodeOwner]?,
         excludingPackID: UUID? = nil
     ) async throws -> ResolvedPackImport {
         var library = try await store.snapshot()
@@ -527,7 +554,10 @@ actor ImportPreparation {
         return try ImportCollisionAnalyzer.resolve(
             preview: preview,
             decisions: decisions,
-            library: library
+            library: library,
+            reservedShortcodeOwners:
+                reservedShortcodeOwners
+                ?? previewReservedShortcodeOwners
         )
     }
 

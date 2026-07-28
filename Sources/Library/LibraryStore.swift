@@ -9,12 +9,14 @@ actor LibraryStore {
 
     private let fileManager: FileManager
     private let validator: AssetValidator
+    private let reservedShortcodes: Set<Shortcode>
     private var cachedLibrary: MojiPondLibrary?
 
     init(
         rootURL: URL,
         validator: AssetValidator = .init(),
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        reservedShortcodes: Set<Shortcode> = []
     ) {
         self.rootURL = rootURL.standardizedFileURL
         manifestURL = self.rootURL.appendingPathComponent(
@@ -24,6 +26,7 @@ actor LibraryStore {
         assetsURL = self.rootURL.appendingPathComponent("assets", isDirectory: true)
         self.validator = validator
         self.fileManager = fileManager
+        self.reservedShortcodes = reservedShortcodes
     }
 
     func snapshot() throws -> MojiPondLibrary {
@@ -83,6 +86,62 @@ actor LibraryStore {
         return pack
     }
 
+    /// Creates a Unicode-backed emoji in an existing user pack.
+    ///
+    /// Shortcodes are checked across the whole library before the manifest is
+    /// changed. Existing entries are never replaced implicitly.
+    @discardableResult
+    func createUnicodeItem(
+        in packID: UUID,
+        shortcode: Shortcode,
+        unicode: String,
+        aliases: [Shortcode] = [],
+        displayName: String? = nil,
+        tags: [String] = [],
+        category: String? = nil,
+        additionalReservedShortcodes: Set<Shortcode> = []
+    ) throws -> LibraryEmoji {
+        var library = try loadIfNeeded()
+        guard let packIndex = library.packs.firstIndex(
+            where: { $0.id == packID }
+        ) else {
+            throw LibraryStoreError.packNotFound(packID)
+        }
+        guard library.packs[packIndex].source.kind != .builtIn else {
+            throw LibraryStoreError.cannotModifyBuiltInPack(packID)
+        }
+        try UnicodeEmojiValueValidator.validate(unicode)
+
+        let claims = [shortcode] + aliases
+        guard Set(claims).count == claims.count else {
+            throw LibraryStoreError.duplicateItemClaims
+        }
+        let itemID = UUID()
+        try ensureClaimsAreAvailable(
+            claims,
+            excludingItemID: itemID,
+            additionalReservedShortcodes:
+                additionalReservedShortcodes,
+            in: library
+        )
+
+        let item = LibraryEmoji(
+            id: itemID,
+            shortcode: shortcode,
+            aliases: aliases,
+            displayName: displayName,
+            tags: tags,
+            category: category,
+            order: library.packs[packIndex].items.count,
+            sourceFilename: nil,
+            payload: .unicode(unicode)
+        )
+        library.packs[packIndex].items.append(item)
+        try touchPack(at: packIndex, in: &library)
+        try commit(library)
+        return item
+    }
+
     @discardableResult
     func install(_ resolved: ResolvedPackImport) throws -> EmojiPack {
         var library = try loadIfNeeded()
@@ -92,6 +151,11 @@ actor LibraryStore {
         guard !library.packs.contains(where: { $0.id == resolved.pack.id }) else {
             throw LibraryStoreError.packAlreadyExists(resolved.pack.id)
         }
+        try ensureClaimsAreNotReserved(
+            resolved.pack.items.flatMap {
+                [$0.shortcode] + $0.aliases
+            }
+        )
 
         try prepareDirectories()
         let stagingURL = rootURL.appendingPathComponent(
@@ -122,39 +186,63 @@ actor LibraryStore {
         var installedItems: [LibraryEmoji] = []
         var copiedFilenames = Set<String>()
         for (candidateIndex, candidate) in resolved.pack.items.enumerated() {
-            let currentValidation = try validator.validate(fileAt: candidate.sourceURL)
-            guard currentValidation == candidate.asset else {
-                throw LibraryStoreError.sourceChanged(candidate.sourceURL)
-            }
-
-            let filename = "\(currentValidation.digest.sha256).\(currentValidation.format.preferredFilenameExtension)"
-            let stagedAssetURL = stagingURL.appendingPathComponent(filename, isDirectory: false)
-            if copiedFilenames.insert(filename).inserted {
-                try fileManager.copyItem(at: candidate.sourceURL, to: stagedAssetURL)
-                try fileManager.setAttributes(
-                    [.posixPermissions: 0o600],
-                    ofItemAtPath: stagedAssetURL.path
+            let payload: EmojiPayload
+            let sourceFilename: String?
+            switch candidate.content {
+            case let .unicode(value):
+                try UnicodeEmojiValueValidator.validate(value)
+                payload = .unicode(value)
+                sourceFilename = nil
+            case let .asset(previewValidation):
+                let currentValidation = try validator.validate(
+                    fileAt: candidate.sourceURL
                 )
-                let copiedValidation = try validator.validate(fileAt: stagedAssetURL)
-                guard copiedValidation == currentValidation else {
-                    throw LibraryStoreError.copyVerificationFailed(candidate.sourceFilename)
+                guard currentValidation == previewValidation else {
+                    throw LibraryStoreError.sourceChanged(candidate.sourceURL)
                 }
-            }
 
-            let relativePath = [
-                "assets",
-                resolved.pack.id.uuidString.lowercased(),
-                filename
-            ].joined(separator: "/")
-            let storedAsset = StoredAsset(
-                relativePath: relativePath,
-                format: currentValidation.format,
-                sha256: currentValidation.digest.sha256,
-                byteCount: currentValidation.digest.byteCount,
-                pixelWidth: currentValidation.pixelWidth,
-                pixelHeight: currentValidation.pixelHeight,
-                frameCount: currentValidation.frameCount
-            )
+                let filename = "\(currentValidation.digest.sha256).\(currentValidation.format.preferredFilenameExtension)"
+                let stagedAssetURL = stagingURL.appendingPathComponent(
+                    filename,
+                    isDirectory: false
+                )
+                if copiedFilenames.insert(filename).inserted {
+                    try fileManager.copyItem(
+                        at: candidate.sourceURL,
+                        to: stagedAssetURL
+                    )
+                    try fileManager.setAttributes(
+                        [.posixPermissions: 0o600],
+                        ofItemAtPath: stagedAssetURL.path
+                    )
+                    let copiedValidation = try validator.validate(
+                        fileAt: stagedAssetURL
+                    )
+                    guard copiedValidation == currentValidation else {
+                        throw LibraryStoreError.copyVerificationFailed(
+                            candidate.sourceFilename
+                        )
+                    }
+                }
+
+                let relativePath = [
+                    "assets",
+                    resolved.pack.id.uuidString.lowercased(),
+                    filename
+                ].joined(separator: "/")
+                payload = .asset(
+                    StoredAsset(
+                        relativePath: relativePath,
+                        format: currentValidation.format,
+                        sha256: currentValidation.digest.sha256,
+                        byteCount: currentValidation.digest.byteCount,
+                        pixelWidth: currentValidation.pixelWidth,
+                        pixelHeight: currentValidation.pixelHeight,
+                        frameCount: currentValidation.frameCount
+                    )
+                )
+                sourceFilename = candidate.sourceFilename
+            }
             installedItems.append(
                 LibraryEmoji(
                     id: candidate.id,
@@ -164,8 +252,8 @@ actor LibraryStore {
                     tags: candidate.tags,
                     category: candidate.category,
                     order: candidate.order >= 0 ? candidate.order : candidateIndex,
-                    sourceFilename: candidate.sourceFilename,
-                    payload: .asset(storedAsset)
+                    sourceFilename: sourceFilename,
+                    payload: payload
                 )
             )
         }
@@ -208,7 +296,7 @@ actor LibraryStore {
             throw error
         }
         cachedLibrary = library
-        try cleanupUnreferencedAssets(in: library)
+        cleanUpAssetsAfterCommit(in: library)
         return installedPack
     }
 
@@ -221,6 +309,11 @@ actor LibraryStore {
         to packID: UUID
     ) throws -> EmojiPack {
         var library = try loadIfNeeded()
+        try ensureClaimsAreNotReserved(
+            resolved.pack.items.flatMap {
+                [$0.shortcode] + $0.aliases
+            }
+        )
         guard library.packs.contains(where: { $0.id == packID }) else {
             throw LibraryStoreError.packNotFound(packID)
         }
@@ -289,7 +382,7 @@ actor LibraryStore {
             throw error
         }
         cachedLibrary = library
-        try cleanupUnreferencedAssets(in: library)
+        cleanUpAssetsAfterCommit(in: library)
         return library.packs[targetIndex]
     }
 
@@ -303,6 +396,11 @@ actor LibraryStore {
         in packID: UUID
     ) throws -> EmojiPack {
         var library = try loadIfNeeded()
+        try ensureClaimsAreNotReserved(
+            resolved.pack.items.flatMap {
+                [$0.shortcode] + $0.aliases
+            }
+        )
         guard let targetIndex = library.packs.firstIndex(where: { $0.id == packID }) else {
             throw LibraryStoreError.packNotFound(packID)
         }
@@ -421,7 +519,7 @@ actor LibraryStore {
                 // more chance without reporting a failed update after commit.
             }
         }
-        try cleanupUnreferencedAssets(in: library)
+        cleanUpAssetsAfterCommit(in: library)
         return library.packs[targetIndex]
     }
 
@@ -442,7 +540,8 @@ actor LibraryStore {
         aliases: [Shortcode],
         displayName: String?,
         tags: [String],
-        category: String?
+        category: String?,
+        additionalReservedShortcodes: Set<Shortcode> = []
     ) throws -> LibraryEmoji {
         var library = try loadIfNeeded()
         guard let packIndex = library.packs.firstIndex(where: { $0.id == packID }) else {
@@ -461,6 +560,8 @@ actor LibraryStore {
         try ensureClaimsAreAvailable(
             claims,
             excludingItemID: itemID,
+            additionalReservedShortcodes:
+                additionalReservedShortcodes,
             in: library
         )
 
@@ -560,7 +661,7 @@ actor LibraryStore {
             }
             throw error
         }
-        try cleanupUnreferencedAssets(in: library)
+        cleanUpAssetsAfterCommit(in: library)
         return updatedItem
     }
 
@@ -581,7 +682,7 @@ actor LibraryStore {
         }
         try touchPack(at: packIndex, in: &library)
         try commit(library)
-        try cleanupUnreferencedAssets(in: library)
+        cleanUpAssetsAfterCommit(in: library)
         return removed
     }
 
@@ -607,7 +708,7 @@ actor LibraryStore {
         library.packs.remove(at: index)
         Self.recalculatePriorities(in: &library)
         try commit(library)
-        try cleanupUnreferencedAssets(in: library)
+        cleanUpAssetsAfterCommit(in: library)
     }
 
     func setPackUpdateMetadata(
@@ -699,49 +800,80 @@ actor LibraryStore {
         }
 
         let exportedAssetsURL = stagingURL.appendingPathComponent("emoji", isDirectory: true)
-        try fileManager.createDirectory(
-            at: exportedAssetsURL,
-            withIntermediateDirectories: false,
-            attributes: [.posixPermissions: 0o700]
-        )
+        var createdAssetsDirectory = false
         var portableItems: [PortablePackEmoji] = []
         for item in pack.items.sorted(by: { $0.order < $1.order }) {
-            guard item.payload.kind == .asset, let asset = item.payload.asset else {
-                throw LibraryStoreError.cannotExportUnicodeItem(item.id)
-            }
-            let sourceAssetURL = try assetURL(for: asset)
-            let currentValidation = try validator.validate(fileAt: sourceAssetURL)
-            guard currentValidation.digest.sha256 == asset.sha256,
-                  currentValidation.digest.byteCount == asset.byteCount,
-                  currentValidation.format == asset.format else {
-                throw LibraryStoreError.storedAssetChanged(asset.relativePath)
-            }
-
-            let filename = "\(item.shortcode.rawValue).\(asset.format.preferredFilenameExtension)"
-            let exportedRelativePath = "emoji/\(filename)"
-            let exportedURL = exportedAssetsURL.appendingPathComponent(
-                filename,
-                isDirectory: false
-            )
-            try fileManager.copyItem(at: sourceAssetURL, to: exportedURL)
-            try fileManager.setAttributes(
-                [.posixPermissions: 0o600],
-                ofItemAtPath: exportedURL.path
-            )
-            guard try validator.validate(fileAt: exportedURL) == currentValidation else {
-                throw LibraryStoreError.copyVerificationFailed(filename)
-            }
-            portableItems.append(
-                PortablePackEmoji(
-                    shortcode: item.shortcode,
-                    aliases: item.aliases,
-                    displayName: item.displayName,
-                    tags: item.tags,
-                    category: item.category,
-                    order: item.order,
-                    file: exportedRelativePath
+            switch item.payload.kind {
+            case .unicode:
+                guard let unicode = item.payload.unicode else {
+                    throw LibraryModelError.invalidPayload
+                }
+                try UnicodeEmojiValueValidator.validate(unicode)
+                portableItems.append(
+                    PortablePackEmoji(
+                        shortcode: item.shortcode,
+                        aliases: item.aliases,
+                        displayName: item.displayName,
+                        tags: item.tags,
+                        category: item.category,
+                        order: item.order,
+                        unicode: unicode
+                    )
                 )
-            )
+            case .asset:
+                guard let asset = item.payload.asset else {
+                    throw LibraryModelError.invalidPayload
+                }
+                if !createdAssetsDirectory {
+                    try fileManager.createDirectory(
+                        at: exportedAssetsURL,
+                        withIntermediateDirectories: false,
+                        attributes: [.posixPermissions: 0o700]
+                    )
+                    createdAssetsDirectory = true
+                }
+                let sourceAssetURL = try assetURL(for: asset)
+                let currentValidation = try validator.validate(
+                    fileAt: sourceAssetURL
+                )
+                guard currentValidation.digest.sha256 == asset.sha256,
+                      currentValidation.digest.byteCount == asset.byteCount,
+                      currentValidation.format == asset.format else {
+                    throw LibraryStoreError.storedAssetChanged(
+                        asset.relativePath
+                    )
+                }
+
+                let filename = "\(item.shortcode.rawValue).\(asset.format.preferredFilenameExtension)"
+                let exportedRelativePath = "emoji/\(filename)"
+                let exportedURL = exportedAssetsURL.appendingPathComponent(
+                    filename,
+                    isDirectory: false
+                )
+                try fileManager.copyItem(
+                    at: sourceAssetURL,
+                    to: exportedURL
+                )
+                try fileManager.setAttributes(
+                    [.posixPermissions: 0o600],
+                    ofItemAtPath: exportedURL.path
+                )
+                guard try validator.validate(fileAt: exportedURL)
+                    == currentValidation else {
+                    throw LibraryStoreError.copyVerificationFailed(filename)
+                }
+                portableItems.append(
+                    PortablePackEmoji(
+                        shortcode: item.shortcode,
+                        aliases: item.aliases,
+                        displayName: item.displayName,
+                        tags: item.tags,
+                        category: item.category,
+                        order: item.order,
+                        file: exportedRelativePath
+                    )
+                )
+            }
         }
 
         let portableManifest = try PortablePackManifest(
@@ -868,6 +1000,16 @@ actor LibraryStore {
         }
     }
 
+    /// The manifest is the source of truth. Once it has been committed, a
+    /// failure to reclaim an unreferenced file must not make the caller believe
+    /// the mutation failed. `cleanUpAssets()` remains available as a
+    /// retryable, throwing maintenance operation.
+    private func cleanUpAssetsAfterCommit(
+        in library: MojiPondLibrary
+    ) {
+        try? cleanupUnreferencedAssets(in: library)
+    }
+
     private func cleanupUnreferencedAssets(in library: MojiPondLibrary) throws {
         try ensureSafeDirectory(assetsURL)
         let referencedPaths = Set(
@@ -935,8 +1077,14 @@ actor LibraryStore {
     private func ensureClaimsAreAvailable(
         _ claims: [Shortcode],
         excludingItemID: UUID,
+        additionalReservedShortcodes: Set<Shortcode> = [],
         in library: MojiPondLibrary
     ) throws {
+        try ensureClaimsAreNotReserved(
+            claims,
+            additionalReservedShortcodes:
+                additionalReservedShortcodes
+        )
         let requested = Set(claims)
         for pack in library.packs {
             for item in pack.items where item.id != excludingItemID {
@@ -950,6 +1098,22 @@ actor LibraryStore {
         }
     }
 
+    private func ensureClaimsAreNotReserved(
+        _ claims: [Shortcode],
+        additionalReservedShortcodes: Set<Shortcode> = []
+    ) throws {
+        if let shortcode = Set(claims)
+            .intersection(
+                reservedShortcodes.union(
+                    additionalReservedShortcodes
+                )
+            )
+            .sorted()
+            .first {
+            throw LibraryStoreError.reservedShortcode(shortcode)
+        }
+    }
+
     private func stageImportedItems(
         _ candidates: [PreparedEmoji],
         for packID: UUID,
@@ -957,46 +1121,45 @@ actor LibraryStore {
     ) throws -> [LibraryEmoji] {
         var copiedFilenames = Set<String>()
         return try candidates.enumerated().map { index, candidate in
-            let currentValidation = try validator.validate(
-                fileAt: candidate.sourceURL
-            )
-            guard currentValidation == candidate.asset else {
-                throw LibraryStoreError.sourceChanged(candidate.sourceURL)
-            }
-            let filename = [
-                currentValidation.digest.sha256,
-                currentValidation.format.preferredFilenameExtension
-            ].joined(separator: ".")
-            let stagedAssetURL = stagingURL.appendingPathComponent(
-                filename,
-                isDirectory: false
-            )
-            if copiedFilenames.insert(filename).inserted {
-                try fileManager.copyItem(
-                    at: candidate.sourceURL,
-                    to: stagedAssetURL
+            let payload: EmojiPayload
+            let sourceFilename: String?
+            switch candidate.content {
+            case let .unicode(value):
+                try UnicodeEmojiValueValidator.validate(value)
+                payload = .unicode(value)
+                sourceFilename = nil
+            case let .asset(previewValidation):
+                let currentValidation = try validator.validate(
+                    fileAt: candidate.sourceURL
                 )
-                try fileManager.setAttributes(
-                    [.posixPermissions: 0o600],
-                    ofItemAtPath: stagedAssetURL.path
-                )
-                guard try validator.validate(fileAt: stagedAssetURL)
-                    == currentValidation else {
-                    throw LibraryStoreError.copyVerificationFailed(
-                        candidate.sourceFilename
-                    )
+                guard currentValidation == previewValidation else {
+                    throw LibraryStoreError.sourceChanged(candidate.sourceURL)
                 }
-            }
-            return LibraryEmoji(
-                id: candidate.id,
-                shortcode: candidate.shortcode,
-                aliases: candidate.aliases,
-                displayName: candidate.displayName,
-                tags: candidate.tags,
-                category: candidate.category,
-                order: index,
-                sourceFilename: candidate.sourceFilename,
-                payload: .asset(
+                let filename = [
+                    currentValidation.digest.sha256,
+                    currentValidation.format.preferredFilenameExtension
+                ].joined(separator: ".")
+                let stagedAssetURL = stagingURL.appendingPathComponent(
+                    filename,
+                    isDirectory: false
+                )
+                if copiedFilenames.insert(filename).inserted {
+                    try fileManager.copyItem(
+                        at: candidate.sourceURL,
+                        to: stagedAssetURL
+                    )
+                    try fileManager.setAttributes(
+                        [.posixPermissions: 0o600],
+                        ofItemAtPath: stagedAssetURL.path
+                    )
+                    guard try validator.validate(fileAt: stagedAssetURL)
+                        == currentValidation else {
+                        throw LibraryStoreError.copyVerificationFailed(
+                            candidate.sourceFilename
+                        )
+                    }
+                }
+                payload = .asset(
                     StoredAsset(
                         relativePath: [
                             "assets",
@@ -1011,6 +1174,18 @@ actor LibraryStore {
                         frameCount: currentValidation.frameCount
                     )
                 )
+                sourceFilename = candidate.sourceFilename
+            }
+            return LibraryEmoji(
+                id: candidate.id,
+                shortcode: candidate.shortcode,
+                aliases: candidate.aliases,
+                displayName: candidate.displayName,
+                tags: candidate.tags,
+                category: candidate.category,
+                order: index,
+                sourceFilename: sourceFilename,
+                payload: payload
             )
         }
     }
@@ -1060,9 +1235,11 @@ enum LibraryStoreError: Error, Equatable, LocalizedError, Sendable {
     case emptyPackName
     case packAlreadyExists(UUID)
     case packNotFound(UUID)
+    case cannotModifyBuiltInPack(UUID)
     case itemNotFound(UUID)
     case invalidPackIndex(Int)
     case duplicateItemClaims
+    case reservedShortcode(Shortcode)
     case shortcodeCollision(Shortcode, existingItemID: UUID)
     case assetDirectoryAlreadyExists
     case sourceChanged(URL)
@@ -1071,7 +1248,6 @@ enum LibraryStoreError: Error, Equatable, LocalizedError, Sendable {
     case cannotEnumerateAssets
     case exportDestinationAlreadyExists
     case unsafeExportDestination
-    case cannotExportUnicodeItem(UUID)
 
     var errorDescription: String? {
         switch self {
@@ -1091,12 +1267,16 @@ enum LibraryStoreError: Error, Equatable, LocalizedError, Sendable {
             "Pack \(id) already exists."
         case let .packNotFound(id):
             "Pack \(id) was not found."
+        case let .cannotModifyBuiltInPack(id):
+            "Built-in pack \(id) cannot be changed."
         case let .itemNotFound(id):
             "Emoji \(id) was not found."
         case let .invalidPackIndex(index):
             "Pack index \(index) is out of bounds."
         case .duplicateItemClaims:
             "An emoji shortcode and its aliases must be unique."
+        case let .reservedShortcode(shortcode):
+            "Shortcode \(shortcode.rawValue) is reserved by the built-in emoji library."
         case let .shortcodeCollision(shortcode, existingItemID):
             "Shortcode \(shortcode.rawValue) is already used by emoji \(existingItemID)."
         case .assetDirectoryAlreadyExists:
@@ -1113,8 +1293,6 @@ enum LibraryStoreError: Error, Equatable, LocalizedError, Sendable {
             "Portable pack export destination already exists."
         case .unsafeExportDestination:
             "Portable pack export parent is not a safe directory."
-        case let .cannotExportUnicodeItem(id):
-            "Emoji \(id) is Unicode-only and cannot be exported as an asset pack."
         }
     }
 }

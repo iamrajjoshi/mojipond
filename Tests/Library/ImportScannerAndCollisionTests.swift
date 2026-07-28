@@ -168,6 +168,8 @@ final class ImportScannerAndCollisionTests: XCTestCase {
             switch collision.existing {
             case .library:
                 decisions[collision.id] = .replaceExistingItem
+            case .reserved:
+                XCTFail("This fixture does not contain protected claims")
             case .incoming:
                 decisions[collision.id] = .skipIncomingItem
             }
@@ -179,6 +181,219 @@ final class ImportScannerAndCollisionTests: XCTestCase {
         )
         XCTAssertEqual(resolved.pack.items.count, 1)
         XCTAssertEqual(resolved.existingItemIDsToReplace, [existingItem.id])
+    }
+
+    func testProtectedNamespaceDetectsBuiltInPrimaryAliasAndIncomingAliasClaims() throws {
+        let reservations = try builtInReservations()
+        let library = MojiPondLibrary()
+        let wave = try Shortcode(validating: "wave")
+        let hello = try Shortcode(validating: "hello")
+
+        let primaryPreview = ImportCollisionAnalyzer.makePreview(
+            scanResult: makeUnicodeScan(shortcode: wave),
+            library: library,
+            reservedShortcodeOwners: reservations
+        )
+        let primaryCollision = try XCTUnwrap(
+            primaryPreview.collisions.first
+        )
+        XCTAssertEqual(primaryPreview.collisions.count, 1)
+        XCTAssertEqual(primaryCollision.incomingClaim, .primary)
+        guard case let .reserved(primaryOwner) = primaryCollision.existing else {
+            return XCTFail("Expected collision with built-in primary shortcode")
+        }
+        XCTAssertEqual(primaryOwner.shortcode, wave)
+        XCTAssertFalse(primaryOwner.isAlias)
+        XCTAssertEqual(primaryOwner.source, .builtIn)
+
+        let builtInAliasPreview = ImportCollisionAnalyzer.makePreview(
+            scanResult: makeUnicodeScan(shortcode: hello),
+            library: library,
+            reservedShortcodeOwners: reservations
+        )
+        let builtInAliasCollision = try XCTUnwrap(
+            builtInAliasPreview.collisions.first
+        )
+        XCTAssertEqual(builtInAliasPreview.collisions.count, 1)
+        XCTAssertEqual(builtInAliasCollision.incomingClaim, .primary)
+        guard case let .reserved(aliasOwner) = builtInAliasCollision.existing else {
+            return XCTFail("Expected collision with built-in alias")
+        }
+        XCTAssertEqual(aliasOwner.shortcode, hello)
+        XCTAssertTrue(aliasOwner.isAlias)
+        XCTAssertEqual(aliasOwner.source, .builtIn)
+
+        let incomingAliasPreview = ImportCollisionAnalyzer.makePreview(
+            scanResult: makeUnicodeScan(
+                shortcode: try Shortcode(validating: "pond_wave"),
+                aliases: [hello]
+            ),
+            library: library,
+            reservedShortcodeOwners: reservations
+        )
+        let incomingAliasCollision = try XCTUnwrap(
+            incomingAliasPreview.collisions.first
+        )
+        XCTAssertEqual(incomingAliasPreview.collisions.count, 1)
+        XCTAssertEqual(incomingAliasCollision.shortcode, hello)
+        XCTAssertEqual(incomingAliasCollision.incomingClaim, .alias(index: 0))
+        guard case let .reserved(incomingAliasOwner) =
+            incomingAliasCollision.existing
+        else {
+            return XCTFail("Expected incoming alias to collide with protected alias")
+        }
+        XCTAssertTrue(incomingAliasOwner.isAlias)
+    }
+
+    func testProtectedShortcodeCannotReplaceReservedOwner() throws {
+        let reservations = try builtInReservations()
+        let library = MojiPondLibrary()
+        let wave = try Shortcode(validating: "wave")
+        let preview = ImportCollisionAnalyzer.makePreview(
+            scanResult: makeUnicodeScan(shortcode: wave),
+            library: library,
+            reservedShortcodeOwners: reservations
+        )
+        let collision = try XCTUnwrap(preview.collisions.first)
+
+        XCTAssertThrowsError(
+            try ImportCollisionAnalyzer.resolve(
+                preview: preview,
+                decisions: [collision.id: .replaceExistingItem],
+                library: library,
+                reservedShortcodeOwners: reservations
+            )
+        ) {
+            XCTAssertEqual(
+                $0 as? CollisionResolutionError,
+                .cannotReplaceReservedShortcode(wave)
+            )
+        }
+    }
+
+    func testProtectedShortcodeSupportsSkipRenameAndDropThenRevalidates() throws {
+        let reservations = try builtInReservations()
+        let library = MojiPondLibrary()
+        let wave = try Shortcode(validating: "wave")
+        let hello = try Shortcode(validating: "hello")
+        let pondWave = try Shortcode(validating: "pond_wave")
+
+        let skippedPreview = ImportCollisionAnalyzer.makePreview(
+            scanResult: makeUnicodeScan(shortcode: wave),
+            library: library,
+            reservedShortcodeOwners: reservations
+        )
+        let skippedCollision = try XCTUnwrap(
+            skippedPreview.collisions.first
+        )
+        let skipped = try ImportCollisionAnalyzer.resolve(
+            preview: skippedPreview,
+            decisions: [skippedCollision.id: .skipIncomingItem],
+            library: library,
+            reservedShortcodeOwners: reservations
+        )
+        XCTAssertTrue(skipped.pack.items.isEmpty)
+
+        let renamedPreview = ImportCollisionAnalyzer.makePreview(
+            scanResult: makeUnicodeScan(shortcode: wave),
+            library: library,
+            reservedShortcodeOwners: reservations
+        )
+        let renamedCollision = try XCTUnwrap(
+            renamedPreview.collisions.first
+        )
+        let renamed = try ImportCollisionAnalyzer.resolve(
+            preview: renamedPreview,
+            decisions: [
+                renamedCollision.id: .renameIncomingClaim(pondWave)
+            ],
+            library: library,
+            reservedShortcodeOwners: reservations
+        )
+        XCTAssertEqual(renamed.pack.items.map(\.shortcode), [pondWave])
+
+        let droppedPreview = ImportCollisionAnalyzer.makePreview(
+            scanResult: makeUnicodeScan(
+                shortcode: pondWave,
+                aliases: [hello]
+            ),
+            library: library,
+            reservedShortcodeOwners: reservations
+        )
+        let droppedCollision = try XCTUnwrap(
+            droppedPreview.collisions.first
+        )
+        let dropped = try ImportCollisionAnalyzer.resolve(
+            preview: droppedPreview,
+            decisions: [droppedCollision.id: .dropIncomingAlias],
+            library: library,
+            reservedShortcodeOwners: reservations
+        )
+        XCTAssertEqual(dropped.pack.items.map(\.shortcode), [pondWave])
+        XCTAssertTrue(try XCTUnwrap(dropped.pack.items.first).aliases.isEmpty)
+
+        XCTAssertThrowsError(
+            try ImportCollisionAnalyzer.resolve(
+                preview: renamedPreview,
+                decisions: [
+                    renamedCollision.id: .renameIncomingClaim(hello)
+                ],
+                library: library,
+                reservedShortcodeOwners: reservations
+            )
+        ) {
+            XCTAssertEqual(
+                $0 as? CollisionResolutionError,
+                .unresolved(hello)
+            )
+        }
+    }
+
+    func testReplacementRejectsOwnerChangedAfterPreview() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try TestSupport.writeImage(
+            to: root.appendingPathComponent("frog.png")
+        )
+        let scan = try ImportScanner().scanFiles(
+            [source],
+            packName: "Incoming"
+        )
+        let existingItem = LibraryEmoji(
+            shortcode: try Shortcode(validating: "frog"),
+            payload: .unicode("🐸")
+        )
+        let existingPack = EmojiPack(
+            name: "Existing",
+            source: PackSource(kind: .builtIn),
+            items: [existingItem]
+        )
+        let previewLibrary = MojiPondLibrary(packs: [existingPack])
+        let preview = ImportCollisionAnalyzer.makePreview(
+            scanResult: scan,
+            library: previewLibrary
+        )
+        let collision = try XCTUnwrap(preview.collisions.first)
+        var changedPack = existingPack
+        changedPack.items[0].shortcode = try Shortcode(
+            validating: "renamed_frog"
+        )
+        let changedLibrary = MojiPondLibrary(packs: [changedPack])
+
+        XCTAssertThrowsError(
+            try ImportCollisionAnalyzer.resolve(
+                preview: preview,
+                decisions: [
+                    collision.id: .replaceExistingItem
+                ],
+                library: changedLibrary
+            )
+        ) {
+            XCTAssertEqual(
+                $0 as? CollisionResolutionError,
+                .staleExistingOwner(existingItem.id)
+            )
+        }
     }
 
     func testResolutionRequiresEveryDecisionAndRejectsRemainingCollision() throws {
@@ -224,5 +439,54 @@ final class ImportScannerAndCollisionTests: XCTestCase {
                 .unresolved(try! Shortcode(validating: "frog"))
             )
         }
+    }
+
+    private func makeUnicodeScan(
+        shortcode: Shortcode,
+        aliases: [Shortcode] = []
+    ) -> ImportScanResult {
+        let sourceURL = URL(
+            fileURLWithPath: "/test/\(shortcode.rawValue)",
+            isDirectory: false
+        )
+        return ImportScanResult(
+            preparedPack: PreparedPackImport(
+                name: "Incoming",
+                source: PackSource(kind: .individualFiles),
+                items: [
+                    PreparedEmoji(
+                        shortcode: shortcode,
+                        aliases: aliases,
+                        unicode: "🐸",
+                        sourceURL: sourceURL
+                    )
+                ]
+            ),
+            rejections: [],
+            ignoredFileCount: 0
+        )
+    }
+
+    private func builtInReservations() throws -> [ReservedShortcodeOwner] {
+        let packID = "builtin.test"
+        let pack = EmojiCatalogPack(
+            id: packID,
+            name: "Built-in Emoji",
+            source: .builtIn(dataset: "test", revision: "test"),
+            items: [
+                EmojiItem(
+                    id: "\(packID).wave",
+                    shortcode: try Shortcode(validating: "wave"),
+                    name: "Waving hand",
+                    aliases: ["hello"],
+                    category: "People",
+                    content: .unicode(
+                        UnicodeEmojiContent(value: "👋")
+                    ),
+                    packID: packID
+                )
+            ]
+        )
+        return BuiltInShortcodeReservations.owners(in: pack)
     }
 }

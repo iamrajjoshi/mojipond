@@ -340,7 +340,9 @@ final class LibraryStoreTests: XCTestCase {
         XCTAssertEqual(exportedFrog.aliases.map(\.rawValue), ["green_frog", "ribbit"])
         XCTAssertEqual(exportedFrog.tags, ["frog", "green"])
         XCTAssertEqual(exportedFrog.category, "Bufos")
-        let exportedFrogURL = destination.appendingPathComponent(exportedFrog.file)
+        let exportedFrogURL = destination.appendingPathComponent(
+            try XCTUnwrap(exportedFrog.file)
+        )
         let exportedValidation = try AssetValidator().validate(fileAt: exportedFrogURL)
         XCTAssertEqual(exportedValidation.digest.sha256, replacementAsset.sha256)
 
@@ -369,6 +371,401 @@ final class LibraryStoreTests: XCTestCase {
         XCTAssertEqual(reloadedPack.name, "Polished Frogs")
         XCTAssertEqual(reloadedPack.items.map(\.id), [toadItem.id])
         XCTAssertEqual(reloadedPack.items.map(\.order), [0])
+    }
+
+    func testCreatesCollisionSafeUnicodeItemAndExportsUnicodeOnlyPack() async throws {
+        let workspace = try TestSupport.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let store = LibraryStore(
+            rootURL: workspace.appendingPathComponent(
+                "Library",
+                isDirectory: true
+            )
+        )
+        let pack = try await store.createPack(name: "My Unicode")
+        let emptyDigest = pack.updateMetadata.contentSHA256
+
+        let created = try await store.createUnicodeItem(
+            in: pack.id,
+            shortcode: Shortcode(validating: "pond_coder"),
+            unicode: "👨🏽‍💻",
+            aliases: [Shortcode(validating: "frog_dev")],
+            displayName: "Pond coder",
+            tags: ["frog", "work"],
+            category: "People"
+        )
+
+        XCTAssertEqual(created.payload.unicode, "👨🏽‍💻")
+        XCTAssertNil(created.payload.asset)
+        let afterCreate = try await store.snapshot()
+        let updatedPack = try XCTUnwrap(
+            afterCreate.packs.first(where: { $0.id == pack.id })
+        )
+        XCTAssertNotEqual(
+            updatedPack.updateMetadata.contentSHA256,
+            emptyDigest
+        )
+
+        do {
+            _ = try await store.createUnicodeItem(
+                in: pack.id,
+                shortcode: Shortcode(validating: "pond_coder"),
+                unicode: "🐸"
+            )
+            XCTFail("Expected shortcode collision")
+        } catch {
+            XCTAssertEqual(
+                error as? LibraryStoreError,
+                .shortcodeCollision(
+                    try Shortcode(validating: "pond_coder"),
+                    existingItemID: created.id
+                )
+            )
+        }
+        do {
+            _ = try await store.createUnicodeItem(
+                in: pack.id,
+                shortcode: Shortcode(validating: "plain_text"),
+                unicode: "frog"
+            )
+            XCTFail("Expected plain text rejection")
+        } catch {
+            XCTAssertEqual(
+                error as? UnicodeEmojiValidationError,
+                .mustBeSingleEmoji
+            )
+        }
+        let afterRejectedCreates = try await store.snapshot()
+        XCTAssertEqual(
+            afterRejectedCreates.packs[0].items.map(\.id),
+            [created.id]
+        )
+
+        let destination = workspace.appendingPathComponent(
+            "Unicode Only.mojipond",
+            isDirectory: true
+        )
+        _ = try await store.exportPortablePack(pack.id, to: destination)
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: destination.appendingPathComponent("emoji").path
+            )
+        )
+        let scanned = try ImportScanner().scanFolder(at: destination)
+        XCTAssertEqual(scanned.preparedPack.items.count, 1)
+        XCTAssertEqual(scanned.preparedPack.items[0].unicode, "👨🏽‍💻")
+        XCTAssertNil(scanned.preparedPack.items[0].asset)
+
+        let builtInPack = try await store.createPack(
+            name: "Read Only",
+            source: PackSource(kind: .builtIn)
+        )
+        do {
+            _ = try await store.createUnicodeItem(
+                in: builtInPack.id,
+                shortcode: Shortcode(validating: "nope"),
+                unicode: "🛑"
+            )
+            XCTFail("Expected built-in pack mutation rejection")
+        } catch {
+            XCTAssertEqual(
+                error as? LibraryStoreError,
+                .cannotModifyBuiltInPack(builtInPack.id)
+            )
+        }
+    }
+
+    func testReservedShortcodesRejectDirectCreateUpdateAndImport() async throws {
+        let workspace = try TestSupport.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let wave = try Shortcode(validating: "wave")
+        let hello = try Shortcode(validating: "hello")
+        let pondFrog = try Shortcode(validating: "pond_frog")
+        let store = LibraryStore(
+            rootURL: workspace.appendingPathComponent(
+                "Library",
+                isDirectory: true
+            ),
+            reservedShortcodes: [wave, hello]
+        )
+        let pack = try await store.createPack(name: "My Pond")
+
+        do {
+            _ = try await store.createUnicodeItem(
+                in: pack.id,
+                shortcode: wave,
+                unicode: "👋"
+            )
+            XCTFail("Expected protected create rejection")
+        } catch {
+            XCTAssertEqual(
+                error as? LibraryStoreError,
+                .reservedShortcode(wave)
+            )
+        }
+
+        let item = try await store.createUnicodeItem(
+            in: pack.id,
+            shortcode: pondFrog,
+            unicode: "🐸"
+        )
+        do {
+            _ = try await store.updateItemMetadata(
+                packID: pack.id,
+                itemID: item.id,
+                shortcode: pondFrog,
+                aliases: [hello],
+                displayName: nil,
+                tags: [],
+                category: nil
+            )
+            XCTFail("Expected protected update rejection")
+        } catch {
+            XCTAssertEqual(
+                error as? LibraryStoreError,
+                .reservedShortcode(hello)
+            )
+        }
+
+        let imported = ResolvedPackImport(
+            pack: PreparedPackImport(
+                name: "Bypassed Preview",
+                source: PackSource(kind: .individualFiles),
+                items: [
+                    PreparedEmoji(
+                        shortcode: try Shortcode(
+                            validating: "imported_frog"
+                        ),
+                        aliases: [wave],
+                        unicode: "🥳",
+                        sourceURL: workspace.appendingPathComponent(
+                            "unicode-import"
+                        )
+                    )
+                ]
+            ),
+            existingItemIDsToReplace: []
+        )
+        do {
+            _ = try await store.install(imported)
+            XCTFail("Expected protected import rejection")
+        } catch {
+            XCTAssertEqual(
+                error as? LibraryStoreError,
+                .reservedShortcode(wave)
+            )
+        }
+
+        let snapshot = try await store.snapshot()
+        XCTAssertEqual(snapshot.packs.map(\.id), [pack.id])
+        XCTAssertEqual(snapshot.packs[0].items.map(\.id), [item.id])
+        XCTAssertEqual(snapshot.packs[0].items[0].shortcode, pondFrog)
+        XCTAssertTrue(snapshot.packs[0].items[0].aliases.isEmpty)
+    }
+
+    func testMixedPortablePackInstallAppendExportAndReplaceRoundTrips() async throws {
+        let workspace = try TestSupport.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let store = LibraryStore(
+            rootURL: workspace.appendingPathComponent(
+                "Library",
+                isDirectory: true
+            )
+        )
+        let initialSource = workspace.appendingPathComponent(
+            "Initial",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: initialSource,
+            withIntermediateDirectories: false
+        )
+        _ = try TestSupport.writeImage(
+            to: initialSource.appendingPathComponent("frog.png")
+        )
+        let initialManifest = PortablePackManifest(
+            id: try PackIdentifier(validating: "example.mixed"),
+            name: "Mixed Pond",
+            version: "1.0.0",
+            emoji: [
+                PortablePackEmoji(
+                    shortcode: try Shortcode(validating: "frog_art"),
+                    file: "frog.png"
+                ),
+                PortablePackEmoji(
+                    shortcode: try Shortcode(validating: "frog_unicode"),
+                    unicode: "🐸"
+                )
+            ]
+        )
+        try JSONEncoder().encode(initialManifest).write(
+            to: initialSource.appendingPathComponent(
+                MojiPondLibrary.manifestFilename
+            )
+        )
+
+        let initialScan = try ImportScanner().scanFolder(at: initialSource)
+        let initialPreview = ImportCollisionAnalyzer.makePreview(
+            scanResult: initialScan,
+            library: try await store.snapshot()
+        )
+        let initialResolved = try ImportCollisionAnalyzer.resolve(
+            preview: initialPreview,
+            decisions: [:],
+            library: try await store.snapshot()
+        )
+        let installed = try await store.install(initialResolved)
+        XCTAssertEqual(installed.items.count, 2)
+        XCTAssertEqual(
+            installed.items.compactMap(\.payload.unicode),
+            ["🐸"]
+        )
+        XCTAssertEqual(
+            installed.items.compactMap(\.payload.asset).count,
+            1
+        )
+
+        let appendSource = workspace.appendingPathComponent(
+            "Append",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: appendSource,
+            withIntermediateDirectories: false
+        )
+        _ = try TestSupport.writeImage(
+            to: appendSource.appendingPathComponent("newt.png"),
+            width: 3,
+            height: 3
+        )
+        let appendManifest = PortablePackManifest(
+            id: try PackIdentifier(validating: "example.mixed.append"),
+            name: "More Pond",
+            version: "1.0.0",
+            emoji: [
+                PortablePackEmoji(
+                    shortcode: try Shortcode(validating: "newt_art"),
+                    file: "newt.png"
+                ),
+                PortablePackEmoji(
+                    shortcode: try Shortcode(validating: "pond_party"),
+                    unicode: "🥳"
+                )
+            ]
+        )
+        try JSONEncoder().encode(appendManifest).write(
+            to: appendSource.appendingPathComponent(
+                MojiPondLibrary.manifestFilename
+            )
+        )
+        let appendScan = try ImportScanner().scanFolder(at: appendSource)
+        let beforeAppend = try await store.snapshot()
+        let appendPreview = ImportCollisionAnalyzer.makePreview(
+            scanResult: appendScan,
+            library: beforeAppend
+        )
+        let appendResolved = try ImportCollisionAnalyzer.resolve(
+            preview: appendPreview,
+            decisions: [:],
+            library: beforeAppend
+        )
+        let appended = try await store.append(
+            appendResolved,
+            to: installed.id
+        )
+        XCTAssertEqual(appended.items.count, 4)
+        XCTAssertEqual(
+            Set(appended.items.compactMap(\.payload.unicode)),
+            Set(["🐸", "🥳"])
+        )
+        XCTAssertEqual(
+            appended.items.compactMap(\.payload.asset).count,
+            2
+        )
+
+        let exported = workspace.appendingPathComponent(
+            "Mixed Export.mojipond",
+            isDirectory: true
+        )
+        _ = try await store.exportPortablePack(installed.id, to: exported)
+        let exportedManifest = try PortablePackManifest.decode(
+            Data(
+                contentsOf: exported.appendingPathComponent(
+                    MojiPondLibrary.manifestFilename
+                )
+            )
+        )
+        XCTAssertEqual(
+            exportedManifest.schemaVersion,
+            PortablePackManifest.currentSchemaVersion
+        )
+        XCTAssertEqual(exportedManifest.emoji.count, 4)
+        XCTAssertEqual(
+            exportedManifest.emoji.filter { $0.file != nil }.count,
+            2
+        )
+        XCTAssertEqual(
+            Set(exportedManifest.emoji.compactMap(\.unicode)),
+            Set(["🐸", "🥳"])
+        )
+        XCTAssertTrue(
+            exportedManifest.emoji.allSatisfy {
+                ($0.file == nil) != ($0.unicode == nil)
+            }
+        )
+
+        let exportedScan = try ImportScanner().scanFolder(at: exported)
+        var comparison = try await store.snapshot()
+        comparison.packs.removeAll { $0.id == installed.id }
+        let replacementPreview = ImportCollisionAnalyzer.makePreview(
+            scanResult: exportedScan,
+            library: comparison
+        )
+        let replacementResolved = try ImportCollisionAnalyzer.resolve(
+            preview: replacementPreview,
+            decisions: [:],
+            library: comparison
+        )
+        let replaced = try await store.replacePackContents(
+            replacementResolved,
+            in: installed.id
+        )
+        XCTAssertEqual(replaced.items.count, 4)
+        XCTAssertEqual(
+            Set(replaced.items.compactMap(\.payload.unicode)),
+            Set(["🐸", "🥳"])
+        )
+
+        let roundTripStore = LibraryStore(
+            rootURL: workspace.appendingPathComponent(
+                "RoundTripLibrary",
+                isDirectory: true
+            )
+        )
+        let roundTripPreview = ImportCollisionAnalyzer.makePreview(
+            scanResult: exportedScan,
+            library: try await roundTripStore.snapshot()
+        )
+        let roundTripResolved = try ImportCollisionAnalyzer.resolve(
+            preview: roundTripPreview,
+            decisions: [:],
+            library: try await roundTripStore.snapshot()
+        )
+        let roundTripped = try await roundTripStore.install(
+            roundTripResolved
+        )
+        XCTAssertEqual(
+            roundTripped.items.map(\.shortcode),
+            appended.items.map(\.shortcode)
+        )
+        XCTAssertEqual(
+            roundTripped.items.compactMap(\.payload.unicode),
+            replaced.items.compactMap(\.payload.unicode)
+        )
+        XCTAssertEqual(
+            roundTripped.items.compactMap { $0.payload.asset?.sha256 },
+            replaced.items.compactMap { $0.payload.asset?.sha256 }
+        )
     }
 
     func testMigratesSchemaOneManifestAtomically() async throws {

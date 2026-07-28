@@ -19,14 +19,15 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Verify tracked files contain no release secrets
         shell: bash
         run: |
           sensitive_files="$(
             git ls-files \
-              | grep -E '(^|/)(\.env($|\.)|[^/]+\.(p8|p12|pem|key|mobileprovision|cer))$' \
+              | grep -E '(^|/)(\.env($|\.)|[^/]+\.(p8|p12|pem|key|mobileprovision|cer)|[^/]*(private|signing)[_-]?key[^/]*)$' \
+              | grep -v -E '(^|/)\.env\.example$' \
               || true
           )"
           if [[ -n "$sensitive_files" ]]; then
@@ -50,8 +51,31 @@ jobs:
             exit 1
           fi
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
+      - name: Install pinned XcodeGen
+        env:
+          XCODEGEN_VERSION: 2.46.0
+          XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
+        run: |
+          mkdir -p .derived/tools
+          curl \
+            --fail \
+            --location \
+            --silent \
+            --show-error \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_VERSION}/xcodegen.zip" \
+            --output .derived/tools/xcodegen.zip
+          printf '%s  %s\n' \
+            "${XCODEGEN_SHA256}" \
+            ".derived/tools/xcodegen.zip" \
+            | shasum -a 256 -c -
+          ditto \
+            -x \
+            -k \
+            .derived/tools/xcodegen.zip \
+            .derived/tools
+          echo "${GITHUB_WORKSPACE}/.derived/tools/xcodegen/bin" \
+            >> "${GITHUB_PATH}"
+          .derived/tools/xcodegen/bin/xcodegen --version
 
       - name: Generate Xcode project
         run: xcodegen generate
@@ -77,3 +101,6 @@ jobs:
             -derivedDataPath .derived/ci \
             CODE_SIGNING_ALLOWED=NO \
             test
+
+      - name: Test signed update feed generator
+        run: /usr/bin/xcrun swift scripts/test-update-feed-generator.swift

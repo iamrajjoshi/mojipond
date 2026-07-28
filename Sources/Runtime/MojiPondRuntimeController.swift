@@ -14,7 +14,9 @@ extension SessionEventTapService: RuntimeEventMonitoring {}
 enum MojiPondRuntimeState: Equatable, Sendable {
     case stopped
     case paused
+    case sessionLocked
     case waitingForPermissions
+    case contextSuspended(RuntimeSessionDenial)
     case running
     case failed(String)
 }
@@ -28,7 +30,9 @@ enum MojiPondRuntimeDiagnostic: Equatable, Sendable {
     case eventTapRepeatedDisablement(totalCount: Int)
     case permissionUnavailable
     case unsupportedTarget
+    case clipboardRestoreFailed
     case sessionDenied(RuntimeSessionDenial)
+    case sessionAllowed
     case catalogLoadFailed(String)
     case startupFailed(String)
 }
@@ -121,6 +125,7 @@ final class MojiPondRuntimeController: ObservableObject {
     private var userEnabled = true
     private var permissionTimer: Timer?
     private var observingWorkspace = false
+    private var sessionIsActive = true
 
     convenience init(
         bundle: Bundle = .main,
@@ -222,8 +227,12 @@ final class MojiPondRuntimeController: ObservableObject {
                 switch diagnostic {
                 case .unsupportedTarget:
                     diagnostics.emit(.unsupportedTarget)
+                case .clipboardRestoreFailed:
+                    diagnostics.emit(.clipboardRestoreFailed)
                 case let .sessionDenied(denial):
                     diagnostics.emit(.sessionDenied(denial))
+                case .sessionAllowed:
+                    diagnostics.emit(.sessionAllowed)
                 case let .mediaCopyFallbackAvailable(fallback):
                     mediaDiagnostics.emit(fallback)
                 }
@@ -248,7 +257,7 @@ final class MojiPondRuntimeController: ObservableObject {
                     .otherMouseDown
                 ],
                 interceptionPolicy: { [gate] snapshot in
-                    gate.decision(for: snapshot)
+                    gate.outcome(for: snapshot)
                 },
                 eventHandler: { [worker] snapshot in
                     worker.enqueue(snapshot)
@@ -380,6 +389,13 @@ final class MojiPondRuntimeController: ObservableObject {
             state = .paused
             return
         }
+        guard sessionIsActive else {
+            eventTap.stop()
+            worker.setCaptureEnabled(false)
+            interceptionGate.setCaptureEnabled(false)
+            state = .sessionLocked
+            return
+        }
 
         let permissions = permissionChecker.currentPermissions()
         guard permissions.canMonitorTyping else {
@@ -393,9 +409,11 @@ final class MojiPondRuntimeController: ObservableObject {
             return
         }
 
+        var didStartMonitor = false
         if !eventTap.isRunning {
             do {
                 try eventTap.start()
+                didStartMonitor = true
             } catch {
                 worker.setCaptureEnabled(false)
                 interceptionGate.setCaptureEnabled(false)
@@ -406,7 +424,14 @@ final class MojiPondRuntimeController: ObservableObject {
         }
         worker.setCaptureEnabled(true)
         interceptionGate.setCaptureEnabled(true)
+        if case .contextSuspended = state {
+            worker.refreshContextState()
+            return
+        }
         state = .running
+        if didStartMonitor {
+            worker.refreshContextState()
+        }
     }
 
     private func loadUsageSnapshot() {
@@ -423,6 +448,25 @@ final class MojiPondRuntimeController: ObservableObject {
     }
 
     private func publish(_ diagnostic: MojiPondRuntimeDiagnostic) {
+        switch diagnostic {
+        case let .sessionDenied(denial):
+            if sessionIsActive {
+                state = denial == .permissionUnavailable
+                    ? .waitingForPermissions
+                    : .contextSuspended(denial)
+            }
+        case .sessionAllowed:
+            if
+                sessionIsActive,
+                wantsToRun,
+                userEnabled,
+                case .contextSuspended = state
+            {
+                state = .running
+            }
+        default:
+            break
+        }
         lastDiagnostic = diagnostic
         onDiagnostic?(diagnostic)
     }
@@ -498,17 +542,34 @@ final class MojiPondRuntimeController: ObservableObject {
     private func frontmostApplicationChanged(_ notification: Notification) {
         _ = notification
         worker.reset(.applicationChanged)
+        worker.refreshContextState()
     }
 
     @objc
     private func screenOrSessionLocked(_ notification: Notification) {
         _ = notification
-        worker.reset(.screenLocked)
+        sessionDidLock()
     }
 
     @objc
     private func screenOrSessionUnlocked(_ notification: Notification) {
         _ = notification
+        sessionDidUnlock()
+    }
+
+    func sessionDidLock() {
+        sessionIsActive = false
+        worker.reset(.screenLocked)
+        eventTap.stop()
+        worker.setCaptureEnabled(false)
+        interceptionGate.setCaptureEnabled(false)
+        if wantsToRun {
+            state = .sessionLocked
+        }
+    }
+
+    func sessionDidUnlock() {
+        sessionIsActive = true
         worker.reset(.externallyCancelled)
         reconcileRuntime()
     }

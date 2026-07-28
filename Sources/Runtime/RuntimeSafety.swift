@@ -78,6 +78,7 @@ enum RuntimeSessionDenial: Error, Equatable, Sendable {
     case secureField
     case secureStatusUnknown
     case applicationUnknown
+    case domainUnknown(String)
     case excludedApplication(String)
     case excludedDomain(String)
 }
@@ -253,10 +254,29 @@ final class RuntimeAccessibilityTextContextProvider:
         if policy.exclusions.domains.isEmpty {
             domain = nil
         } else if let bundleIdentifier {
-            domain = try? browserDomainProvider.host(
-                for: bundleIdentifier,
-                processIdentifier: target.processIdentifier
-            )
+            if AXBrowserDomainProvider.supportsDomainLookup(
+                for: bundleIdentifier
+            ) {
+                do {
+                    guard let verifiedDomain = try browserDomainProvider.host(
+                        for: bundleIdentifier,
+                        processIdentifier: target.processIdentifier
+                    ) else {
+                        throw RuntimeTextCaptureError.denied(
+                            .domainUnknown(bundleIdentifier)
+                        )
+                    }
+                    domain = verifiedDomain
+                } catch let error as RuntimeTextCaptureError {
+                    throw error
+                } catch {
+                    throw RuntimeTextCaptureError.denied(
+                        .domainUnknown(bundleIdentifier)
+                    )
+                }
+            } else {
+                domain = nil
+            }
         } else {
             domain = nil
         }
@@ -279,9 +299,11 @@ final class RuntimeAccessibilityTextContextProvider:
             let capturedContext = try accessibility.context(
                 for: target,
                 trigger: trigger,
-                locateShortcodeToken: true
+                locateShortcodeToken: !expectedToken.isEmpty
             )
-            context = trigger == "/"
+            context = expectedToken.isEmpty
+                ? try Self.caretContext(capturedContext)
+                : trigger == "/"
                 ? try Self.mediaCommandContext(
                     capturedContext,
                     expectedToken: expectedToken
@@ -302,6 +324,30 @@ final class RuntimeAccessibilityTextContextProvider:
             target: target,
             context: context,
             bundleIdentifier: bundleIdentifier
+        )
+    }
+
+    private static func caretContext(
+        _ context: AccessibilityTextContext
+    ) throws -> AccessibilityTextContext {
+        guard
+            context.selection.length == 0,
+            context.caretBounds != nil
+        else {
+            throw RuntimeTextCaptureError.invalidTokenContext
+        }
+        return AccessibilityTextContext(
+            selection: context.selection,
+            caretBounds: context.caretBounds,
+            textFragment: context.textFragment,
+            textFragmentRange: NSRange(
+                location: context.selection.location,
+                length: 0
+            ),
+            tokenRange: NSRange(
+                location: context.selection.location,
+                length: 0
+            )
         )
     }
 
@@ -332,13 +378,32 @@ final class RuntimeAccessibilityTextContextProvider:
         guard fragment.substring(with: localRange) == expectedToken else {
             throw RuntimeTextCaptureError.invalidTokenContext
         }
+        let tokenLocation =
+            context.selection.location - expectedLength
+        if tokenLocation > 0 {
+            guard localRange.location > 0 else {
+                throw RuntimeTextCaptureError.invalidTokenContext
+            }
+            let precedingRange = fragment.rangeOfComposedCharacterSequence(
+                at: localRange.location - 1
+            )
+            let preceding = fragment.substring(with: precedingRange)
+            guard
+                !preceding.isEmpty,
+                preceding.unicodeScalars.allSatisfy({
+                    CharacterSet.whitespacesAndNewlines.contains($0)
+                })
+            else {
+                throw RuntimeTextCaptureError.invalidTokenContext
+            }
+        }
         return AccessibilityTextContext(
             selection: context.selection,
             caretBounds: context.caretBounds,
             textFragment: context.textFragment,
             textFragmentRange: context.textFragmentRange,
             tokenRange: NSRange(
-                location: context.selection.location - expectedLength,
+                location: tokenLocation,
                 length: expectedLength
             )
         )

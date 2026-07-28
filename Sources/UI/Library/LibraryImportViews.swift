@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct LibraryImportSourceView: View {
     @ObservedObject var viewModel: LibraryViewModel
+    let githubImportsAllowed: Bool
     let didSubmit: () -> Void
 
     @State private var source = ImportSource.files
@@ -100,6 +101,11 @@ struct LibraryImportSourceView: View {
                 focusedField = .githubURL
             }
         }
+        .onChange(of: githubImportsAllowed) {
+            if !githubImportsAllowed {
+                allowGitHubNetwork = false
+            }
+        }
     }
 
     private var githubForm: some View {
@@ -107,6 +113,18 @@ struct LibraryImportSourceView: View {
             VStack(alignment: .leading, spacing: 14) {
                 Label("Public GitHub repository", systemImage: "network")
                     .font(.headline)
+
+                if !githubImportsAllowed {
+                    Label(
+                        "Public GitHub imports are off. Enable them in MojiPond Settings → General before reviewing this source.",
+                        systemImage: "network.slash"
+                    )
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel(
+                        "Public GitHub imports are disabled in Settings"
+                    )
+                }
 
                 TextField("https://github.com/owner/repository", text: $githubURL)
                     .textFieldStyle(.roundedBorder)
@@ -131,6 +149,7 @@ struct LibraryImportSourceView: View {
                     .textFieldStyle(.roundedBorder)
 
                 Toggle("Allow this import to contact GitHub", isOn: $allowGitHubNetwork)
+                    .disabled(!githubImportsAllowed)
 
                 HStack {
                     networkExplanation
@@ -155,7 +174,12 @@ struct LibraryImportSourceView: View {
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(githubURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(
+                        !githubImportsAllowed
+                            || githubURL.trimmingCharacters(
+                                in: .whitespacesAndNewlines
+                            ).isEmpty
+                    )
                     .keyboardShortcut(.defaultAction)
                 }
             }
@@ -427,7 +451,7 @@ struct LibraryImportPreviewView: View {
     private func itemPreview(_ session: LibraryImportSession) -> some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Accepted files")
+                Text("Accepted emoji")
                     .font(.headline)
                 Spacer()
                 Text("Source name → shortcode")
@@ -440,11 +464,23 @@ struct LibraryImportPreviewView: View {
                 HStack(spacing: 12) {
                     LibraryImportThumbnail(
                         url: session.sourceURL(for: item.id),
+                        unicode: item.unicode,
                         isAnimated: item.frameCount > 1
                     )
                     VStack(alignment: .leading, spacing: 3) {
                         Text(":\(item.shortcode.rawValue):")
                             .font(.body.monospaced().weight(.medium))
+                        if !item.aliases.isEmpty {
+                            Text(
+                                "Aliases: "
+                                    + item.aliases.map {
+                                        ":\($0.rawValue):"
+                                    }.joined(separator: ", ")
+                            )
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        }
                         Text(item.sourceFilename)
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -452,19 +488,27 @@ struct LibraryImportPreviewView: View {
                     }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 3) {
-                        Text(item.format.displayName)
-                            .font(.caption.weight(.medium))
-                        Text(
-                            "\(item.pixelWidth)×\(item.pixelHeight) · \(ByteCountFormatter.string(fromByteCount: item.byteCount, countStyle: .file))"
-                        )
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        if let format = item.format {
+                            Text(format.displayName)
+                                .font(.caption.weight(.medium))
+                            Text(
+                                "\(item.pixelWidth)×\(item.pixelHeight) · \(ByteCountFormatter.string(fromByteCount: item.byteCount, countStyle: .file))"
+                            )
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        } else {
+                            Text("Unicode")
+                                .font(.caption.weight(.medium))
+                            Text("Text emoji")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
                 .padding(.vertical, 3)
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(
-                    "\(item.sourceFilename), normalized to colon \(item.shortcode.rawValue) colon, \(item.format.displayName)"
+                    itemAccessibilityLabel(item)
                 )
             }
             .listStyle(.inset)
@@ -507,6 +551,14 @@ struct LibraryImportPreviewView: View {
                 List(session.preview.collisions) { collision in
                     LibraryCollisionRow(
                         collision: collision,
+                        incoming: conflictIncoming(
+                            collision,
+                            session: session
+                        ),
+                        existing: conflictExisting(
+                            collision,
+                            session: session
+                        ),
                         choice: viewModel.conflictChoices[collision.id],
                         renameValue: viewModel.conflictRenameValues[collision.id, default: ""],
                         setChoice: {
@@ -520,6 +572,111 @@ struct LibraryImportPreviewView: View {
                 }
                 .listStyle(.inset)
             }
+        }
+    }
+
+    private func itemAccessibilityLabel(
+        _ item: ImportPreviewItem
+    ) -> String {
+        let aliases = item.aliases.isEmpty
+            ? "no aliases"
+            : "aliases "
+                + item.aliases.map(\.rawValue).joined(separator: ", ")
+        return "\(item.sourceFilename), normalized to colon "
+            + "\(item.shortcode.rawValue) colon, \(aliases), "
+            + "\(item.format?.displayName ?? "Unicode")"
+    }
+
+    private func conflictIncoming(
+        _ collision: ImportCollision,
+        session: LibraryImportSession
+    ) -> LibraryConflictItemPresentation {
+        guard
+            let item = session.preview.items.first(where: {
+                $0.id == collision.incomingCandidateID
+            })
+        else {
+            return .unavailable(
+                heading: "Incoming",
+                detail: "Incoming item is unavailable"
+            )
+        }
+        return LibraryConflictItemPresentation(
+            heading: "Incoming",
+            shortcode: item.shortcode.rawValue,
+            aliases: item.aliases.map(\.rawValue),
+            detail: item.sourceFilename,
+            url: session.sourceURL(for: item.id),
+            unicode: item.unicode,
+            isAnimated: item.frameCount > 1
+        )
+    }
+
+    private func conflictExisting(
+        _ collision: ImportCollision,
+        session: LibraryImportSession
+    ) -> LibraryConflictItemPresentation {
+        switch collision.existing {
+        case let .library(owner):
+            let displayItem = viewModel.allDisplayItems.first {
+                $0.id == "custom-\(owner.itemID.uuidString)"
+            }
+            return LibraryConflictItemPresentation(
+                heading: "Existing · \(owner.packName)",
+                shortcode: displayItem?.shortcode
+                    ?? collision.shortcode.rawValue,
+                aliases: displayItem?.aliases ?? [],
+                detail: owner.isAlias
+                    ? "Currently claims this as an alias"
+                    : "Currently owns this shortcode",
+                url: displayItem?.assetURL,
+                unicode: displayItem?.unicode,
+                isAnimated: displayItem?.isAnimated ?? false
+            )
+        case let .reserved(owner):
+            let heading = switch owner.source {
+            case .builtIn:
+                "Protected · \(owner.packName)"
+            case .customAlias:
+                "Protected · Your alias"
+            }
+            return LibraryConflictItemPresentation(
+                heading: heading,
+                shortcode: owner.shortcode.rawValue,
+                aliases: owner.isAlias ? [owner.shortcode.rawValue] : [],
+                detail: owner.isAlias
+                    ? "\(owner.itemName) currently claims this as an alias"
+                    : "\(owner.itemName) currently owns this shortcode",
+                url: nil,
+                unicode: nil,
+                isAnimated: false
+            )
+        case let .incoming(candidateID, claim):
+            guard
+                let item = session.preview.items.first(where: {
+                    $0.id == candidateID
+                })
+            else {
+                return .unavailable(
+                    heading: "Earlier incoming item",
+                    detail: "Earlier item is unavailable"
+                )
+            }
+            let claimDescription = switch claim {
+            case .primary:
+                "Also claims this as its primary shortcode"
+            case .alias:
+                "Also claims this as an alias"
+            }
+            return LibraryConflictItemPresentation(
+                heading: "Earlier incoming item",
+                shortcode: item.shortcode.rawValue,
+                aliases: item.aliases.map(\.rawValue),
+                detail: claimDescription,
+                url: session.sourceURL(for: item.id),
+                unicode: item.unicode,
+                isAnimated: item.frameCount > 1
+            )
         }
     }
 
@@ -626,7 +783,7 @@ struct LibraryImportPreviewView: View {
             .keyboardShortcut(.defaultAction)
             .accessibilityHint(
                 viewModel.canInstallImport
-                    ? "Copies the reviewed files into MojiPond"
+                    ? "Copies the reviewed emoji into MojiPond"
                     : "Resolve all shortcode conflicts first"
             )
         }
@@ -646,7 +803,7 @@ struct LibraryImportPreviewView: View {
         case .newPack:
             "Review “\(session.preview.preparedPack.name)”"
         case let .append(packID):
-            "Review files to add to \(packName(packID))"
+            "Review emoji to add to \(packName(packID))"
         case let .replace(packID):
             "Review update for \(packName(packID))"
         }
@@ -702,6 +859,8 @@ struct LibraryImportPreviewView: View {
 
 private struct LibraryCollisionRow: View {
     let collision: ImportCollision
+    let incoming: LibraryConflictItemPresentation
+    let existing: LibraryConflictItemPresentation
     let choice: LibraryConflictChoice?
     let renameValue: String
     let setChoice: (LibraryConflictChoice) -> Void
@@ -735,6 +894,16 @@ private struct LibraryCollisionRow: View {
                 .accessibilityLabel("Resolution for \(collision.shortcode.rawValue)")
             }
 
+            HStack(alignment: .top, spacing: 10) {
+                conflictIdentity(incoming)
+                Image(systemName: "arrow.left.arrow.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(maxHeight: .infinity)
+                    .accessibilityHidden(true)
+                conflictIdentity(existing)
+            }
+
             if choice == .renameIncoming {
                 HStack {
                     Text(":")
@@ -758,12 +927,59 @@ private struct LibraryCollisionRow: View {
         .accessibilityElement(children: .contain)
     }
 
+    private func conflictIdentity(
+        _ item: LibraryConflictItemPresentation
+    ) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            LibraryImportThumbnail(
+                url: item.url,
+                unicode: item.unicode,
+                isAnimated: item.isAnimated
+            )
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.heading)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(":\(item.shortcode):")
+                    .font(.callout.monospaced().weight(.medium))
+                if !item.aliases.isEmpty {
+                    Text(
+                        "Aliases: "
+                            + item.aliases.map {
+                                ":\($0):"
+                            }.joined(separator: ", ")
+                    )
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                }
+                Text(item.detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            .background.secondary,
+            in: RoundedRectangle(cornerRadius: 9)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(item.accessibilityLabel)
+    }
+
     private var availableChoices: [LibraryConflictChoice] {
         var values: [LibraryConflictChoice] = [
             .keepExisting,
-            .replaceExisting,
             .renameIncoming
         ]
+        if case .reserved = collision.existing {
+            // Built-in names and user aliases are protected from pack imports.
+        } else {
+            values.insert(.replaceExisting, at: 1)
+        }
         if case .alias = collision.incomingClaim {
             values.append(.dropIncomingAlias)
         }
@@ -780,6 +996,13 @@ private struct LibraryCollisionRow: View {
         let existing = switch collision.existing {
         case let .library(owner):
             "already belongs to \(owner.packName)"
+        case let .reserved(owner):
+            switch owner.source {
+            case .builtIn:
+                "is protected by \(owner.packName)"
+            case .customAlias:
+                "is already one of your aliases"
+            }
         case .incoming:
             "is also claimed by another incoming emoji"
         }
@@ -787,13 +1010,50 @@ private struct LibraryCollisionRow: View {
     }
 }
 
+private struct LibraryConflictItemPresentation {
+    let heading: String
+    let shortcode: String
+    let aliases: [String]
+    let detail: String
+    let url: URL?
+    let unicode: String?
+    let isAnimated: Bool
+
+    var accessibilityLabel: String {
+        let aliasDescription = aliases.isEmpty
+            ? "no aliases"
+            : "aliases " + aliases.joined(separator: ", ")
+        return "\(heading), colon \(shortcode) colon, "
+            + "\(aliasDescription), \(detail)"
+    }
+
+    static func unavailable(
+        heading: String,
+        detail: String
+    ) -> Self {
+        Self(
+            heading: heading,
+            shortcode: "unavailable",
+            aliases: [],
+            detail: detail,
+            url: nil,
+            unicode: nil,
+            isAnimated: false
+        )
+    }
+}
+
 private struct LibraryImportThumbnail: View {
     let url: URL?
+    let unicode: String?
     let isAnimated: Bool
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            if let url {
+            if let unicode {
+                Text(unicode)
+                    .font(.system(size: 28))
+            } else if let url {
                 LibraryAssetArtwork(url: url)
             } else {
                 Image(systemName: "photo")

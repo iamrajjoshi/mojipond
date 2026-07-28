@@ -38,6 +38,7 @@ final class SignedUpdateCheckerTests: XCTestCase {
         XCTAssertEqual(metadata.assetSHA256, String(repeating: "a", count: 64))
         XCTAssertEqual(metadata.assetByteCount, 12_345)
         XCTAssertEqual(metadata.verificationAlgorithm, .ed25519)
+        XCTAssertEqual(metadata.verificationKeySHA256.count, 64)
         XCTAssertEqual(metadata.signedPayloadSHA256.count, 64)
     }
 
@@ -251,6 +252,34 @@ final class SignedUpdateCheckerTests: XCTestCase {
         }
     }
 
+    func testSignedPayloadRejectsMalformedMinimumSystemVersion()
+        async throws
+    {
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let payload = try makePayload(
+            minimumSystemVersion: "14.beta"
+        )
+        let response = try makeResponse(
+            payload: payload,
+            signature: try privateKey.signature(for: payload),
+            algorithm: .ed25519
+        )
+        let checker = SignedUpdateChecker(
+            configuration: SignedUpdateConfiguration(
+                feedURL: feedURL,
+                publicKey: .ed25519(
+                    rawRepresentation:
+                        privateKey.publicKey.rawRepresentation
+                )
+            ),
+            fetcher: MockUpdateFeedFetcher { _ in response }
+        )
+
+        await assertCheckError(.invalidMinimumSystemVersion) {
+            try await checker.check(for: .manual)
+        }
+    }
+
     func testHTTPSRequestCannotRedirectToHTTP() async {
         let privateKey = Curve25519.Signing.PrivateKey()
         let checker = SignedUpdateChecker(
@@ -309,6 +338,7 @@ final class SignedUpdateCheckerTests: XCTestCase {
     private func makePayload(
         version: String = "1.2.3",
         build: Int = 42,
+        minimumSystemVersion: String? = "14.0",
         downloadURL: URL = URL(string: "https://updates.example.com/MojiPond.zip")!
     ) throws -> Data {
         let payload = UpdatePayloadFixture(
@@ -316,7 +346,7 @@ final class SignedUpdateCheckerTests: XCTestCase {
             version: version,
             build: build,
             publishedAt: Date(timeIntervalSince1970: 1_800_000_000),
-            minimumSystemVersion: "14.0",
+            minimumSystemVersion: minimumSystemVersion,
             downloadURL: downloadURL,
             releaseNotesURL: URL(string: "https://updates.example.com/notes/1.2.3"),
             assetSHA256: String(repeating: "a", count: 64),
@@ -388,8 +418,12 @@ private struct MockUpdateFeedFetcher: UpdateFeedFetching {
         self.handler = handler
     }
 
-    func fetchUpdateFeed(from url: URL) async throws -> UpdateFeedResponse {
-        try await handler(url)
+    func fetchUpdateFeed(
+        from url: URL,
+        maximumBytes: Int
+    ) async throws -> UpdateFeedResponse {
+        _ = maximumBytes
+        return try await handler(url)
     }
 }
 
@@ -401,8 +435,12 @@ private actor CountingUpdateFeedFetcher: UpdateFeedFetching {
         self.response = response
     }
 
-    func fetchUpdateFeed(from url: URL) async throws -> UpdateFeedResponse {
+    func fetchUpdateFeed(
+        from url: URL,
+        maximumBytes: Int
+    ) async throws -> UpdateFeedResponse {
         _ = url
+        _ = maximumBytes
         count += 1
         return response
     }
@@ -413,7 +451,11 @@ private actor CountingUpdateFeedFetcher: UpdateFeedFetching {
 }
 
 private struct SuspendingUpdateFeedFetcher: UpdateFeedFetching {
-    func fetchUpdateFeed(from url: URL) async throws -> UpdateFeedResponse {
+    func fetchUpdateFeed(
+        from url: URL,
+        maximumBytes: Int
+    ) async throws -> UpdateFeedResponse {
+        _ = maximumBytes
         try await Task.sleep(for: .seconds(30))
         return UpdateFeedResponse(data: Data(), finalURL: url)
     }

@@ -67,6 +67,77 @@ final class MojiPondRuntimeControllerTests: XCTestCase {
         controller.stop()
     }
 
+    func testLockStopsMonitorAndUnlockRestartsIt() {
+        let permissions = MutableRuntimePermissionChecker(
+            permissions: RuntimePermissionPreflight(
+                inputMonitoringGranted: true,
+                accessibilityGranted: true
+            )
+        )
+        let monitor = FakeRuntimeEventMonitor()
+        let controller = makeController(
+            permissions: permissions,
+            monitor: monitor
+        )
+        controller.start()
+
+        controller.sessionDidLock()
+        XCTAssertEqual(controller.state, .sessionLocked)
+        XCTAssertFalse(monitor.isRunning)
+        XCTAssertEqual(monitor.stopCount, 1)
+
+        controller.sessionDidUnlock()
+        XCTAssertEqual(controller.state, .running)
+        XCTAssertTrue(monitor.isRunning)
+        XCTAssertEqual(monitor.startCount, 2)
+        controller.stop()
+    }
+
+    func testSecureInputSuspendsAndSameAppRecoveryReturnsToRunning() async {
+        let permissions = MutableRuntimePermissionChecker(
+            permissions: RuntimePermissionPreflight(
+                inputMonitoringGranted: true,
+                accessibilityGranted: true
+            )
+        )
+        let monitor = FakeRuntimeEventMonitor()
+        let secureInput = MutableRuntimeSecureInputChecker(isEnabled: true)
+        let textSystem = FakeAccessibilityTextSystem()
+        textSystem.text = ""
+        textSystem.selection = NSRange(location: 0, length: 0)
+        let item = EmojiItem(
+            id: "test.frog",
+            shortcode: Shortcode(rawValue: "frog")!,
+            name: "frog",
+            category: "test",
+            content: .unicode(UnicodeEmojiContent(value: "🐸")),
+            packID: "test"
+        )
+        let controller = MojiPondRuntimeController(
+            searchIndex: EmojiSearchIndex(items: [item]),
+            permissionChecker: permissions,
+            secureInputChecker: secureInput,
+            applicationIdentity: FixedRuntimeIdentityProvider(),
+            presenter: RuntimeLifecyclePresenter(),
+            accessibility: AccessibilityTextAdapter(system: textSystem),
+            eventMonitor: monitor
+        )
+
+        controller.start()
+
+        let suspended = await eventually {
+            controller.state == .contextSuspended(.secureEventInput)
+        }
+        XCTAssertTrue(suspended)
+
+        secureInput.isEnabled = false
+        let recovered = await eventually(timeout: .seconds(2)) {
+            controller.state == .running
+        }
+        XCTAssertTrue(recovered)
+        controller.stop()
+    }
+
     private func makeController(
         permissions: MutableRuntimePermissionChecker,
         monitor: FakeRuntimeEventMonitor
@@ -85,6 +156,51 @@ final class MojiPondRuntimeControllerTests: XCTestCase {
             presenter: RuntimeLifecyclePresenter(),
             eventMonitor: monitor
         )
+    }
+
+    private func eventually(
+        timeout: Duration = .seconds(1),
+        condition: @escaping @MainActor () -> Bool
+    ) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        while clock.now < deadline {
+            if condition() {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return condition()
+    }
+}
+
+private final class MutableRuntimeSecureInputChecker:
+    RuntimeSecureInputChecking,
+    @unchecked Sendable
+{
+    private let lock = NSLock()
+    private var storedValue: Bool
+
+    init(isEnabled: Bool) {
+        storedValue = isEnabled
+    }
+
+    var isEnabled: Bool {
+        get { lock.withLock { storedValue } }
+        set { lock.withLock { storedValue = newValue } }
+    }
+
+    var secureEventInputEnabled: Bool {
+        isEnabled
+    }
+}
+
+private struct FixedRuntimeIdentityProvider:
+    RuntimeApplicationIdentityProviding
+{
+    func bundleIdentifier(for processIdentifier: pid_t) -> String? {
+        _ = processIdentifier
+        return "com.example.Editor"
     }
 }
 

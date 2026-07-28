@@ -77,6 +77,7 @@ enum RuntimeMediaCopyFallbackReason: Equatable, Sendable {
     case notMessages
     case managedLibraryUnavailable
     case invalidManagedAsset
+    case animatedWebPExperimental
     case downloadFailed
     case unsupportedDownloadedMedia
     case insertionFailed(InsertionFailureReason)
@@ -103,6 +104,7 @@ enum RuntimeMediaDownloadError: Error, Equatable, Sendable {
     case tooLarge(limit: Int)
     case unsupportedContentType
     case contentTypeMismatch
+    case unsafeImage
 }
 
 enum RuntimeMediaPayloadBuilder {
@@ -140,43 +142,37 @@ enum RuntimeMediaPayloadBuilder {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased(with: Locale(identifier: "en_US_POSIX"))
         let uniformType: UTType
-        let matchesMagic: Bool
+        let expectedFormat: AssetFormat
         switch normalizedType {
         case "image/png":
             uniformType = .png
-            matchesMagic = download.data.starts(with: [
-                0x89, 0x50, 0x4E, 0x47,
-                0x0D, 0x0A, 0x1A, 0x0A
-            ])
+            expectedFormat = .png
         case "image/jpeg", "image/jpg":
             uniformType = .jpeg
-            matchesMagic = download.data.count >= 3
-                && download.data[download.data.startIndex] == 0xFF
-                && download.data[
-                    download.data.index(after: download.data.startIndex)
-                ] == 0xD8
-                && download.data[
-                    download.data.index(
-                        download.data.startIndex,
-                        offsetBy: 2
-                    )
-                ] == 0xFF
+            expectedFormat = .jpeg
         case "image/gif":
             uniformType = .gif
-            matchesMagic =
-                download.data.starts(with: Data("GIF87a".utf8))
-                || download.data.starts(with: Data("GIF89a".utf8))
+            expectedFormat = .gif
         case "image/webp":
             uniformType = .webP
-            matchesMagic = download.data.count >= 12
-                && download.data.prefix(4) == Data("RIFF".utf8)
-                && download.data.dropFirst(8).prefix(4)
-                    == Data("WEBP".utf8)
+            expectedFormat = .webP
         default:
             throw RuntimeMediaDownloadError.unsupportedContentType
         }
-        guard matchesMagic else {
-            throw RuntimeMediaDownloadError.contentTypeMismatch
+        var limits = AssetValidationLimits.default
+        limits.maximumFileBytes = Int64(maximumBytes)
+        do {
+            _ = try AssetValidator(limits: limits).validate(
+                data: download.data,
+                expectedFormat: expectedFormat
+            )
+        } catch let error as AssetValidationError {
+            if case .dataTypeMismatch = error {
+                throw RuntimeMediaDownloadError.contentTypeMismatch
+            }
+            throw RuntimeMediaDownloadError.unsafeImage
+        } catch {
+            throw RuntimeMediaDownloadError.unsafeImage
         }
         return uniformType
     }

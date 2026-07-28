@@ -7,6 +7,6 @@
   "sha256": "b174ae2aeb321b52f64adb9ff412f966a7f338839d780784dd15dcad702c2dd6",
   "license": "MIT",
   "licensePath": "ThirdParty/gemoji/LICENSE",
+  "bundledNotice": "THIRD-PARTY-NOTICES.txt",
   "pinnedOn": "2026-07-27"
 }
-

@@ -180,6 +180,8 @@ final class FakePasteboard: PasteboardAccessing {
     var writesSucceed = true
     var failingWriteAttempts: Set<Int> = []
     var failedWriteClearsContents = false
+    var failedWriteKeepsAttemptedContents = false
+    var failedWriteReplacement: [PasteboardItemPayload]?
     private(set) var writeAttempts = 0
 
     init(items: [PasteboardItemPayload] = []) {
@@ -210,7 +212,13 @@ final class FakePasteboard: PasteboardAccessing {
     func replaceContents(with items: [PasteboardItemPayload]) -> Bool {
         writeAttempts += 1
         guard writesSucceed, !failingWriteAttempts.contains(writeAttempts) else {
-            if failedWriteClearsContents {
+            if let failedWriteReplacement {
+                self.items = failedWriteReplacement
+                changeCount += 1
+            } else if failedWriteKeepsAttemptedContents {
+                self.items = items
+                changeCount += 1
+            } else if failedWriteClearsContents {
                 self.items = []
                 changeCount += 1
             }
@@ -231,16 +239,18 @@ final class FakeEventPoster: SyntheticEventPosting, @unchecked Sendable {
     var canPostEvents: Bool
     var error: Error?
     private(set) var pasteCount = 0
+    private(set) var targetProcessIdentifiers: [pid_t] = []
 
     init(canPostEvents: Bool = true) {
         self.canPostEvents = canPostEvents
     }
 
-    func postPasteShortcut() throws {
+    func postPasteShortcut(to processIdentifier: pid_t) throws {
         if let error {
             throw error
         }
         pasteCount += 1
+        targetProcessIdentifiers.append(processIdentifier)
     }
 }
 

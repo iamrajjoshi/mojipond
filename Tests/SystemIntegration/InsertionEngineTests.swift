@@ -76,6 +76,10 @@ final class InsertionEngineTests: XCTestCase {
             [NSRange(location: 5, length: 6)]
         )
         XCTAssertEqual(poster.pasteCount, 1)
+        XCTAssertEqual(
+            poster.targetProcessIdentifiers,
+            [request.target.processIdentifier]
+        )
         XCTAssertEqual(pasteboard.items, originalClipboard)
     }
 

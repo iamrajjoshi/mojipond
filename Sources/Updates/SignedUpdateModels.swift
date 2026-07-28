@@ -1,5 +1,59 @@
 import Foundation
 
+struct UpdateSystemVersion: Comparable, Equatable, Sendable {
+    let major: Int
+    let minor: Int
+    let patch: Int
+
+    init?(_ value: String) {
+        let components = value.split(
+            separator: ".",
+            omittingEmptySubsequences: false
+        )
+        guard (1...3).contains(components.count) else {
+            return nil
+        }
+        var parsed: [Int] = []
+        parsed.reserveCapacity(3)
+        for component in components {
+            guard
+                !component.isEmpty,
+                component.utf8.allSatisfy({ (0x30...0x39).contains($0) }),
+                let number = Int(component)
+            else {
+                return nil
+            }
+            parsed.append(number)
+        }
+        while parsed.count < 3 {
+            parsed.append(0)
+        }
+        major = parsed[0]
+        minor = parsed[1]
+        patch = parsed[2]
+    }
+
+    init(_ value: OperatingSystemVersion) {
+        major = value.majorVersion
+        minor = value.minorVersion
+        patch = value.patchVersion
+    }
+
+    var displayString: String {
+        patch == 0
+            ? "\(major).\(minor)"
+            : "\(major).\(minor).\(patch)"
+    }
+
+    static func < (
+        lhs: UpdateSystemVersion,
+        rhs: UpdateSystemVersion
+    ) -> Bool {
+        (lhs.major, lhs.minor, lhs.patch)
+            < (rhs.major, rhs.minor, rhs.patch)
+    }
+}
+
 enum UpdateSignatureAlgorithm: String, Codable, Equatable, Sendable {
     case ed25519
     case p256SHA256 = "p256-sha256"
@@ -69,6 +123,7 @@ struct VerifiedUpdateMetadata: Equatable, Sendable {
     let assetSHA256: String
     let assetByteCount: Int64
     let verificationAlgorithm: UpdateSignatureAlgorithm
+    let verificationKeySHA256: String
     let signedPayloadSHA256: String
 
     init(
@@ -81,6 +136,7 @@ struct VerifiedUpdateMetadata: Equatable, Sendable {
         assetSHA256: String,
         assetByteCount: Int64,
         verificationAlgorithm: UpdateSignatureAlgorithm,
+        verificationKeySHA256: String,
         signedPayloadSHA256: String,
         verificationProof: UpdateVerificationProof
     ) {
@@ -94,6 +150,7 @@ struct VerifiedUpdateMetadata: Equatable, Sendable {
         self.assetSHA256 = assetSHA256
         self.assetByteCount = assetByteCount
         self.verificationAlgorithm = verificationAlgorithm
+        self.verificationKeySHA256 = verificationKeySHA256
         self.signedPayloadSHA256 = signedPayloadSHA256
     }
 }
@@ -112,6 +169,7 @@ enum SignedUpdateCheckError: Error, Equatable, LocalizedError, Sendable {
     case unsupportedPayloadSchema(Int)
     case invalidVersion
     case invalidBuild
+    case invalidMinimumSystemVersion
     case invalidDownloadURL
     case invalidReleaseNotesURL
     case invalidAssetDigest
@@ -147,6 +205,8 @@ enum SignedUpdateCheckError: Error, Equatable, LocalizedError, Sendable {
             "The update version is invalid."
         case .invalidBuild:
             "The update build number is invalid."
+        case .invalidMinimumSystemVersion:
+            "The update minimum macOS version is invalid."
         case .invalidDownloadURL:
             "The update download URL must use HTTPS."
         case .invalidReleaseNotesURL:
@@ -176,5 +236,8 @@ struct UpdateFeedResponse: Equatable, Sendable {
 }
 
 protocol UpdateFeedFetching: Sendable {
-    func fetchUpdateFeed(from url: URL) async throws -> UpdateFeedResponse
+    func fetchUpdateFeed(
+        from url: URL,
+        maximumBytes: Int
+    ) async throws -> UpdateFeedResponse
 }

@@ -78,3 +78,41 @@ targets:
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: "-"
         DEVELOPMENT_TEAM: ""
+    scheme:
+      testTargets:
+        - MojiPondIntegrationFixtureUITests
+
+  MojiPondUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: UITests/MojiPond
+    dependencies:
+      - target: MojiPond
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rajjoshi.MojiPondUITests
+        GENERATE_INFOPLIST_FILE: YES
+        ENABLE_HARDENED_RUNTIME: NO
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""
+    scheme:
+      testTargets:
+        - MojiPondUITests
+
+  MojiPondIntegrationFixtureUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: UITests/IntegrationFixture
+    dependencies:
+      - target: MojiPondIntegrationFixture
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rajjoshi.MojiPondIntegrationFixtureUITests
+        GENERATE_INFOPLIST_FILE: YES
+        ENABLE_HARDENED_RUNTIME: NO
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""

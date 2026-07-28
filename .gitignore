@@ -7,6 +7,7 @@ DerivedData/
 build/
 MojiPond.xcodeproj/
 *.xcarchive
+*.xcresult
 *.dSYM
 *.dSYM.zip
 *.ipa
@@ -37,8 +38,16 @@ work/
 Secrets.xcconfig
 *.p8
 *.p12
+*.pem
+*.key
 *.cer
 *.mobileprovision
 *.provisionprofile
+*.private-key
+*.private-key.*
+*-private-key
+*-private-key.*
+*-signing-key
+*-signing-key.*
 sparkle_private_key*
 notarytool-profile*

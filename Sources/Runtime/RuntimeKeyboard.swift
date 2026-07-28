@@ -157,6 +157,12 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
     }
 
     func decision(for snapshot: KeyboardEventSnapshot) -> EventInterceptionDecision {
+        outcome(for: snapshot).decision
+    }
+
+    func outcome(
+        for snapshot: KeyboardEventSnapshot
+    ) -> EventInterceptionOutcome {
         let current = lock.withLock {
             state
         }
@@ -169,26 +175,48 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
             return .passThrough
         }
 
-        switch snapshot.keyCode {
+        let decision: EventInterceptionDecision = switch snapshot.keyCode {
         case RuntimeKeyboardKeyCode.escape:
-            return .intercept
+            .intercept
         case RuntimeKeyboardKeyCode.leftArrow,
              RuntimeKeyboardKeyCode.rightArrow:
-            return current.mode == .media ? .intercept : .passThrough
+            current.mode == .media ? .intercept : .passThrough
         case RuntimeKeyboardKeyCode.upArrow,
              RuntimeKeyboardKeyCode.downArrow:
-            return .intercept
+            .intercept
         case RuntimeKeyboardKeyCode.tab:
-            return current.acceptsTab || current.mode == .browser
+            current.acceptsTab || current.mode == .browser
                 ? .intercept
                 : .passThrough
         case RuntimeKeyboardKeyCode.returnKey, RuntimeKeyboardKeyCode.keypadEnter:
-            return current.acceptsReturn || current.mode == .browser
+            current.acceptsReturn || current.mode == .browser
+                ? .intercept
+                : .passThrough
+        case RuntimeKeyboardKeyCode.delete:
+            current.mode == .browser
                 ? .intercept
                 : .passThrough
         default:
-            return .passThrough
+            current.mode == .browser
+                    && isValidBrowserQueryCharacter(snapshot.characters)
+                ? .intercept
+                : .passThrough
         }
+        return decision == .intercept
+            ? .intercepting(current.mode)
+            : .passThrough
+    }
+
+    private func isValidBrowserQueryCharacter(
+        _ characters: String?
+    ) -> Bool {
+        guard
+            let characters,
+            characters.count == 1
+        else {
+            return false
+        }
+        return EmojiAliasSyntax.isValidToken(characters)
     }
 
     private func hasUnsupportedNavigationModifiers(_ flags: CGEventFlags) -> Bool {

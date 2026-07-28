@@ -5,20 +5,58 @@ import Foundation
 protocol LibraryImportPreparing: Sendable {
     func prepare(
         _ request: ImportRequest,
-        against library: MojiPondLibrary
+        against library: MojiPondLibrary,
+        reservedShortcodeOwners: [ReservedShortcodeOwner]
     ) async throws -> ImportPreparation
+}
+
+extension LibraryImportPreparing {
+    func prepare(
+        _ request: ImportRequest,
+        against library: MojiPondLibrary
+    ) async throws -> ImportPreparation {
+        try await prepare(
+            request,
+            against: library,
+            reservedShortcodeOwners: []
+        )
+    }
 }
 
 extension ImportOrchestrator: LibraryImportPreparing {}
 
+protocol LibraryGitHubRevisionResolving: Sendable {
+    func resolveRevision(
+        from repositoryURL: URL,
+        ref: String?,
+        subdirectory: String?
+    ) async throws -> GitHubResolvedRevision
+}
+
+extension GitHubImportClient: LibraryGitHubRevisionResolving {}
+
+enum LibraryGitHubRevisionState: Equatable, Sendable {
+    case checking
+    case current(revision: String)
+    case updateAvailable(installed: String?, latest: String)
+    case failed(String)
+}
+
+private enum LibraryPasteboardSource: Sendable {
+    case ready(PasteboardItemPayload)
+    case managed(MediaEmojiContent, rootURL: URL)
+}
+
 @MainActor
 final class LibraryViewModel: ObservableObject {
     typealias MutationCallback = @MainActor (MojiPondLibrary) -> Void
+    typealias UsageMutationCallback = @MainActor () -> Void
     typealias BuiltInPackLoader = @Sendable () throws -> EmojiCatalogPack
 
     @Published private(set) var loadState: LibraryLoadState = .idle
     @Published private(set) var library = MojiPondLibrary()
     @Published private(set) var builtInPack: EmojiCatalogPack?
+    @Published private(set) var usageSnapshot = EmojiUsageSnapshot()
     @Published var scope: LibraryScope = .all
     @Published var searchText = ""
     @Published var categoryFilter: String?
@@ -32,36 +70,60 @@ final class LibraryViewModel: ObservableObject {
     @Published var pendingRemoval: LibraryRemovalTarget?
     @Published var notice: LibraryNotice?
     @Published private(set) var undoMessage: String?
+    @Published private(set) var githubRevisionStates:
+        [UUID: LibraryGitHubRevisionState] = [:]
 
     let paths: ApplicationPaths
+    let thumbnailService: any LibraryThumbnailServing
 
     private let store: LibraryStore
     private let importer: any LibraryImportPreparing
+    private let githubRevisionResolver:
+        any LibraryGitHubRevisionResolving
     private let builtInLoader: BuiltInPackLoader
     private let onMutation: MutationCallback
     private let pasteboard: any PasteboardAccessing
+    private let usageStore: (any EmojiUsageStore)?
+    private let onUsageMutation: UsageMutationCallback
     private var preparation: ImportPreparation?
     private var importTask: Task<Void, Never>?
+    private var importOperationID: UUID?
     private var undoMutation: UndoMutation?
 
     init(
         store: LibraryStore,
         paths: ApplicationPaths,
         importer: (any LibraryImportPreparing)? = nil,
+        githubRevisionResolver:
+            (any LibraryGitHubRevisionResolving)? = nil,
         builtInLoader: @escaping BuiltInPackLoader = {
             try BuiltInRuntimeCatalogLoader().loadPack()
         },
+        thumbnailService: (any LibraryThumbnailServing)? = nil,
         pasteboard: any PasteboardAccessing = MacPasteboardAccess(),
-        onMutation: @escaping MutationCallback = { _ in }
+        usageStore: (any EmojiUsageStore)? = nil,
+        onMutation: @escaping MutationCallback = { _ in },
+        onUsageMutation: @escaping UsageMutationCallback = {}
     ) {
         self.store = store
         self.paths = paths
         self.importer = importer ?? ImportOrchestrator(
             temporaryRootURL: paths.importStagingRoot
         )
+        self.githubRevisionResolver =
+            githubRevisionResolver ?? GitHubImportClient()
         self.builtInLoader = builtInLoader
+        self.thumbnailService =
+            thumbnailService ?? LibraryThumbnailPipeline(
+                rootURL: paths.cachesRoot.appendingPathComponent(
+                    "Library Thumbnails",
+                    isDirectory: true
+                )
+            )
         self.pasteboard = pasteboard
+        self.usageStore = usageStore
         self.onMutation = onMutation
+        self.onUsageMutation = onUsageMutation
     }
 
     static func live(
@@ -69,9 +131,17 @@ final class LibraryViewModel: ObservableObject {
     ) -> LibraryViewModel {
         do {
             let paths = try ApplicationPaths.live()
+            let builtInPack = try BuiltInRuntimeCatalogLoader().loadPack()
             return LibraryViewModel(
-                store: LibraryStore(rootURL: paths.libraryRoot),
+                store: LibraryStore(
+                    rootURL: paths.libraryRoot,
+                    reservedShortcodes:
+                        BuiltInShortcodeReservations.shortcodes(
+                            in: builtInPack
+                        )
+                ),
                 paths: paths,
+                builtInLoader: { builtInPack },
                 onMutation: onMutation
             )
         } catch {
@@ -121,6 +191,8 @@ final class LibraryViewModel: ObservableObject {
             switch scope {
             case .all:
                 true
+            case .favorites:
+                isFavorite(item)
             case .builtIn:
                 item.origin == .builtIn
             case .custom:
@@ -158,7 +230,7 @@ final class LibraryViewModel: ObservableObject {
                 item.displayName,
                 item.category,
                 item.packName
-            ] + item.aliases + item.tags
+            ] + item.aliases + customAliases(for: item) + item.tags
             return values.contains {
                 Self.normalizedSearch($0).contains(query)
             }
@@ -170,6 +242,8 @@ final class LibraryViewModel: ObservableObject {
             switch scope {
             case .all:
                 return item.category
+            case .favorites:
+                return isFavorite(item) ? item.category : nil
             case .builtIn:
                 return item.origin == .builtIn ? item.category : nil
             case .custom:
@@ -190,6 +264,8 @@ final class LibraryViewModel: ObservableObject {
         switch scope {
         case .all:
             "All Emoji"
+        case .favorites:
+            "Favorites"
         case .builtIn:
             builtInPack?.name ?? "Built-in Emoji"
         case .custom:
@@ -203,6 +279,8 @@ final class LibraryViewModel: ObservableObject {
         switch scope {
         case .all:
             return "\(allDisplayItems.count.formatted()) emoji across \(packs.count + 1) sources"
+        case .favorites:
+            return "\(usageSnapshot.favoriteItemIDs.count.formatted()) favorite emoji"
         case .builtIn:
             return builtInPack?.packDescription
                 ?? "Unicode emoji and familiar GitHub-style aliases"
@@ -253,6 +331,7 @@ final class LibraryViewModel: ObservableObject {
         do {
             let snapshot = try await store.snapshot()
             library = snapshot
+            await reconcileThumbnailCache(with: snapshot)
             loadedAny = true
         } catch {
             library = MojiPondLibrary()
@@ -265,6 +344,14 @@ final class LibraryViewModel: ObservableObject {
         } catch {
             builtInPack = nil
             messages.append("Built-in emoji: \(error.localizedDescription)")
+        }
+
+        if let usageStore {
+            do {
+                usageSnapshot = try await usageStore.snapshot()
+            } catch {
+                messages.append("Favorites and recents: \(error.localizedDescription)")
+            }
         }
 
         if messages.isEmpty {
@@ -391,6 +478,15 @@ final class LibraryViewModel: ObservableObject {
         do {
             let shortcode = try Self.shortcode(from: draft.shortcode)
             let aliases = try Self.shortcodes(from: draft.aliases)
+            try validateClaimsAgainstReservations(
+                [shortcode] + aliases,
+                excludingRuntimeItemID: draft.itemID.uuidString
+            )
+            let additionalReservedShortcodes = Set(
+                effectiveReservedShortcodeOwners(
+                    excludingRuntimeItemID: draft.itemID.uuidString
+                ).map(\.shortcode)
+            )
             let tags = Self.commaSeparatedValues(draft.tags)
             _ = try await store.updateItemMetadata(
                 packID: draft.packID,
@@ -399,12 +495,51 @@ final class LibraryViewModel: ObservableObject {
                 aliases: aliases,
                 displayName: Self.nilIfBlank(draft.displayName),
                 tags: tags,
-                category: Self.nilIfBlank(draft.category)
+                category: Self.nilIfBlank(draft.category),
+                additionalReservedShortcodes:
+                    additionalReservedShortcodes
             )
             try await finishMutation(message: "Saved :\(shortcode.rawValue):.", undo: nil)
             return true
         } catch {
             presentError("Couldn’t save emoji", error)
+            return false
+        }
+    }
+
+    @discardableResult
+    func createUnicodeItem(
+        _ draft: LibraryUnicodeItemDraft
+    ) async -> Bool {
+        do {
+            let shortcode = try Self.shortcode(from: draft.shortcode)
+            let aliases = try Self.shortcodes(from: draft.aliases)
+            try validateClaimsAgainstReservations(
+                [shortcode] + aliases
+            )
+            let additionalReservedShortcodes = Set(
+                effectiveReservedShortcodeOwners()
+                    .map(\.shortcode)
+            )
+            let tags = Self.commaSeparatedValues(draft.tags)
+            _ = try await store.createUnicodeItem(
+                in: draft.packID,
+                shortcode: shortcode,
+                unicode: draft.unicode,
+                aliases: aliases,
+                displayName: Self.nilIfBlank(draft.displayName),
+                tags: tags,
+                category: Self.nilIfBlank(draft.category),
+                additionalReservedShortcodes:
+                    additionalReservedShortcodes
+            )
+            try await finishMutation(
+                message: "Added :\(shortcode.rawValue):.",
+                undo: nil
+            )
+            return true
+        } catch {
+            presentError("Couldn’t add emoji", error)
             return false
         }
     }
@@ -441,13 +576,28 @@ final class LibraryViewModel: ObservableObject {
             )
             return
         }
+        guard builtInPack != nil else {
+            notice = LibraryNotice(
+                kind: .warning,
+                title: "Built-in emoji unavailable",
+                message:
+                    "MojiPond cannot safely check shortcode conflicts until the built-in catalog loads."
+            )
+            return
+        }
 
         importTask?.cancel()
+        let operationID = UUID()
+        importOperationID = operationID
         isPreparingImport = true
         notice = nil
         let importer = self.importer
         let store = self.store
         let stagingRoot = paths.importStagingRoot
+        let reservedShortcodeOwners =
+            effectiveReservedShortcodeOwners(
+                excludingPackID: destination.replacedPackID
+            )
         importTask = Task { [weak self] in
             do {
                 try FileManager.default.createDirectory(
@@ -461,10 +611,18 @@ final class LibraryViewModel: ObservableObject {
                 }
                 let prepared = try await importer.prepare(
                     request,
-                    against: snapshot
+                    against: snapshot,
+                    reservedShortcodeOwners: reservedShortcodeOwners
                 )
-                try Task.checkCancellation()
+                if Task.isCancelled {
+                    try? await prepared.discard()
+                    throw CancellationError()
+                }
                 guard let self else {
+                    try? await prepared.discard()
+                    return
+                }
+                guard self.importOperationID == operationID else {
                     try? await prepared.discard()
                     return
                 }
@@ -482,12 +640,21 @@ final class LibraryViewModel: ObservableObject {
                 )
                 self.isPreparingImport = false
                 self.importTask = nil
+                self.importOperationID = nil
             } catch is CancellationError {
+                guard self?.importOperationID == operationID else {
+                    return
+                }
                 self?.isPreparingImport = false
                 self?.importTask = nil
+                self?.importOperationID = nil
             } catch {
+                guard self?.importOperationID == operationID else {
+                    return
+                }
                 self?.isPreparingImport = false
                 self?.importTask = nil
+                self?.importOperationID = nil
                 self?.presentError("Couldn’t prepare import", error)
             }
         }
@@ -525,21 +692,32 @@ final class LibraryViewModel: ObservableObject {
     }
 
     func cancelImport() {
+        importOperationID = nil
         importTask?.cancel()
         importTask = nil
         isPreparingImport = false
     }
 
     func discardImport() async {
+        importOperationID = nil
         importTask?.cancel()
         importTask = nil
         isPreparingImport = false
         let prepared = preparation
+        let thumbnailSourceURLs =
+            prepared?.preview.preparedPack.items.compactMap(
+                \.assetSourceURL
+            ) ?? []
         clearImportState()
         do {
             try await prepared?.discard()
         } catch {
             presentError("Couldn’t discard import", error)
+        }
+        for sourceURL in thumbnailSourceURLs {
+            try? await thumbnailService.invalidate(
+                sourceURL: sourceURL
+            )
         }
     }
 
@@ -547,6 +725,19 @@ final class LibraryViewModel: ObservableObject {
         _ choice: LibraryConflictChoice?,
         for collisionID: UUID
     ) {
+        if choice == .replaceExisting,
+           let collision = importSession?.preview.collisions.first(
+               where: { $0.id == collisionID }
+           ),
+           case .reserved = collision.existing {
+            conflictChoices.removeValue(forKey: collisionID)
+            notice = LibraryNotice(
+                kind: .warning,
+                title: "Protected shortcode",
+                message: "Keep the protected name or rename the incoming emoji."
+            )
+            return
+        }
         if let choice {
             conflictChoices[collisionID] = choice
         } else {
@@ -563,6 +754,10 @@ final class LibraryViewModel: ObservableObject {
             return
         }
         for collision in session.preview.collisions {
+            if choice == .replaceExisting,
+               case .reserved = collision.existing {
+                continue
+            }
             if choice == .dropIncomingAlias,
                case .primary = collision.incomingClaim {
                 continue
@@ -578,6 +773,15 @@ final class LibraryViewModel: ObservableObject {
         guard let session = importSession, let preparation else {
             return
         }
+        guard builtInPack != nil else {
+            notice = LibraryNotice(
+                kind: .error,
+                title: "Built-in emoji unavailable",
+                message:
+                    "Reload the library before installing so MojiPond can revalidate protected shortcodes."
+            )
+            return
+        }
         guard canInstallImport else {
             notice = LibraryNotice(
                 kind: .warning,
@@ -588,6 +792,10 @@ final class LibraryViewModel: ObservableObject {
         }
         do {
             isInstallingImport = true
+            let currentReservedShortcodeOwners =
+                effectiveReservedShortcodeOwners(
+                    excludingPackID: session.destination.replacedPackID
+                )
             var decisions: [UUID: CollisionDecision] = [:]
             for collision in session.preview.collisions {
                 guard let choice = conflictChoices[collision.id] else {
@@ -613,19 +821,25 @@ final class LibraryViewModel: ObservableObject {
             case .newPack:
                 installed = try await preparation.install(
                     into: store,
-                    decisions: decisions
+                    decisions: decisions,
+                    reservedShortcodeOwners:
+                        currentReservedShortcodeOwners
                 )
             case let .append(packID):
                 installed = try await preparation.append(
                     into: store,
                     packID: packID,
-                    decisions: decisions
+                    decisions: decisions,
+                    reservedShortcodeOwners:
+                        currentReservedShortcodeOwners
                 )
             case let .replace(packID):
                 installed = try await preparation.replacePackContents(
                     in: store,
                     packID: packID,
-                    decisions: decisions
+                    decisions: decisions,
+                    reservedShortcodeOwners:
+                        currentReservedShortcodeOwners
                 )
             }
             clearImportState()
@@ -710,9 +924,23 @@ final class LibraryViewModel: ObservableObject {
         self.notice = notice
     }
 
-    func copyToClipboard(_ item: LibraryDisplayItem) {
+    func copyToClipboard(_ item: LibraryDisplayItem) async {
         do {
-            let payload = try pasteboardPayload(for: item)
+            let source = try pasteboardSource(for: item)
+            let payload: PasteboardItemPayload
+            switch source {
+            case let .ready(value):
+                payload = value
+            case let .managed(media, rootURL):
+                payload = try await Task.detached(
+                    priority: .userInitiated
+                ) {
+                    try RuntimeManagedMediaResolver()
+                        .resolve(media, beneath: rootURL)
+                        .pasteboardPayload
+                }.value
+            }
+            try Task.checkCancellation()
             guard pasteboard.replaceContents(with: [payload]) else {
                 throw LibraryCopyError.pasteboardWriteFailed
             }
@@ -723,8 +951,143 @@ final class LibraryViewModel: ObservableObject {
                     ? "Original image bytes are on the clipboard."
                     : "Unicode emoji is on the clipboard."
             )
+        } catch is CancellationError {
+            return
         } catch {
             presentError("Couldn’t copy emoji", error)
+        }
+    }
+
+    func isFavorite(_ item: LibraryDisplayItem) -> Bool {
+        usageSnapshot.isFavorite(runtimeItemID(for: item))
+    }
+
+    func toggleFavorite(_ item: LibraryDisplayItem) async {
+        guard let usageStore else {
+            presentError(
+                "Couldn’t change favorite",
+                LibraryUsageError.storeUnavailable
+            )
+            return
+        }
+        do {
+            try await usageStore.setFavorite(
+                !isFavorite(item),
+                itemID: runtimeItemID(for: item)
+            )
+            usageSnapshot = try await usageStore.snapshot()
+            onUsageMutation()
+            notice = LibraryNotice(
+                kind: .information,
+                title: isFavorite(item)
+                    ? "Added to Favorites"
+                    : "Removed from Favorites",
+                message: item.displayName
+            )
+        } catch {
+            presentError("Couldn’t change favorite", error)
+        }
+    }
+
+    func availableSkinTones(
+        for item: LibraryDisplayItem
+    ) -> [EmojiSkinTone] {
+        guard
+            item.origin == .builtIn,
+            let builtIn = builtInItem(for: item),
+            case let .unicode(content) = builtIn.content
+        else {
+            return []
+        }
+        return EmojiSkinTone.allCases.filter { tone in
+            content.skinToneVariants.contains {
+                $0.skinTone == tone
+            }
+        }
+    }
+
+    func preferredSkinTone(
+        for item: LibraryDisplayItem
+    ) -> EmojiSkinTone? {
+        usageSnapshot.preferredSkinToneByItemID[runtimeItemID(for: item)]
+    }
+
+    func customAliases(
+        for item: LibraryDisplayItem
+    ) -> [String] {
+        usageSnapshot.customAliasesByItemID[
+            runtimeItemID(for: item),
+            default: []
+        ]
+    }
+
+    func setCustomAliases(
+        _ value: String,
+        for item: LibraryDisplayItem
+    ) async {
+        guard let usageStore else {
+            presentError(
+                "Couldn’t save aliases",
+                LibraryUsageError.storeUnavailable
+            )
+            return
+        }
+        let aliases = Self.commaSeparatedValues(value).map {
+            EmojiAliasSyntax.normalizedToken($0)
+        }
+        guard aliases.allSatisfy(EmojiAliasSyntax.isValidToken) else {
+            presentError(
+                "Couldn’t save aliases",
+                LibraryUsageError.invalidAlias
+            )
+            return
+        }
+        do {
+            try validateCustomAliases(
+                aliases,
+                for: item
+            )
+            try await usageStore.setCustomAliases(
+                aliases,
+                itemID: runtimeItemID(for: item)
+            )
+            usageSnapshot = try await usageStore.snapshot()
+            onUsageMutation()
+            notice = LibraryNotice(
+                kind: .information,
+                title: "Aliases updated",
+                message: item.displayName
+            )
+        } catch {
+            presentError("Couldn’t save aliases", error)
+        }
+    }
+
+    func setPreferredSkinTone(
+        _ skinTone: EmojiSkinTone?,
+        for item: LibraryDisplayItem
+    ) async {
+        guard let usageStore else {
+            presentError(
+                "Couldn’t change skin tone",
+                LibraryUsageError.storeUnavailable
+            )
+            return
+        }
+        do {
+            try await usageStore.setPreferredSkinTone(
+                skinTone,
+                itemID: runtimeItemID(for: item)
+            )
+            usageSnapshot = try await usageStore.snapshot()
+            onUsageMutation()
+            notice = LibraryNotice(
+                kind: .information,
+                title: "Skin tone preference updated",
+                message: item.displayName
+            )
+        } catch {
+            presentError("Couldn’t change skin tone", error)
         }
     }
 
@@ -830,6 +1193,74 @@ final class LibraryViewModel: ObservableObject {
         )
     }
 
+    func githubRevisionState(
+        for packID: UUID
+    ) -> LibraryGitHubRevisionState? {
+        githubRevisionStates[packID]
+    }
+
+    func checkGitHubRevision(
+        for packID: UUID,
+        networkAccessGranted: Bool
+    ) async {
+        guard networkAccessGranted else {
+            notice = LibraryNotice(
+                kind: .warning,
+                title: "Network access not granted",
+                message:
+                    "Review and allow this GitHub revision check before MojiPond contacts the repository."
+            )
+            return
+        }
+        guard
+            let pack = library.packs.first(where: { $0.id == packID }),
+            let github = pack.source.github,
+            let repositoryURL = URL(
+                string:
+                    "https://github.com/\(github.owner)/\(github.repository)"
+            )
+        else {
+            notice = LibraryNotice(
+                kind: .warning,
+                title: "GitHub source unavailable",
+                message:
+                    "This pack does not contain a valid GitHub source reference."
+            )
+            return
+        }
+
+        githubRevisionStates[packID] = .checking
+        do {
+            let resolved = try await githubRevisionResolver.resolveRevision(
+                from: repositoryURL,
+                ref: github.ref,
+                subdirectory: github.subdirectory
+            )
+            try await store.markPackChecked(
+                packID,
+                sourceETag: resolved.sourceETag
+            )
+            library = try await store.snapshot()
+            onMutation(library)
+            let installed = pack.updateMetadata.sourceRevision
+            if installed == resolved.commitSHA {
+                githubRevisionStates[packID] = .current(
+                    revision: resolved.commitSHA
+                )
+            } else {
+                githubRevisionStates[packID] = .updateAvailable(
+                    installed: installed,
+                    latest: resolved.commitSHA
+                )
+            }
+        } catch {
+            githubRevisionStates[packID] = .failed(
+                error.localizedDescription
+            )
+            presentError("Couldn’t check GitHub", error)
+        }
+    }
+
     private var builtInDisplayItems: [LibraryDisplayItem] {
         guard let builtInPack else {
             return []
@@ -888,11 +1319,11 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    private func pasteboardPayload(
+    private func pasteboardSource(
         for item: LibraryDisplayItem
-    ) throws -> PasteboardItemPayload {
+    ) throws -> LibraryPasteboardSource {
         if let unicode = item.unicode {
-            return .text(unicode)
+            return .ready(.text(unicode))
         }
         guard
             case let .custom(packID) = item.origin,
@@ -911,9 +1342,26 @@ final class LibraryViewModel: ObservableObject {
             contentHash: asset.sha256,
             isAnimated: asset.frameCount > 1
         )
-        return try RuntimeManagedMediaResolver()
-            .resolve(media, beneath: paths.libraryRoot)
-            .pasteboardPayload
+        return .managed(media, rootURL: paths.libraryRoot)
+    }
+
+    private func runtimeItemID(
+        for item: LibraryDisplayItem
+    ) -> EmojiItem.ID {
+        switch item.origin {
+        case .builtIn:
+            String(item.id.dropFirst("builtin-".count))
+        case .custom:
+            String(item.id.dropFirst("custom-".count))
+        }
+    }
+
+    private func builtInItem(
+        for item: LibraryDisplayItem
+    ) -> EmojiItem? {
+        builtInPack?.items.first {
+            $0.id == runtimeItemID(for: item)
+        }
     }
 
     private static func mediaType(
@@ -937,6 +1385,7 @@ final class LibraryViewModel: ObservableObject {
     ) async throws {
         let snapshot = try await store.snapshot()
         library = snapshot
+        await reconcileThumbnailCache(with: snapshot)
         onMutation(snapshot)
         undoMutation = undo
         undoMessage = undo == nil ? nil : message
@@ -984,6 +1433,182 @@ final class LibraryViewModel: ObservableObject {
         conflictRenameValues = [:]
         isPreparingImport = false
         isInstallingImport = false
+    }
+
+    private func reconcileThumbnailCache(
+        with library: MojiPondLibrary
+    ) async {
+        let sourceURLs = Set(
+            library.packs.flatMap(\.items).compactMap {
+                $0.payload.asset
+            }.map {
+                paths.libraryRoot.appendingPathComponent(
+                    $0.relativePath,
+                    isDirectory: false
+                )
+            }
+        )
+        try? await thumbnailService.reconcile(
+            retaining: sourceURLs
+        )
+    }
+
+    private func effectiveReservedShortcodeOwners(
+        excludingPackID: UUID? = nil,
+        excludingRuntimeItemID: String? = nil
+    ) -> [ReservedShortcodeOwner] {
+        guard let builtInPack else {
+            return []
+        }
+
+        let displayItems = allDisplayItems.filter { item in
+            guard runtimeItemID(for: item) != excludingRuntimeItemID else {
+                return false
+            }
+            if case let .custom(packID) = item.origin,
+               packID == excludingPackID {
+                return false
+            }
+            return true
+        }
+        let canonicalClaims = Set(
+            displayItems.flatMap {
+                [$0.shortcode] + $0.aliases
+            }.map(EmojiAliasSyntax.normalizedToken)
+        )
+        var claimedShortcodes = Set<Shortcode>()
+        var owners = BuiltInShortcodeReservations.owners(
+            in: builtInPack
+        ).sorted {
+            if $0.shortcode != $1.shortcode {
+                return $0.shortcode < $1.shortcode
+            }
+            if $0.isAlias != $1.isAlias {
+                return !$0.isAlias
+            }
+            return $0.itemID < $1.itemID
+        }.filter {
+            claimedShortcodes.insert($0.shortcode).inserted
+        }
+        for item in displayItems.sorted(by: {
+            runtimeItemID(for: $0) < runtimeItemID(for: $1)
+        }) {
+            let itemID = runtimeItemID(for: item)
+            let packID = switch item.origin {
+            case .builtIn:
+                builtInPack.id
+            case let .custom(packID):
+                packID.uuidString.lowercased()
+            }
+            for alias in usageSnapshot.customAliasesByItemID[
+                itemID,
+                default: []
+            ].sorted() {
+                let normalizedAlias =
+                    EmojiAliasSyntax.normalizedToken(alias)
+                guard
+                    !canonicalClaims.contains(normalizedAlias),
+                    let shortcode = Shortcode(
+                        rawValue: normalizedAlias
+                    ),
+                    claimedShortcodes.insert(shortcode).inserted
+                else {
+                    // Leading +/- aliases are searchable but cannot collide
+                    // with the stricter imported shortcode namespace.
+                    // Canonical/self duplicates already have a stronger owner.
+                    continue
+                }
+                owners.append(
+                    ReservedShortcodeOwner(
+                        shortcode: shortcode,
+                        itemID: itemID,
+                        itemName: item.displayName,
+                        packID: packID,
+                        packName: item.packName,
+                        isAlias: true,
+                        source: .customAlias
+                    )
+                )
+            }
+        }
+        return owners.sorted {
+            if $0.shortcode != $1.shortcode {
+                return $0.shortcode < $1.shortcode
+            }
+            if $0.source != $1.source {
+                return $0.source == .builtIn
+            }
+            if $0.packID != $1.packID {
+                return $0.packID < $1.packID
+            }
+            return $0.itemID < $1.itemID
+        }
+    }
+
+    private func validateClaimsAgainstReservations(
+        _ claims: [Shortcode],
+        excludingRuntimeItemID: String? = nil
+    ) throws {
+        guard builtInPack != nil else {
+            throw LibraryViewModelError.builtInCatalogUnavailable
+        }
+        let reserved = Set(
+            effectiveReservedShortcodeOwners(
+                excludingRuntimeItemID: excludingRuntimeItemID
+            ).map(\.shortcode)
+        )
+        if let collision = Set(claims)
+            .intersection(reserved)
+            .sorted()
+            .first {
+            throw LibraryViewModelError.protectedShortcode(collision)
+        }
+    }
+
+    private func validateCustomAliases(
+        _ aliases: [String],
+        for target: LibraryDisplayItem
+    ) throws {
+        guard builtInPack != nil else {
+            throw LibraryViewModelError.builtInCatalogUnavailable
+        }
+        let targetID = runtimeItemID(for: target)
+        let targetClaims = Set(
+            ([target.shortcode] + target.aliases)
+                .map(EmojiAliasSyntax.normalizedToken)
+        )
+        if let collision = aliases.first(where: {
+            targetClaims.contains(
+                EmojiAliasSyntax.normalizedToken($0)
+            )
+        }) {
+            throw LibraryUsageError.aliasCollision(collision)
+        }
+        var claimed = Set<String>()
+        for item in allDisplayItems
+            where runtimeItemID(for: item) != targetID {
+            claimed.insert(
+                EmojiAliasSyntax.normalizedToken(item.shortcode)
+            )
+            for alias in item.aliases {
+                claimed.insert(
+                    EmojiAliasSyntax.normalizedToken(alias)
+                )
+            }
+            for alias in usageSnapshot.customAliasesByItemID[
+                runtimeItemID(for: item),
+                default: []
+            ] {
+                claimed.insert(
+                    EmojiAliasSyntax.normalizedToken(alias)
+                )
+            }
+        }
+        if let collision = aliases.first(where: {
+            claimed.contains(EmojiAliasSyntax.normalizedToken($0))
+        }) {
+            throw LibraryUsageError.aliasCollision(collision)
+        }
     }
 
     private func presentError(_ title: String, _ error: Error) {
@@ -1064,6 +1689,15 @@ final class LibraryViewModel: ObservableObject {
     }
 }
 
+private extension LibraryImportDestination {
+    var replacedPackID: UUID? {
+        guard case let .replace(packID) = self else {
+            return nil
+        }
+        return packID
+    }
+}
+
 private enum LibraryCopyError: Error, LocalizedError {
     case itemUnavailable
     case pasteboardWriteFailed
@@ -1078,10 +1712,29 @@ private enum LibraryCopyError: Error, LocalizedError {
     }
 }
 
+private enum LibraryUsageError: Error, LocalizedError {
+    case storeUnavailable
+    case invalidAlias
+    case aliasCollision(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .storeUnavailable:
+            "Usage preferences are unavailable."
+        case .invalidAlias:
+            "Aliases must use 1–64 letters, numbers, underscores, plus signs, or hyphens."
+        case let .aliasCollision(alias):
+            "Alias \(alias) is already used by another emoji."
+        }
+    }
+}
+
 enum LibraryViewModelError: Error, Equatable, LocalizedError {
     case emptyPackName
     case invalidSourceURL
     case unresolvedConflict
+    case builtInCatalogUnavailable
+    case protectedShortcode(Shortcode)
 
     var errorDescription: String? {
         switch self {
@@ -1091,6 +1744,10 @@ enum LibraryViewModelError: Error, Equatable, LocalizedError {
             "Source URLs must be valid HTTPS links."
         case .unresolvedConflict:
             "Every shortcode conflict needs a decision."
+        case .builtInCatalogUnavailable:
+            "The built-in emoji catalog is unavailable, so MojiPond cannot safely validate shortcode conflicts."
+        case let .protectedShortcode(shortcode):
+            "Shortcode \(shortcode.rawValue) is already protected by a built-in emoji or one of your aliases."
         }
     }
 }

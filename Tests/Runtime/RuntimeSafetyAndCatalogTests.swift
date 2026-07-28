@@ -199,6 +199,73 @@ final class RuntimeSafetyAndCatalogTests: XCTestCase {
         )
     }
 
+    func testRuntimeCaptureRejectsEmbeddedMediaCommandPaths() throws {
+        for text in [
+            "https://host.example/gif private words",
+            "draft/foo/gif private words"
+        ] {
+            let system = FakeAccessibilityTextSystem()
+            system.text = text
+            system.selection = NSRange(
+                location: text.utf16.count,
+                length: 0
+            )
+            let provider = RuntimeAccessibilityTextContextProvider(
+                accessibility: AccessibilityTextAdapter(system: system),
+                permissionChecker: GrantedRuntimePermissionChecker(),
+                secureInputChecker: InactiveRuntimeSecureInputChecker(),
+                applicationIdentity: MessagesRuntimeIdentityProvider()
+            )
+
+            XCTAssertThrowsError(
+                try provider.capture(
+                    expectedToken: "/gif private words",
+                    trigger: "/"
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? RuntimeTextCaptureError,
+                    .invalidTokenContext
+                )
+            }
+        }
+    }
+
+    func testRuntimeCaptureCanSafelyAnchorAnEmptyCaretReplacement() throws {
+        let system = FakeAccessibilityTextSystem()
+        system.text = "draft"
+        system.selection = NSRange(
+            location: system.text.utf16.count,
+            length: 0
+        )
+        let provider = RuntimeAccessibilityTextContextProvider(
+            accessibility: AccessibilityTextAdapter(system: system),
+            permissionChecker: GrantedRuntimePermissionChecker(),
+            secureInputChecker: InactiveRuntimeSecureInputChecker(),
+            applicationIdentity: MessagesRuntimeIdentityProvider()
+        )
+
+        let capture = try provider.capture(
+            expectedToken: "",
+            trigger: ":"
+        )
+        let request = RuntimeReplacementRequestFactory.make(
+            sessionTarget: capture.target,
+            capture: capture,
+            expectedToken: ""
+        )
+
+        XCTAssertEqual(
+            capture.context.tokenRange,
+            NSRange(location: 5, length: 0)
+        )
+        XCTAssertEqual(
+            request?.expectedSelection,
+            NSRange(location: 5, length: 0)
+        )
+        XCTAssertEqual(request?.expectedToken, "")
+    }
+
     func testCatalogLoaderBuildsExactLocalIndexFromInjectedData() throws {
         let data = Data(
             """

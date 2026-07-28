@@ -9,6 +9,8 @@ struct LibraryShellView: View {
     @State private var showsBuiltInDetails = false
     @State private var selectedItem: LibraryDisplayItem?
     @State private var packDetails: PackDetailSelection?
+    @State private var unicodeItemDestination:
+        UnicodeItemDestination?
     @State private var isDropTargeted = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -52,6 +54,10 @@ struct LibraryShellView: View {
                 }
         }
         .frame(minWidth: 840, minHeight: 560)
+        .environment(
+            \.libraryThumbnailLoader,
+            viewModel.thumbnailService
+        )
         .toolbar {
             ToolbarItemGroup {
                 Picker("Layout", selection: $viewModel.layout) {
@@ -85,7 +91,11 @@ struct LibraryShellView: View {
             }
         }
         .sheet(isPresented: $showsImportSource) {
-            LibraryImportSourceView(viewModel: viewModel) {
+            LibraryImportSourceView(
+                viewModel: viewModel,
+                githubImportsAllowed:
+                    appState.preferences.network.allowsGitHubImports
+            ) {
                 showsImportSource = false
             }
         }
@@ -101,7 +111,16 @@ struct LibraryShellView: View {
         .sheet(item: $packDetails) { selection in
             LibraryPackDetailView(
                 viewModel: viewModel,
-                packID: selection.id
+                packID: selection.id,
+                githubImportsAllowed:
+                    appState.preferences.network.allowsGitHubImports
+            )
+        }
+        .sheet(item: $unicodeItemDestination) { destination in
+            LibraryAddUnicodeItemView(
+                viewModel: viewModel,
+                packID: destination.id,
+                packName: destination.packName
             )
         }
         .sheet(isPresented: $showsBuiltInDetails) {
@@ -138,6 +157,9 @@ struct LibraryShellView: View {
                 Label("All Emoji", systemImage: "square.grid.2x2")
                     .badge(viewModel.allDisplayItems.count)
                     .tag(LibraryScope.all)
+                Label("Favorites", systemImage: "star")
+                    .badge(viewModel.usageSnapshot.favoriteItemIDs.count)
+                    .tag(LibraryScope.favorites)
                 Label("Built-in", systemImage: "face.smiling")
                     .badge(viewModel.builtInPack?.items.count ?? 0)
                     .tag(LibraryScope.builtIn)
@@ -176,6 +198,13 @@ struct LibraryShellView: View {
                         }
                         Button("Pack Details…") {
                             packDetails = PackDetailSelection(id: pack.id)
+                        }
+                        Button("Add Unicode Emoji…") {
+                            unicodeItemDestination =
+                                UnicodeItemDestination(
+                                    id: pack.id,
+                                    packName: pack.name
+                                )
                         }
                         Divider()
                         Button("Move Up") {
@@ -274,6 +303,16 @@ struct LibraryShellView: View {
                         )
                     )
                     .toggleStyle(.switch)
+                    Button(
+                        "Add Unicode Emoji",
+                        systemImage: "text.badge.plus"
+                    ) {
+                        unicodeItemDestination =
+                            UnicodeItemDestination(
+                                id: pack.id,
+                                packName: pack.name
+                            )
+                    }
                     Button("Pack Details", systemImage: "info.circle") {
                         packDetails = PackDetailSelection(id: pack.id)
                     }
@@ -336,8 +375,18 @@ struct LibraryShellView: View {
                     Text(emptyDescription)
                 } actions: {
                     if viewModel.searchText.isEmpty {
-                        Button("Import a Pack") {
-                            showsImportSource = true
+                        if let pack = viewModel.selectedPack {
+                            Button("Add Unicode Emoji") {
+                                unicodeItemDestination =
+                                    UnicodeItemDestination(
+                                        id: pack.id,
+                                        packName: pack.name
+                                    )
+                            }
+                        } else {
+                            Button("Import a Pack") {
+                                showsImportSource = true
+                            }
                         }
                     } else {
                         Button("Clear Search") {
@@ -362,8 +411,19 @@ struct LibraryShellView: View {
                                 selectedItem = item
                             }
                             .contextMenu {
+                                Button(
+                                    viewModel.isFavorite(item)
+                                        ? "Remove from Favorites"
+                                        : "Add to Favorites"
+                                ) {
+                                    Task {
+                                        await viewModel.toggleFavorite(item)
+                                    }
+                                }
                                 Button("Copy Emoji") {
-                                    viewModel.copyToClipboard(item)
+                                    Task {
+                                        await viewModel.copyToClipboard(item)
+                                    }
                                 }
                                 Button("Show Details") {
                                     selectedItem = item
@@ -379,8 +439,19 @@ struct LibraryShellView: View {
                         selectedItem = item
                     }
                     .contextMenu {
+                        Button(
+                            viewModel.isFavorite(item)
+                                ? "Remove from Favorites"
+                                : "Add to Favorites"
+                        ) {
+                            Task {
+                                await viewModel.toggleFavorite(item)
+                            }
+                        }
                         Button("Copy Emoji") {
-                            viewModel.copyToClipboard(item)
+                            Task {
+                                await viewModel.copyToClipboard(item)
+                            }
                         }
                         Button("Show Details") {
                             selectedItem = item
@@ -461,6 +532,9 @@ struct LibraryShellView: View {
         if case .custom = viewModel.scope {
             return "Import image files or a pack to add custom emoji."
         }
+        if case .favorites = viewModel.scope {
+            return "Mark emoji as favorites from an item’s context menu or detail view."
+        }
         if case .pack = viewModel.scope {
             return "This pack is empty. Open Pack Details to add files through the review flow."
         }
@@ -515,4 +589,9 @@ struct LibraryShellView: View {
 
 private struct PackDetailSelection: Identifiable {
     let id: UUID
+}
+
+private struct UnicodeItemDestination: Identifiable {
+    let id: UUID
+    let packName: String
 }

@@ -74,11 +74,176 @@ struct LibraryNewPackView: View {
     }
 }
 
+struct LibraryAddUnicodeItemView: View {
+    @ObservedObject var viewModel: LibraryViewModel
+    let packID: UUID
+    let packName: String
+
+    @State private var draft: LibraryUnicodeItemDraft
+    @State private var isSaving = false
+    @FocusState private var emojiFocused: Bool
+    @Environment(\.dismiss) private var dismiss
+
+    init(
+        viewModel: LibraryViewModel,
+        packID: UUID,
+        packName: String
+    ) {
+        self.viewModel = viewModel
+        self.packID = packID
+        self.packName = packName
+        _draft = State(
+            initialValue: LibraryUnicodeItemDraft(packID: packID)
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .center, spacing: 16) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(PondDesign.pond.opacity(0.1))
+                    Text(draft.unicode.isEmpty ? "＋" : draft.unicode)
+                        .font(.system(size: 42))
+                        .foregroundStyle(
+                            draft.unicode.isEmpty
+                                ? Color.secondary
+                                : Color.primary
+                        )
+                        .lineLimit(1)
+                }
+                .frame(width: 76, height: 76)
+                .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Add Unicode emoji")
+                        .font(.title2.weight(.semibold))
+                    Text("Create a local shortcode in \(packName).")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Form {
+                Section("Emoji") {
+                    TextField(
+                        "One Unicode emoji",
+                        text: $draft.unicode
+                    )
+                    .focused($emojiFocused)
+                    .font(.title2)
+                    .accessibilityIdentifier(
+                        "library.addUnicode.emoji"
+                    )
+                    Text(
+                        "Enter one emoji grapheme, including a flag, keycap, skin tone, or joined sequence."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+
+                Section("Autocomplete") {
+                    TextField(
+                        "Shortcode",
+                        text: $draft.shortcode
+                    )
+                    .font(.body.monospaced())
+                    .accessibilityHint("Colons are optional")
+                    TextField(
+                        "Aliases, separated by commas",
+                        text: $draft.aliases
+                    )
+                    .font(.body.monospaced())
+                }
+
+                Section("Discovery") {
+                    TextField(
+                        "Display name",
+                        text: $draft.displayName
+                    )
+                    TextField(
+                        "Tags, separated by commas",
+                        text: $draft.tags
+                    )
+                    TextField(
+                        "Category",
+                        text: $draft.category
+                    )
+                }
+            }
+            .formStyle(.grouped)
+
+            if let notice = viewModel.notice,
+               notice.kind == .error {
+                Label(
+                    "\(notice.title): \(notice.message)",
+                    systemImage: "exclamationmark.circle"
+                )
+                .font(.caption)
+                .foregroundStyle(.red)
+            }
+
+            HStack {
+                Label(
+                    "Stored locally and included in portable schema-v2 exports.",
+                    systemImage: "externaldrive.badge.checkmark"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                Spacer()
+                Button("Cancel") {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+                Button("Add Emoji") {
+                    isSaving = true
+                    Task {
+                        let created = await viewModel.createUnicodeItem(
+                            draft
+                        )
+                        isSaving = false
+                        if created {
+                            dismiss()
+                        }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(
+                    isSaving
+                        || draft.unicode.isEmpty
+                        || draft.shortcode
+                            .trimmingCharacters(
+                                in: .whitespacesAndNewlines
+                            )
+                            .isEmpty
+                )
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24)
+        .frame(width: 620)
+        .onAppear {
+            emojiFocused = true
+        }
+        .overlay {
+            if isSaving {
+                ProgressView()
+                    .padding(18)
+                    .background(
+                        .regularMaterial,
+                        in: RoundedRectangle(cornerRadius: 12)
+                    )
+            }
+        }
+    }
+}
+
 struct LibraryItemDetailView: View {
     @ObservedObject var viewModel: LibraryViewModel
     let item: LibraryDisplayItem
 
     @State private var draft: LibraryItemDraft?
+    @State private var customAliasesDraft: String
     @State private var isSaving = false
     @Environment(\.dismiss) private var dismiss
 
@@ -94,6 +259,10 @@ struct LibraryItemDetailView: View {
         } else {
             _draft = State(initialValue: nil)
         }
+        _customAliasesDraft = State(
+            initialValue: viewModel.customAliases(for: item)
+                .joined(separator: ", ")
+        )
     }
 
     var body: some View {
@@ -111,6 +280,28 @@ struct LibraryItemDetailView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
+                Button {
+                    Task {
+                        await viewModel.toggleFavorite(item)
+                    }
+                } label: {
+                    Image(
+                        systemName: viewModel.isFavorite(item)
+                            ? "star.fill"
+                            : "star"
+                    )
+                }
+                .buttonStyle(.borderless)
+                .help(
+                    viewModel.isFavorite(item)
+                        ? "Remove from Favorites"
+                        : "Add to Favorites"
+                )
+                .accessibilityLabel(
+                    viewModel.isFavorite(item)
+                        ? "Remove \(item.displayName) from Favorites"
+                        : "Add \(item.displayName) to Favorites"
+                )
             }
             .padding(24)
 
@@ -164,8 +355,20 @@ struct LibraryItemDetailView: View {
                             .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
-                            .textSelection(.enabled)
+                        .textSelection(.enabled)
                     }
+                }
+                if item.format == .webP {
+                    Label(
+                        item.isAnimated
+                            ? "Animated WebP is experimental and uses Copy Media Instead until Messages compatibility is proven."
+                            : "Static WebP is checked at insertion time and includes a PNG compatibility fallback.",
+                        systemImage: item.isAnimated
+                            ? "flask"
+                            : "checkmark.shield"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
                 Button("Replace File…", action: chooseReplacement)
                     .disabled(item.assetURL == nil)
@@ -197,7 +400,9 @@ struct LibraryItemDetailView: View {
                     dismiss()
                 }
                 Button("Copy Emoji") {
-                    viewModel.copyToClipboard(item)
+                    Task {
+                        await viewModel.copyToClipboard(item)
+                    }
                 }
                 .keyboardShortcut("c", modifiers: .command)
                 Spacer()
@@ -242,6 +447,57 @@ struct LibraryItemDetailView: View {
                 }
             }
 
+            Section("Your aliases") {
+                TextField(
+                    "Aliases, separated by commas",
+                    text: $customAliasesDraft
+                )
+                .font(.body.monospaced())
+                .accessibilityHint(
+                    "Adds local aliases without changing the bundled dataset."
+                )
+                Button("Save Aliases") {
+                    isSaving = true
+                    Task {
+                        await viewModel.setCustomAliases(
+                            customAliasesDraft,
+                            for: item
+                        )
+                        isSaving = false
+                    }
+                }
+            }
+
+            if !viewModel.availableSkinTones(for: item).isEmpty {
+                Section("Appearance") {
+                    Picker(
+                        "Preferred skin tone",
+                        selection: Binding(
+                            get: {
+                                viewModel.preferredSkinTone(for: item)
+                            },
+                            set: { tone in
+                                Task {
+                                    await viewModel.setPreferredSkinTone(
+                                        tone,
+                                        for: item
+                                    )
+                                }
+                            }
+                        )
+                    ) {
+                        Text("Use default").tag(EmojiSkinTone?.none)
+                        ForEach(
+                            viewModel.availableSkinTones(for: item),
+                            id: \.self
+                        ) { tone in
+                            Text("\(tone.modifier) \(tone.displayName)")
+                                .tag(Optional(tone))
+                        }
+                    }
+                }
+            }
+
             Section("Source & attribution") {
                 LabeledContent("Dataset", value: "github/gemoji")
                 LabeledContent("License", value: "MIT")
@@ -255,7 +511,9 @@ struct LibraryItemDetailView: View {
         .safeAreaInset(edge: .bottom) {
             HStack {
                 Button("Copy Emoji") {
-                    viewModel.copyToClipboard(item)
+                    Task {
+                        await viewModel.copyToClipboard(item)
+                    }
                 }
                 .keyboardShortcut("c", modifiers: .command)
                 Spacer()
@@ -316,9 +574,11 @@ struct LibraryItemDetailView: View {
 struct LibraryPackDetailView: View {
     @ObservedObject var viewModel: LibraryViewModel
     let packID: UUID
+    let githubImportsAllowed: Bool
 
     @Environment(\.dismiss) private var dismiss
     @State private var showsGitHubUpdateConfirmation = false
+    @State private var showsGitHubCheckConfirmation = false
     @State private var allowRemoteSlackAssets = false
 
     var body: some View {
@@ -412,14 +672,45 @@ struct LibraryPackDetailView: View {
                         .help("Review and append individual image files to this pack.")
 
                         if pack.source.kind == .github {
-                            Button("Review Update from GitHub…") {
-                                showsGitHubUpdateConfirmation = true
+                            githubRevisionStatus(for: pack)
+
+                            Button("Check GitHub Revision…") {
+                                showsGitHubCheckConfirmation = true
+                            }
+                            .disabled(
+                                !githubImportsAllowed
+                                    || viewModel.githubRevisionState(
+                                        for: pack.id
+                                    ) == .checking
+                            )
+                            .help(
+                                githubImportsAllowed
+                                    ? "Contact only GitHub’s commit API and compare source revisions."
+                                    : "Enable public GitHub imports in Settings → General first."
+                            )
+
+                            if case .updateAvailable =
+                                viewModel.githubRevisionState(for: pack.id) {
+                                Button("Review Available Update…") {
+                                    showsGitHubUpdateConfirmation = true
+                                }
+                                .buttonStyle(.borderedProminent)
                             }
                         } else {
                             Button("Replace Contents from Local Source…") {
                                 chooseReplacementSource(for: pack)
                             }
                             .help("Review a new folder, archive, Slack manifest, or set of files before replacing this pack.")
+                        }
+
+                        if pack.source.kind == .github,
+                           !githubImportsAllowed {
+                            Label(
+                                "GitHub imports are disabled in Settings.",
+                                systemImage: "network.slash"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         }
 
                         if pack.source.kind == .slackManifest
@@ -465,6 +756,25 @@ struct LibraryPackDetailView: View {
             }
             .frame(width: 660, height: 680)
             .confirmationDialog(
+                "Contact GitHub to compare revisions?",
+                isPresented: $showsGitHubCheckConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Allow This Revision Check") {
+                    Task {
+                        await viewModel.checkGitHubRevision(
+                            for: pack.id,
+                            networkAccessGranted: true
+                        )
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(
+                    "MojiPond will send the configured public repository and ref to GitHub’s commit API. It will not download pack files during this check."
+                )
+            }
+            .confirmationDialog(
                 "Contact GitHub for this update?",
                 isPresented: $showsGitHubUpdateConfirmation,
                 titleVisibility: .visible
@@ -488,6 +798,44 @@ struct LibraryPackDetailView: View {
             )
             .frame(width: 520, height: 360)
         }
+    }
+
+    @ViewBuilder
+    private func githubRevisionStatus(for pack: EmojiPack) -> some View {
+        switch viewModel.githubRevisionState(for: pack.id) {
+        case .none:
+            if let checkedAt = pack.updateMetadata.lastCheckedAt {
+                LabeledContent(
+                    "Last revision check",
+                    value: checkedAt.formatted(
+                        date: .abbreviated,
+                        time: .shortened
+                    )
+                )
+            }
+        case .checking:
+            Label("Checking GitHub revision…", systemImage: "arrow.triangle.2.circlepath")
+                .foregroundStyle(.secondary)
+        case let .current(revision):
+            Label(
+                "Up to date at \(shortRevision(revision))",
+                systemImage: "checkmark.circle.fill"
+            )
+            .foregroundStyle(PondDesign.lily)
+        case let .updateAvailable(installed, latest):
+            Label(
+                "Update available: \(shortRevision(installed)) → \(shortRevision(latest))",
+                systemImage: "arrow.down.circle.fill"
+            )
+            .foregroundStyle(PondDesign.pond)
+        case let .failed(message):
+            Label(message, systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
+        }
+    }
+
+    private func shortRevision(_ revision: String?) -> String {
+        revision.map { String($0.prefix(10)) } ?? "unknown"
     }
 
     private func export(_ pack: EmojiPack) {

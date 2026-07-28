@@ -92,6 +92,31 @@ final class EmojiSearchIndexTests: XCTestCase {
         XCTAssertEqual(results.map(\.item.id), ["recent", "old", "unused"])
     }
 
+    func testFavoriteBreaksTieBeforeRecencyWithinPack() {
+        let favorite = CoreTestFixtures.item(
+            id: "favorite",
+            shortcode: "frog_a"
+        )
+        let recent = CoreTestFixtures.item(
+            id: "recent",
+            shortcode: "frog_b"
+        )
+        let usage = EmojiUsageSnapshot(
+            statisticsByItemID: [
+                "recent": EmojiUsageStatistics(
+                    useCount: 100,
+                    lastUsedAt: Date(timeIntervalSince1970: 10_000)
+                )
+            ],
+            favoriteItemIDs: ["favorite"]
+        )
+
+        let results = EmojiSearchIndex(items: [recent, favorite])
+            .search("frog", usage: usage)
+
+        XCTAssertEqual(results.map(\.item.id), ["favorite", "recent"])
+    }
+
     func testOrderingIsDeterministicAcrossInputOrder() {
         let items = [
             CoreTestFixtures.item(id: "z", shortcode: "pond_z"),

@@ -1,6 +1,50 @@
 import AppKit
 import SwiftUI
 
+enum OnboardingPracticeCatalogAvailability: Equatable, Sendable {
+    case available
+    case unavailable
+
+    var title: String {
+        switch self {
+        case .available:
+            "Practice suggestions ready"
+        case .unavailable:
+            "Practice suggestions unavailable"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .available:
+            "The built-in emoji catalog is ready."
+        case .unavailable:
+            "MojiPond could not load its built-in emoji catalog. You can try again or continue to the Library."
+        }
+    }
+}
+
+struct OnboardingPracticeCatalog {
+    let searchIndex: EmojiSearchIndex?
+    let availability: OnboardingPracticeCatalogAvailability
+
+    static func load(
+        using loader: () throws -> EmojiSearchIndex
+    ) -> OnboardingPracticeCatalog {
+        do {
+            return OnboardingPracticeCatalog(
+                searchIndex: try loader(),
+                availability: .available
+            )
+        } catch {
+            return OnboardingPracticeCatalog(
+                searchIndex: nil,
+                availability: .unavailable
+            )
+        }
+    }
+}
+
 struct OnboardingView: View {
     @ObservedObject var appState: AppState
     @ObservedObject private var permissions: SystemPermissionCenter
@@ -9,13 +53,37 @@ struct OnboardingView: View {
     @State private var step = 0
     @State private var practiceText = ""
     @State private var practiceFeedback: String?
-    private let practiceIndex: EmojiSearchIndex?
+    @State private var practiceIndex: EmojiSearchIndex?
+    @State private var practiceCatalogAvailability:
+        OnboardingPracticeCatalogAvailability
+    private let practiceCatalogLoader: () throws -> EmojiSearchIndex
 
     init(appState: AppState, onFinish: @escaping () -> Void) {
+        self.init(
+            appState: appState,
+            practiceCatalogLoader: {
+                try BuiltInRuntimeCatalogLoader().loadSearchIndex()
+            },
+            onFinish: onFinish
+        )
+    }
+
+    init(
+        appState: AppState,
+        practiceCatalogLoader: @escaping () throws -> EmojiSearchIndex,
+        onFinish: @escaping () -> Void
+    ) {
+        let practiceCatalog = OnboardingPracticeCatalog.load(
+            using: practiceCatalogLoader
+        )
         self.appState = appState
         permissions = appState.permissions
         self.onFinish = onFinish
-        practiceIndex = try? BuiltInRuntimeCatalogLoader().loadSearchIndex()
+        self.practiceCatalogLoader = practiceCatalogLoader
+        _practiceIndex = State(initialValue: practiceCatalog.searchIndex)
+        _practiceCatalogAvailability = State(
+            initialValue: practiceCatalog.availability
+        )
     }
 
     var body: some View {
@@ -38,7 +106,12 @@ struct OnboardingView: View {
             Divider()
             footer
         }
-        .frame(width: 760, height: 570)
+        .frame(
+            minWidth: 680,
+            idealWidth: 760,
+            minHeight: 520,
+            idealHeight: 570
+        )
         .background(.background)
     }
 
@@ -62,39 +135,39 @@ struct OnboardingView: View {
     }
 
     private var welcomeStep: some View {
-        VStack(spacing: 22) {
-            PondMark(size: 88)
+        ScrollView {
+            VStack(spacing: 22) {
+                PondMark(size: 88)
 
-            VStack(spacing: 8) {
-                Text("Every emote, right where you type")
-                    .font(.system(size: 30, weight: .semibold, design: .rounded))
-                Text("Use familiar shortcodes in Messages and across your Mac, then add the custom packs that make conversations yours.")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 570)
-            }
+                VStack(spacing: 8) {
+                    Text("Every emote, right where you type")
+                        .font(
+                            .system(
+                                size: 30,
+                                weight: .semibold,
+                                design: .rounded
+                            )
+                        )
+                    Text("Use familiar shortcodes in Messages and across your Mac, then add the custom packs that make conversations yours.")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 570)
+                }
 
-            HStack(spacing: 12) {
-                FeatureCard(
-                    icon: "keyboard",
-                    title: "Stay in flow",
-                    detail: "Type :wave: and keep going."
-                )
-                FeatureCard(
-                    icon: "square.grid.2x2",
-                    title: "Bring your packs",
-                    detail: "Folders, ZIPs, Slack, and GitHub."
-                )
-                FeatureCard(
-                    icon: "lock.shield",
-                    title: "Local by default",
-                    detail: "Your messages never leave your Mac."
-                )
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) {
+                        onboardingFeatureCards
+                    }
+                    VStack(spacing: 12) {
+                        onboardingFeatureCards
+                    }
+                }
+                .frame(maxWidth: 650)
             }
-            .frame(maxWidth: 650)
+            .padding(34)
+            .frame(maxWidth: .infinity)
         }
-        .padding(34)
     }
 
     private var permissionStep: some View {
@@ -121,7 +194,7 @@ struct OnboardingView: View {
                 PermissionCard(
                     icon: "keyboard",
                     title: "Input Monitoring",
-                    detail: "Notices only the short token that begins with your trigger. Raw typing is never saved or logged.",
+                    detail: "Observes global key events so it can notice your trigger. Unrelated keys are discarded immediately; only a bounded token is buffered after the trigger. Typing is never saved or logged.",
                     status: permissions.snapshot.inputMonitoring,
                     buttonTitle: "Allow Input Monitoring",
                     request: { permissions.requestInputMonitoring() },
@@ -166,101 +239,157 @@ struct OnboardingView: View {
     }
 
     private var practiceStep: some View {
-        VStack(spacing: 22) {
-            Image(systemName: appState.canMonitorTyping ? "checkmark.circle.fill" : "rectangle.and.pencil.and.ellipsis")
-                .font(.system(size: 48))
-                .foregroundStyle(appState.canMonitorTyping ? PondDesign.lily : PondDesign.pond)
-                .accessibilityHidden(true)
+        ScrollView {
+            VStack(spacing: 22) {
+                Image(systemName: appState.canMonitorTyping ? "checkmark.circle.fill" : "rectangle.and.pencil.and.ellipsis")
+                    .font(.system(size: 48))
+                    .foregroundStyle(appState.canMonitorTyping ? PondDesign.lily : PondDesign.pond)
+                    .accessibilityHidden(true)
 
-            VStack(spacing: 7) {
-                Text(appState.canMonitorTyping ? "You’re ready to ripple" : "Library mode is ready")
-                    .font(.title2.weight(.semibold))
-                Text(
-                    appState.canMonitorTyping
-                        ? "Try typing :wave: below. Suggestions should appear beside your caret."
-                        : "You can browse and copy emoji now, then grant typing permissions whenever you’re ready."
-                )
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 500)
-            }
-
-            VStack(spacing: 8) {
-                TextField(
-                    "Type \(triggerText)wave\(triggerText) here",
-                    text: $practiceText
-                )
-                .textFieldStyle(.roundedBorder)
-                .font(.title3)
-                .onSubmit(acceptFirstPracticeSuggestion)
-                .onChange(of: practiceText) { _, _ in
-                    replaceExactPracticeTokenIfNeeded()
-                }
-                .accessibilityIdentifier("onboarding.practiceField")
-
-                if !practiceSuggestions.isEmpty {
-                    VStack(spacing: 0) {
-                        ForEach(
-                            Array(practiceSuggestions.prefix(3).enumerated()),
-                            id: \.element.item.id
-                        ) { index, result in
-                            Button {
-                                acceptPracticeResult(result)
-                            } label: {
-                                HStack(spacing: 10) {
-                                    Text(unicodeValue(for: result.item) ?? "◇")
-                                        .font(.title2)
-                                        .frame(width: 30)
-                                    Text(
-                                        "\(triggerText)\(result.item.shortcode.rawValue)\(triggerText)"
-                                    )
-                                    .fontDesign(.monospaced)
-                                    Spacer()
-                                    if index == 0 {
-                                        Text("Return")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                .padding(.horizontal, 10)
-                                .frame(height: 38)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityHint(
-                                index == 0
-                                    ? "Press Return to insert"
-                                    : "Select to insert"
-                            )
-                        }
-                    }
-                    .background(
-                        .background.secondary,
-                        in: RoundedRectangle(cornerRadius: 9)
+                VStack(spacing: 7) {
+                    Text(appState.canMonitorTyping ? "You’re ready to ripple" : "Library mode is ready")
+                        .font(.title2.weight(.semibold))
+                    Text(
+                        appState.canMonitorTyping
+                            ? "Try typing :wave: below. Suggestions should appear beside your caret."
+                            : "You can browse and copy emoji now, then grant typing permissions whenever you’re ready."
                     )
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 9)
-                            .stroke(.separator)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 500)
+                }
+
+                Group {
+                    if practiceCatalogAvailability == .available {
+                        practiceEditor
+                    } else {
+                        practiceCatalogFailure
                     }
                 }
+                .frame(maxWidth: 460)
 
-                if let practiceFeedback {
-                    Label(practiceFeedback, systemImage: "checkmark.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(PondDesign.lily)
+                Label(
+                    "MojiPond favors doing nothing when it is not certain, so ordinary Tab and Return behavior stays untouched.",
+                    systemImage: "hand.raised"
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: 520)
+            }
+            .padding(34)
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private var onboardingFeatureCards: some View {
+        FeatureCard(
+            icon: "keyboard",
+            title: "Stay in flow",
+            detail: "Type :wave: and keep going."
+        )
+        FeatureCard(
+            icon: "square.grid.2x2",
+            title: "Bring your packs",
+            detail: "Folders, ZIPs, Slack, and GitHub."
+        )
+        FeatureCard(
+            icon: "lock.shield",
+            title: "Local by default",
+            detail: "Your messages never leave your Mac."
+        )
+    }
+
+    private var practiceEditor: some View {
+        VStack(spacing: 8) {
+            TextField(
+                "Type \(triggerText)wave\(triggerText) here",
+                text: $practiceText
+            )
+            .textFieldStyle(.roundedBorder)
+            .font(.title3)
+            .onSubmit(acceptFirstPracticeSuggestion)
+            .onChange(of: practiceText) { _, _ in
+                replaceExactPracticeTokenIfNeeded()
+            }
+            .accessibilityIdentifier("onboarding.practiceField")
+
+            if !practiceSuggestions.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(
+                        Array(practiceSuggestions.prefix(3).enumerated()),
+                        id: \.element.item.id
+                    ) { index, result in
+                        Button {
+                            acceptPracticeResult(result)
+                        } label: {
+                            HStack(spacing: 10) {
+                                Text(unicodeValue(for: result.item) ?? "◇")
+                                    .font(.title2)
+                                    .frame(width: 30)
+                                Text(
+                                    "\(triggerText)\(result.item.shortcode.rawValue)\(triggerText)"
+                                )
+                                .fontDesign(.monospaced)
+                                Spacer()
+                                if index == 0 {
+                                    Text("Return")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(.horizontal, 10)
+                            .frame(height: 38)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint(
+                            index == 0
+                                ? "Press Return to insert"
+                                : "Select to insert"
+                        )
+                    }
+                }
+                .background(
+                    .background.secondary,
+                    in: RoundedRectangle(cornerRadius: 9)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 9)
+                        .stroke(.separator)
                 }
             }
-            .frame(width: 460)
 
-            Label(
-                "MojiPond favors doing nothing when it is not certain, so ordinary Tab and Return behavior stays untouched.",
-                systemImage: "hand.raised"
-            )
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: 520)
+            if let practiceFeedback {
+                Label(practiceFeedback, systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(PondDesign.lily)
+            }
         }
-        .padding(34)
+    }
+
+    private var practiceCatalogFailure: some View {
+        PondCard {
+            VStack(alignment: .leading, spacing: 10) {
+                Label(
+                    practiceCatalogAvailability.title,
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(.headline)
+
+                Text(practiceCatalogAvailability.message)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button("Try Again", action: reloadPracticeCatalog)
+                    .accessibilityHint(
+                        "Attempts to reload the built-in emoji catalog"
+                    )
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityElement(children: .contain)
     }
 
     private var footer: some View {
@@ -307,6 +436,14 @@ struct OnboardingView: View {
 
     private var triggerText: String {
         appState.preferences.shortcode.trigger.rawValue
+    }
+
+    private func reloadPracticeCatalog() {
+        let catalog = OnboardingPracticeCatalog.load(
+            using: practiceCatalogLoader
+        )
+        practiceIndex = catalog.searchIndex
+        practiceCatalogAvailability = catalog.availability
     }
 
     private var practiceSuggestions: [EmojiSearchResult] {
@@ -468,10 +605,10 @@ struct PermissionStatusView: View {
     var body: some View {
         Label(title, systemImage: icon)
             .font(.caption.weight(.semibold))
-            .foregroundStyle(color)
+            .foregroundStyle(foregroundColor)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(color.opacity(0.12), in: Capsule())
+            .background(backgroundColor, in: Capsule())
             .accessibilityLabel("Permission status")
             .accessibilityValue(title)
     }
@@ -494,11 +631,22 @@ struct PermissionStatusView: View {
         }
     }
 
-    private var color: Color {
+    private var foregroundColor: Color {
         switch status {
         case .granted: PondDesign.lily
-        case .denied, .revoked: .orange
+        case .denied, .revoked: PondDesign.warningForeground
         case .notRequested: .secondary
+        }
+    }
+
+    private var backgroundColor: Color {
+        switch status {
+        case .denied, .revoked:
+            PondDesign.warningBackground
+        case .granted:
+            PondDesign.lily.opacity(0.12)
+        case .notRequested:
+            Color.secondary.opacity(0.12)
         }
     }
 }

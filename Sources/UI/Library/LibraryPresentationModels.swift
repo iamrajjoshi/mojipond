@@ -2,6 +2,7 @@ import Foundation
 
 enum LibraryScope: Hashable, Identifiable {
     case all
+    case favorites
     case builtIn
     case custom
     case pack(UUID)
@@ -10,6 +11,8 @@ enum LibraryScope: Hashable, Identifiable {
         switch self {
         case .all:
             "all"
+        case .favorites:
+            "favorites"
         case .builtIn:
             "built-in"
         case .custom:
@@ -89,7 +92,12 @@ struct LibraryDisplayItem: Identifiable, Equatable {
 
     var accessibilityLabel: String {
         let kind = isAnimated ? "animated emoji" : (assetURL == nil ? "Unicode emoji" : "image emoji")
-        return "\(displayName), colon \(shortcode) colon, \(kind), \(packName)"
+        return [
+            "\(displayName), colon \(shortcode) colon, \(kind), \(packName)",
+            packEnabled ? nil : "pack disabled"
+        ]
+        .compactMap { $0 }
+        .joined(separator: ", ")
     }
 }
 
@@ -112,7 +120,9 @@ struct LibraryImportSession: Identifiable, Equatable {
     }
 
     func sourceURL(for itemID: UUID) -> URL? {
-        preview.preparedPack.items.first(where: { $0.id == itemID })?.sourceURL
+        preview.preparedPack.items.first(
+            where: { $0.id == itemID }
+        )?.assetSourceURL
     }
 }
 
@@ -183,6 +193,16 @@ struct LibraryItemDraft: Equatable {
         tags = item.tags.joined(separator: ", ")
         category = item.category ?? ""
     }
+}
+
+struct LibraryUnicodeItemDraft: Equatable {
+    let packID: UUID
+    var unicode = ""
+    var shortcode = ""
+    var aliases = ""
+    var displayName = ""
+    var tags = ""
+    var category = ""
 }
 
 struct LibraryNotice: Identifiable, Equatable {

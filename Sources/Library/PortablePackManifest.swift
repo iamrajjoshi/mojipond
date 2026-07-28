@@ -5,7 +5,8 @@ import Foundation
 /// Paths are always relative to the manifest's directory. The model contains no
 /// executable hooks, commands, or scripts.
 struct PortablePackManifest: Codable, Equatable, Sendable {
-    static let currentSchemaVersion = 1
+    static let currentSchemaVersion = 2
+    private static let supportedSchemaVersions = 1...currentSchemaVersion
 
     var schemaVersion: Int
     var id: PackIdentifier
@@ -64,7 +65,7 @@ struct PortablePackManifest: Codable, Equatable, Sendable {
     }
 
     func validated() throws -> Self {
-        guard schemaVersion == Self.currentSchemaVersion else {
+        guard Self.supportedSchemaVersions.contains(schemaVersion) else {
             throw PortablePackManifestError.unsupportedSchemaVersion(schemaVersion)
         }
         try metadata.validate()
@@ -72,12 +73,39 @@ struct PortablePackManifest: Codable, Equatable, Sendable {
         var claims = Set<Shortcode>()
         var paths = Set<String>()
         for entry in emoji {
-            guard Self.isSafeAssetPath(entry.file) else {
-                throw PortablePackManifestError.unsafeAssetPath(entry.file)
-            }
-            let normalizedPath = entry.file.precomposedStringWithCanonicalMapping.lowercased()
-            guard paths.insert(normalizedPath).inserted else {
-                throw PortablePackManifestError.duplicateAssetPath(entry.file)
+            switch (entry.file, entry.unicode) {
+            case let (.some(file), .none):
+                guard Self.isSafeAssetPath(file) else {
+                    throw PortablePackManifestError.unsafeAssetPath(file)
+                }
+                let normalizedPath = file
+                    .precomposedStringWithCanonicalMapping
+                    .lowercased()
+                guard paths.insert(normalizedPath).inserted else {
+                    throw PortablePackManifestError.duplicateAssetPath(file)
+                }
+            case let (.none, .some(unicode)):
+                guard schemaVersion >= 2 else {
+                    throw PortablePackManifestError.unicodeRequiresSchemaVersion2(
+                        entry.shortcode
+                    )
+                }
+                do {
+                    try UnicodeEmojiValueValidator.validate(unicode)
+                } catch {
+                    throw PortablePackManifestError.invalidUnicode(
+                        entry.shortcode,
+                        error.localizedDescription
+                    )
+                }
+            case (.none, .none):
+                throw PortablePackManifestError.missingEmojiContent(
+                    entry.shortcode
+                )
+            case (.some, .some):
+                throw PortablePackManifestError.conflictingEmojiContent(
+                    entry.shortcode
+                )
             }
             for claim in [entry.shortcode] + entry.aliases {
                 guard claims.insert(claim).inserted else {
@@ -93,7 +121,7 @@ struct PortablePackManifest: Codable, Equatable, Sendable {
                 category: entry.category,
                 order: entry.order ?? 0,
                 sourceFilename: entry.file,
-                payload: .unicode("validation")
+                payload: .unicode(entry.unicode ?? "🐸")
             )
             do {
                 try validationProbe.validate()
@@ -141,7 +169,8 @@ struct PortablePackEmoji: Codable, Equatable, Sendable {
     var tags: [String]
     var category: String?
     var order: Int?
-    var file: String
+    var file: String?
+    var unicode: String?
 
     init(
         shortcode: Shortcode,
@@ -159,6 +188,26 @@ struct PortablePackEmoji: Codable, Equatable, Sendable {
         self.category = category
         self.order = order
         self.file = file
+        unicode = nil
+    }
+
+    init(
+        shortcode: Shortcode,
+        aliases: [Shortcode] = [],
+        displayName: String? = nil,
+        tags: [String] = [],
+        category: String? = nil,
+        order: Int? = nil,
+        unicode: String
+    ) {
+        self.shortcode = shortcode
+        self.aliases = aliases
+        self.displayName = displayName
+        self.tags = tags
+        self.category = category
+        self.order = order
+        file = nil
+        self.unicode = unicode
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -169,6 +218,7 @@ struct PortablePackEmoji: Codable, Equatable, Sendable {
         case category
         case order
         case file
+        case unicode
     }
 
     init(from decoder: Decoder) throws {
@@ -179,7 +229,24 @@ struct PortablePackEmoji: Codable, Equatable, Sendable {
         tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
         category = try container.decodeIfPresent(String.self, forKey: .category)
         order = try container.decodeIfPresent(Int.self, forKey: .order)
-        file = try container.decode(String.self, forKey: .file)
+        file = try container.decodeIfPresent(String.self, forKey: .file)
+        unicode = try container.decodeIfPresent(String.self, forKey: .unicode)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(shortcode, forKey: .shortcode)
+        if !aliases.isEmpty {
+            try container.encode(aliases, forKey: .aliases)
+        }
+        try container.encodeIfPresent(displayName, forKey: .displayName)
+        if !tags.isEmpty {
+            try container.encode(tags, forKey: .tags)
+        }
+        try container.encodeIfPresent(category, forKey: .category)
+        try container.encodeIfPresent(order, forKey: .order)
+        try container.encodeIfPresent(file, forKey: .file)
+        try container.encodeIfPresent(unicode, forKey: .unicode)
     }
 }
 
@@ -189,6 +256,10 @@ enum PortablePackManifestError: Error, Equatable, LocalizedError, Sendable {
     case unsafeAssetPath(String)
     case duplicateAssetPath(String)
     case duplicateShortcode(Shortcode)
+    case missingEmojiContent(Shortcode)
+    case conflictingEmojiContent(Shortcode)
+    case unicodeRequiresSchemaVersion2(Shortcode)
+    case invalidUnicode(Shortcode, String)
     case invalidEmojiMetadata(Shortcode, String)
     case manifestTooLarge(actual: Int64, limit: Int64)
     case unsafeManifestFile
@@ -209,6 +280,14 @@ enum PortablePackManifestError: Error, Equatable, LocalizedError, Sendable {
             "Portable pack asset path \(path) appears more than once."
         case let .duplicateShortcode(shortcode):
             "Portable pack shortcode \(shortcode.rawValue) appears more than once."
+        case let .missingEmojiContent(shortcode):
+            "Portable pack emoji \(shortcode.rawValue) must contain either file or unicode."
+        case let .conflictingEmojiContent(shortcode):
+            "Portable pack emoji \(shortcode.rawValue) cannot contain both file and unicode."
+        case let .unicodeRequiresSchemaVersion2(shortcode):
+            "Portable pack emoji \(shortcode.rawValue) uses Unicode content, which requires schema version 2."
+        case let .invalidUnicode(shortcode, message):
+            "Portable pack emoji \(shortcode.rawValue) has invalid Unicode content: \(message)"
         case let .invalidEmojiMetadata(shortcode, message):
             "Portable pack emoji \(shortcode.rawValue) is invalid: \(message)"
         case let .manifestTooLarge(actual, limit):
