@@ -54,6 +54,16 @@ brew install xcodegen
 
 ## Build and install
 
+The verified pre-release is on the implementation branch and has not been
+merged into `main`. For a fresh authenticated checkout:
+
+```sh
+git clone \
+  --branch raj--mojipond--mvp \
+  https://github.com/iamrajjoshi/mojipond.git
+cd mojipond
+```
+
 From the repository root:
 
 ```sh
@@ -67,8 +77,8 @@ signature, installs it at `/Applications/MojiPond.app`, and launches it. A
 stable path matters because macOS privacy approvals are associated with the
 installed application.
 
-To produce a local Universal Release archive, ZIP, DMG, and SHA-256 checksum
-file:
+To produce a local Universal Release archive, ZIP, DMG, fixed-schema
+build-provenance metadata, and SHA-256 checksum file:
 
 ```sh
 ./scripts/package-local.sh
@@ -106,11 +116,11 @@ xcodebuild \
   CODE_SIGNING_REQUIRED=YES
 ```
 
-The MojiPond UI scheme launches with isolated temporary Library data, fixed
-permission-denied state, and runtime/network startup disabled. It does not
-request TCC access or interact with Messages. The integration fixture safely
-exercises an ordinary field, multiline editor, secure field, and
-attachment-capable rich text view.
+The MojiPond UI scheme launches with isolated temporary Library data,
+deterministic not-requested/denied/granted/revoked permission scenarios, and
+runtime/network startup disabled. It does not request TCC access or interact
+with Messages. The integration fixture safely exercises an ordinary field,
+multiline editor, secure field, and attachment-capable rich text view.
 
 ## Grant permissions
 

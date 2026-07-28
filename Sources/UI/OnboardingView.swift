@@ -185,10 +185,13 @@ struct OnboardingView: View {
                         Text("Install MojiPond in Applications before granting access so macOS can recognize a stable app location.")
                     } icon: {
                         Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(PondDesign.warningForeground)
                     }
                     .padding(12)
-                    .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+                    .background(
+                        PondDesign.warningBackground,
+                        in: RoundedRectangle(cornerRadius: 10)
+                    )
                 }
 
                 PermissionCard(

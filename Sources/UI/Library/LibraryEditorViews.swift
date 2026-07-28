@@ -38,7 +38,7 @@ struct LibraryNewPackView: View {
                     systemImage: "exclamationmark.circle"
                 )
                 .font(.caption)
-                .foregroundStyle(.red)
+                .foregroundStyle(PondDesign.errorForeground)
             }
 
             HStack {
@@ -180,7 +180,7 @@ struct LibraryAddUnicodeItemView: View {
                     systemImage: "exclamationmark.circle"
                 )
                 .font(.caption)
-                .foregroundStyle(.red)
+                .foregroundStyle(PondDesign.errorForeground)
             }
 
             HStack {
@@ -381,7 +381,7 @@ struct LibraryItemDetailView: View {
                         "\(notice.title): \(notice.message)",
                         systemImage: "exclamationmark.circle"
                     )
-                    .foregroundStyle(.red)
+                    .foregroundStyle(PondDesign.errorForeground)
                 }
             }
         }
@@ -830,7 +830,7 @@ struct LibraryPackDetailView: View {
             .foregroundStyle(PondDesign.pond)
         case let .failed(message):
             Label(message, systemImage: "exclamationmark.triangle")
-                .foregroundStyle(.orange)
+                .foregroundStyle(PondDesign.warningForeground)
         }
     }
 

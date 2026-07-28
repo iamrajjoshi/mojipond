@@ -70,7 +70,7 @@ struct SettingsRootView: View {
                 if let error = appState.launchAtLoginError {
                     Label(error, systemImage: "exclamationmark.triangle")
                         .font(.caption)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(PondDesign.warningForeground)
                 }
             }
 
@@ -142,7 +142,7 @@ struct SettingsRootView: View {
                 if case let .failed(message) = giphyKey.status {
                     Text(message)
                         .font(.caption)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(PondDesign.errorForeground)
                 }
 
                 Text(
@@ -334,7 +334,7 @@ struct SettingsRootView: View {
                 if let exclusionError {
                     Text(exclusionError)
                         .font(.caption)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(PondDesign.warningForeground)
                 }
                 Text(
                     "Domain exclusions apply only in browsers where MojiPond "
@@ -369,7 +369,7 @@ struct SettingsRootView: View {
             if case let .failed(message) = updates.state {
                 Text(message)
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(PondDesign.errorForeground)
             }
             if let metadata = updates.availableMetadata,
                let releaseNotesURL = metadata.releaseNotesURL {
@@ -452,7 +452,7 @@ struct SettingsRootView: View {
                     case let .unavailable(reason):
                         Text(reason)
                             .font(.caption)
-                            .foregroundStyle(.red)
+                            .foregroundStyle(PondDesign.errorForeground)
                     case .none:
                         EmptyView()
                     }

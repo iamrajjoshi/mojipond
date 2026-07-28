@@ -357,6 +357,10 @@ struct RuntimeSuggestionPanelView: View {
                     Text("↑↓ choose  ·  ↩ insert  ·  esc close")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .accessibilityLabel(
+                            "Up and Down Arrow choose, Return inserts, "
+                                + "Escape closes"
+                        )
                 }
                 .padding(.horizontal, 12)
                 .frame(height: 42)
@@ -386,6 +390,10 @@ struct RuntimeSuggestionPanelView: View {
                     Text("↑↓ choose  ·  tab or ↩ insert  ·  esc close")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                        .accessibilityLabel(
+                            "Up and Down Arrow choose, Tab or Return inserts, "
+                                + "Escape closes"
+                        )
                         .padding(.horizontal, 12)
                         .frame(height: 30)
                 }

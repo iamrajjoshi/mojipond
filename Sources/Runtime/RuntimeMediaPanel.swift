@@ -255,6 +255,9 @@ struct RuntimeMediaPanelView: View {
             Text("arrows choose  ·  ↩ insert  ·  esc close")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .accessibilityLabel(
+                    "Arrow keys choose, Return inserts, Escape closes"
+                )
         }
     }
 
@@ -463,7 +466,7 @@ private struct RuntimeMediaCell: View {
                 .lineLimit(1)
             if let attributionDetail {
                 Text(attributionDetail)
-                    .font(.system(size: 8))
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
@@ -510,7 +513,7 @@ private struct RuntimeMediaCell: View {
                 Image(systemName: "exclamationmark.triangle")
                     .font(.title3)
                 Text("Preview unavailable")
-                    .font(.system(size: 8, weight: .medium))
+                    .font(.caption2.weight(.medium))
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
             }
@@ -536,7 +539,7 @@ private extension View {
         foreground: Color,
         background: Color
     ) -> some View {
-        font(.system(size: 9, weight: .bold))
+        font(.caption2.weight(.bold))
             .foregroundStyle(foreground)
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
