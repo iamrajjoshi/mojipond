@@ -2,6 +2,7 @@
 
 # Xcode
 DerivedData/
+.derived/
 build/
 MojiPond.xcodeproj/
 *.xcarchive
