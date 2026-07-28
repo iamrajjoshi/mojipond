@@ -1,0 +1,249 @@
+import Foundation
+@testable import MojiPond
+
+final class FakePermissionProvider: SystemPermissionProviding {
+    var granted = Dictionary(
+        uniqueKeysWithValues: SystemPermission.allCases.map { ($0, false) }
+    )
+    var requestResults = Dictionary(
+        uniqueKeysWithValues: SystemPermission.allCases.map { ($0, false) }
+    )
+    private(set) var requests: [SystemPermission] = []
+
+    func isGranted(_ permission: SystemPermission) -> Bool {
+        granted[permission, default: false]
+    }
+
+    func request(_ permission: SystemPermission) -> Bool {
+        requests.append(permission)
+        let result = requestResults[permission, default: false]
+        granted[permission] = result
+        return result
+    }
+}
+
+final class FakePermissionHistory: PermissionHistoryStoring {
+    var requested: Set<SystemPermission> = []
+    var everGranted: Set<SystemPermission> = []
+
+    func hasRequested(_ permission: SystemPermission) -> Bool {
+        requested.contains(permission)
+    }
+
+    func wasEverGranted(_ permission: SystemPermission) -> Bool {
+        everGranted.contains(permission)
+    }
+
+    func setRequested(_ requested: Bool, for permission: SystemPermission) {
+        if requested {
+            self.requested.insert(permission)
+        } else {
+            self.requested.remove(permission)
+        }
+    }
+
+    func setEverGranted(_ granted: Bool, for permission: SystemPermission) {
+        if granted {
+            everGranted.insert(permission)
+        } else {
+            everGranted.remove(permission)
+        }
+    }
+}
+
+final class FakeAccessibilityTextSystem: AccessibilityTextSystem {
+    let primaryElement = AccessibilityElementReference(rawValue: NSObject())
+    let alternateElement = AccessibilityElementReference(rawValue: NSObject())
+
+    var focusedElementReference: AccessibilityElementReference
+    var processIdentifier: pid_t = 42
+    var text = ""
+    var selection = NSRange(location: 0, length: 0)
+    var caretBounds: CGRect? = CGRect(x: 20, y: 30, width: 1, height: 18)
+    var subrole: String?
+    var subroleError: Error?
+    var supportsRangedStrings = true
+    var reportedCharacterCount: Int?
+    var settableAttributes: Set<String> = [
+        "AXSelectedTextRange",
+        "AXSelectedText"
+    ]
+    var focusedElementError: Error?
+    private(set) var selectedRangesSet: [NSRange] = []
+    private(set) var replacements: [String] = []
+    private(set) var fullValueReadCount = 0
+    private(set) var rangedStringReads: [NSRange] = []
+
+    init() {
+        focusedElementReference = primaryElement
+    }
+
+    func focusedElement() throws -> AccessibilityElementReference {
+        if let focusedElementError {
+            throw focusedElementError
+        }
+        return focusedElementReference
+    }
+
+    func processIdentifier(
+        of element: AccessibilityElementReference
+    ) throws -> pid_t {
+        processIdentifier
+    }
+
+    func elementsAreEqual(
+        _ lhs: AccessibilityElementReference,
+        _ rhs: AccessibilityElementReference
+    ) -> Bool {
+        lhs === rhs
+    }
+
+    func value(of element: AccessibilityElementReference) throws -> String {
+        fullValueReadCount += 1
+        return text
+    }
+
+    func numberOfCharacters(
+        in element: AccessibilityElementReference
+    ) throws -> Int? {
+        reportedCharacterCount ?? text.utf16.count
+    }
+
+    func string(
+        for range: NSRange,
+        in element: AccessibilityElementReference
+    ) throws -> String? {
+        guard supportsRangedStrings else {
+            return nil
+        }
+        rangedStringReads.append(range)
+        try AccessibilityTextAdapter.validate(range, in: text)
+        return (text as NSString).substring(with: range)
+    }
+
+    func selectedTextRange(
+        of element: AccessibilityElementReference
+    ) throws -> NSRange {
+        selection
+    }
+
+    func bounds(
+        for range: NSRange,
+        in element: AccessibilityElementReference
+    ) throws -> CGRect? {
+        caretBounds
+    }
+
+    func subrole(
+        of element: AccessibilityElementReference
+    ) throws -> String? {
+        if let subroleError {
+            throw subroleError
+        }
+        return subrole
+    }
+
+    func isAttributeSettable(
+        _ attribute: String,
+        in element: AccessibilityElementReference
+    ) throws -> Bool {
+        settableAttributes.contains(attribute)
+    }
+
+    func setSelectedTextRange(
+        _ range: NSRange,
+        in element: AccessibilityElementReference
+    ) throws {
+        selectedRangesSet.append(range)
+        selection = range
+    }
+
+    func setSelectedText(
+        _ replacement: String,
+        in element: AccessibilityElementReference
+    ) throws {
+        let mutable = NSMutableString(string: text)
+        mutable.replaceCharacters(in: selection, with: replacement)
+        text = mutable as String
+        selection = NSRange(
+            location: selection.location + replacement.utf16.count,
+            length: 0
+        )
+        replacements.append(replacement)
+    }
+}
+
+@MainActor
+final class FakePasteboard: PasteboardAccessing {
+    private(set) var changeCount = 0
+    var items: [PasteboardItemPayload]
+    var writesSucceed = true
+    var failingWriteAttempts: Set<Int> = []
+    var failedWriteClearsContents = false
+    private(set) var writeAttempts = 0
+
+    init(items: [PasteboardItemPayload] = []) {
+        self.items = items
+    }
+
+    var itemCount: Int {
+        items.count
+    }
+
+    func types(forItemAt index: Int) -> [String] {
+        guard items.indices.contains(index) else {
+            return []
+        }
+        return items[index].representations.map(\.typeIdentifier)
+    }
+
+    func data(forType typeIdentifier: String, itemAt index: Int) -> Data? {
+        guard items.indices.contains(index) else {
+            return nil
+        }
+        return items[index].representations.first {
+            $0.typeIdentifier == typeIdentifier
+        }?.data
+    }
+
+    @discardableResult
+    func replaceContents(with items: [PasteboardItemPayload]) -> Bool {
+        writeAttempts += 1
+        guard writesSucceed, !failingWriteAttempts.contains(writeAttempts) else {
+            if failedWriteClearsContents {
+                self.items = []
+                changeCount += 1
+            }
+            return false
+        }
+        self.items = items
+        changeCount += 1
+        return true
+    }
+
+    func simulateExternalCopy(_ items: [PasteboardItemPayload]) {
+        self.items = items
+        changeCount += 1
+    }
+}
+
+final class FakeEventPoster: SyntheticEventPosting, @unchecked Sendable {
+    var canPostEvents: Bool
+    var error: Error?
+    private(set) var pasteCount = 0
+
+    init(canPostEvents: Bool = true) {
+        self.canPostEvents = canPostEvents
+    }
+
+    func postPasteShortcut() throws {
+        if let error {
+            throw error
+        }
+        pasteCount += 1
+    }
+}
+
+struct FakeSecureInputProvider: SecureInputProviding {
+    let isSecureEventInputEnabled: Bool
+}

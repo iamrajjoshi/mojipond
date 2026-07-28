@@ -1,0 +1,708 @@
+import ApplicationServices
+import CoreGraphics
+import Foundation
+
+enum AccessibilityTextError: Error, Equatable {
+    case noFocusedElement
+    case unsupportedAttribute(String)
+    case invalidAttributeValue(String)
+    case invalidUTF16Range
+    case staleTarget
+    case staleSelection
+    case tokenChanged
+    case secureTextField
+    case axFailure(operation: String, code: Int32)
+}
+
+final class AccessibilityElementReference: @unchecked Sendable {
+    fileprivate let rawValue: AnyObject
+
+    init(rawValue: AnyObject) {
+        self.rawValue = rawValue
+    }
+}
+
+struct AccessibilityTextTarget: @unchecked Sendable {
+    let element: AccessibilityElementReference
+    let processIdentifier: pid_t
+}
+
+struct AccessibilityTextContext: Equatable, Sendable {
+    let selection: NSRange
+    let caretBounds: CGRect?
+    let textFragment: String
+    let textFragmentRange: NSRange
+    let tokenRange: NSRange?
+}
+
+struct AccessibilityReplacementRequest: @unchecked Sendable {
+    let target: AccessibilityTextTarget
+    let tokenRange: NSRange
+    let expectedToken: String
+    let expectedSelection: NSRange
+}
+
+protocol AccessibilityTextSystem: AnyObject {
+    func focusedElement() throws -> AccessibilityElementReference
+    func processIdentifier(of element: AccessibilityElementReference) throws -> pid_t
+    func elementsAreEqual(
+        _ lhs: AccessibilityElementReference,
+        _ rhs: AccessibilityElementReference
+    ) -> Bool
+    func value(of element: AccessibilityElementReference) throws -> String
+    func numberOfCharacters(
+        in element: AccessibilityElementReference
+    ) throws -> Int?
+    func string(
+        for range: NSRange,
+        in element: AccessibilityElementReference
+    ) throws -> String?
+    func selectedTextRange(of element: AccessibilityElementReference) throws -> NSRange
+    func bounds(
+        for range: NSRange,
+        in element: AccessibilityElementReference
+    ) throws -> CGRect?
+    func subrole(of element: AccessibilityElementReference) throws -> String?
+    func isAttributeSettable(
+        _ attribute: String,
+        in element: AccessibilityElementReference
+    ) throws -> Bool
+    func setSelectedTextRange(
+        _ range: NSRange,
+        in element: AccessibilityElementReference
+    ) throws
+    func setSelectedText(
+        _ text: String,
+        in element: AccessibilityElementReference
+    ) throws
+}
+
+final class MacAccessibilityTextSystem: AccessibilityTextSystem {
+    private let systemWideElement = AXUIElementCreateSystemWide()
+
+    func focusedElement() throws -> AccessibilityElementReference {
+        var value: CFTypeRef?
+        try check(
+            AXUIElementCopyAttributeValue(
+                systemWideElement,
+                kAXFocusedUIElementAttribute as CFString,
+                &value
+            ),
+            operation: "read focused element"
+        )
+        guard let value, CFGetTypeID(value) == AXUIElementGetTypeID() else {
+            throw AccessibilityTextError.noFocusedElement
+        }
+        return AccessibilityElementReference(rawValue: value as AnyObject)
+    }
+
+    func processIdentifier(of element: AccessibilityElementReference) throws -> pid_t {
+        var processIdentifier: pid_t = 0
+        try check(
+            AXUIElementGetPid(axElement(element), &processIdentifier),
+            operation: "read target process identifier"
+        )
+        return processIdentifier
+    }
+
+    func elementsAreEqual(
+        _ lhs: AccessibilityElementReference,
+        _ rhs: AccessibilityElementReference
+    ) -> Bool {
+        CFEqual(lhs.rawValue, rhs.rawValue)
+    }
+
+    func value(of element: AccessibilityElementReference) throws -> String {
+        let value = try copyAttribute(
+            kAXValueAttribute,
+            from: element,
+            operation: "read text value"
+        )
+        if let string = value as? String {
+            return string
+        }
+        if let attributedString = value as? NSAttributedString {
+            return attributedString.string
+        }
+        throw AccessibilityTextError.invalidAttributeValue(kAXValueAttribute)
+    }
+
+    func numberOfCharacters(
+        in element: AccessibilityElementReference
+    ) throws -> Int? {
+        do {
+            let value = try copyAttribute(
+                kAXNumberOfCharactersAttribute,
+                from: element,
+                operation: "read text character count"
+            )
+            guard let number = value as? NSNumber else {
+                throw AccessibilityTextError.invalidAttributeValue(
+                    kAXNumberOfCharactersAttribute
+                )
+            }
+            return number.intValue
+        } catch AccessibilityTextError.unsupportedAttribute {
+            return nil
+        }
+    }
+
+    func string(
+        for range: NSRange,
+        in element: AccessibilityElementReference
+    ) throws -> String? {
+        var cfRange = CFRange(location: range.location, length: range.length)
+        guard let rangeValue = AXValueCreate(.cfRange, &cfRange) else {
+            throw AccessibilityTextError.invalidUTF16Range
+        }
+
+        var value: CFTypeRef?
+        let error = AXUIElementCopyParameterizedAttributeValue(
+            axElement(element),
+            kAXStringForRangeParameterizedAttribute as CFString,
+            rangeValue,
+            &value
+        )
+        if error == .parameterizedAttributeUnsupported || error == .attributeUnsupported {
+            return nil
+        }
+        try check(error, operation: "read string for text range")
+        guard let value else {
+            throw AccessibilityTextError.invalidAttributeValue(
+                kAXStringForRangeParameterizedAttribute
+            )
+        }
+        if let string = value as? String {
+            return string
+        }
+        if let attributedString = value as? NSAttributedString {
+            return attributedString.string
+        }
+        throw AccessibilityTextError.invalidAttributeValue(
+            kAXStringForRangeParameterizedAttribute
+        )
+    }
+
+    func selectedTextRange(of element: AccessibilityElementReference) throws -> NSRange {
+        let value = try copyAttribute(
+            kAXSelectedTextRangeAttribute,
+            from: element,
+            operation: "read selected text range"
+        )
+        guard CFGetTypeID(value) == AXValueGetTypeID() else {
+            throw AccessibilityTextError.invalidAttributeValue(
+                kAXSelectedTextRangeAttribute
+            )
+        }
+
+        let axValue = value as! AXValue
+        guard AXValueGetType(axValue) == .cfRange else {
+            throw AccessibilityTextError.invalidAttributeValue(
+                kAXSelectedTextRangeAttribute
+            )
+        }
+        var range = CFRange()
+        guard AXValueGetValue(axValue, .cfRange, &range) else {
+            throw AccessibilityTextError.invalidAttributeValue(
+                kAXSelectedTextRangeAttribute
+            )
+        }
+        return NSRange(location: range.location, length: range.length)
+    }
+
+    func bounds(
+        for range: NSRange,
+        in element: AccessibilityElementReference
+    ) throws -> CGRect? {
+        var cfRange = CFRange(location: range.location, length: range.length)
+        guard let rangeValue = AXValueCreate(.cfRange, &cfRange) else {
+            throw AccessibilityTextError.invalidAttributeValue(
+                kAXBoundsForRangeParameterizedAttribute
+            )
+        }
+
+        var value: CFTypeRef?
+        let error = AXUIElementCopyParameterizedAttributeValue(
+            axElement(element),
+            kAXBoundsForRangeParameterizedAttribute as CFString,
+            rangeValue,
+            &value
+        )
+        if error == .parameterizedAttributeUnsupported || error == .attributeUnsupported {
+            return nil
+        }
+        try check(error, operation: "read bounds for text range")
+        guard
+            let value,
+            CFGetTypeID(value) == AXValueGetTypeID()
+        else {
+            throw AccessibilityTextError.invalidAttributeValue(
+                kAXBoundsForRangeParameterizedAttribute
+            )
+        }
+
+        let axValue = value as! AXValue
+        guard AXValueGetType(axValue) == .cgRect else {
+            throw AccessibilityTextError.invalidAttributeValue(
+                kAXBoundsForRangeParameterizedAttribute
+            )
+        }
+        var rectangle = CGRect.zero
+        guard AXValueGetValue(axValue, .cgRect, &rectangle) else {
+            throw AccessibilityTextError.invalidAttributeValue(
+                kAXBoundsForRangeParameterizedAttribute
+            )
+        }
+        return rectangle
+    }
+
+    func subrole(of element: AccessibilityElementReference) throws -> String? {
+        do {
+            return try copyAttribute(
+                kAXSubroleAttribute,
+                from: element,
+                operation: "read text target subrole"
+            ) as? String
+        } catch AccessibilityTextError.axFailure(_, let code)
+            where code == AXError.attributeUnsupported.rawValue {
+            return nil
+        }
+    }
+
+    func isAttributeSettable(
+        _ attribute: String,
+        in element: AccessibilityElementReference
+    ) throws -> Bool {
+        var settable = DarwinBoolean(false)
+        try check(
+            AXUIElementIsAttributeSettable(
+                axElement(element),
+                attribute as CFString,
+                &settable
+            ),
+            operation: "check whether \(attribute) is settable"
+        )
+        return settable.boolValue
+    }
+
+    func setSelectedTextRange(
+        _ range: NSRange,
+        in element: AccessibilityElementReference
+    ) throws {
+        var cfRange = CFRange(location: range.location, length: range.length)
+        guard let value = AXValueCreate(.cfRange, &cfRange) else {
+            throw AccessibilityTextError.invalidUTF16Range
+        }
+        try check(
+            AXUIElementSetAttributeValue(
+                axElement(element),
+                kAXSelectedTextRangeAttribute as CFString,
+                value
+            ),
+            operation: "set selected text range"
+        )
+    }
+
+    func setSelectedText(
+        _ text: String,
+        in element: AccessibilityElementReference
+    ) throws {
+        try check(
+            AXUIElementSetAttributeValue(
+                axElement(element),
+                kAXSelectedTextAttribute as CFString,
+                text as CFString
+            ),
+            operation: "replace selected text"
+        )
+    }
+
+    private func copyAttribute(
+        _ attribute: String,
+        from element: AccessibilityElementReference,
+        operation: String
+    ) throws -> CFTypeRef {
+        var value: CFTypeRef?
+        let error = AXUIElementCopyAttributeValue(
+            axElement(element),
+            attribute as CFString,
+            &value
+        )
+        if error == .attributeUnsupported {
+            throw AccessibilityTextError.unsupportedAttribute(attribute)
+        }
+        try check(error, operation: operation)
+        guard let value else {
+            throw AccessibilityTextError.invalidAttributeValue(attribute)
+        }
+        return value
+    }
+
+    private func axElement(_ reference: AccessibilityElementReference) -> AXUIElement {
+        reference.rawValue as! AXUIElement
+    }
+
+    private func check(_ error: AXError, operation: String) throws {
+        guard error == .success else {
+            throw AccessibilityTextError.axFailure(
+                operation: operation,
+                code: error.rawValue
+            )
+        }
+    }
+}
+
+protocol DirectUnicodeReplacing: AnyObject {
+    func replaceUnicode(
+        _ replacement: String,
+        request: AccessibilityReplacementRequest
+    ) throws
+}
+
+final class AccessibilityTextAdapter: DirectUnicodeReplacing {
+    static let defaultMaximumFallbackDocumentLength = 4_096
+    static let maximumShortcodeContextLength = 66
+
+    private let system: AccessibilityTextSystem
+    private let maximumFallbackDocumentLength: Int
+
+    init(
+        system: AccessibilityTextSystem = MacAccessibilityTextSystem(),
+        maximumFallbackDocumentLength: Int =
+            AccessibilityTextAdapter.defaultMaximumFallbackDocumentLength
+    ) {
+        self.system = system
+        self.maximumFallbackDocumentLength = max(
+            0,
+            maximumFallbackDocumentLength
+        )
+    }
+
+    func focusedTarget() throws -> AccessibilityTextTarget {
+        let element = try system.focusedElement()
+        return AccessibilityTextTarget(
+            element: element,
+            processIdentifier: try system.processIdentifier(of: element)
+        )
+    }
+
+    func context(
+        for target: AccessibilityTextTarget,
+        trigger: Character = ":",
+        locateShortcodeToken: Bool = true
+    ) throws -> AccessibilityTextContext {
+        try rejectSecureTarget(target)
+        let selection = try system.selectedTextRange(of: target.element)
+        guard selection.location != NSNotFound, selection.location >= 0 else {
+            throw AccessibilityTextError.invalidUTF16Range
+        }
+
+        let caretBounds = try system.bounds(
+            for: NSRange(location: selection.location, length: 0),
+            in: target.element
+        )
+        let fragmentStart = max(
+            0,
+            selection.location - Self.maximumShortcodeContextLength
+        )
+        let fragmentRange = NSRange(
+            location: fragmentStart,
+            length: selection.location - fragmentStart
+        )
+        let fragment: String
+        let tokenRange: NSRange?
+        if locateShortcodeToken, selection.length == 0 {
+            fragment = try text(
+                in: fragmentRange,
+                from: target.element
+            )
+            if let localRange = Self.shortcodeTokenRange(
+                in: fragment,
+                selection: NSRange(
+                    location: fragment.utf16.count,
+                    length: 0
+                ),
+                trigger: trigger
+            ) {
+                tokenRange = NSRange(
+                    location: fragmentRange.location + localRange.location,
+                    length: localRange.length
+                )
+            } else {
+                tokenRange = nil
+            }
+        } else {
+            fragment = ""
+            tokenRange = nil
+        }
+
+        return AccessibilityTextContext(
+            selection: selection,
+            caretBounds: caretBounds,
+            textFragment: fragment,
+            textFragmentRange: fragmentRange,
+            tokenRange: tokenRange
+        )
+    }
+
+    func replaceUnicode(
+        _ replacement: String,
+        request: AccessibilityReplacementRequest
+    ) throws {
+        let currentElement = try validateCurrentElement(for: request)
+        guard
+            try system.isAttributeSettable(
+                kAXSelectedTextRangeAttribute,
+                in: currentElement
+            ),
+            try system.isAttributeSettable(
+                kAXSelectedTextAttribute,
+                in: currentElement
+            )
+        else {
+            throw AccessibilityTextError.unsupportedAttribute(
+                kAXSelectedTextAttribute
+            )
+        }
+
+        try system.setSelectedTextRange(request.tokenRange, in: currentElement)
+        do {
+            try system.setSelectedText(replacement, in: currentElement)
+        } catch {
+            try? system.setSelectedTextRange(
+                request.expectedSelection,
+                in: currentElement
+            )
+            throw error
+        }
+    }
+
+    /// Revalidates focus, selection, and the exact token immediately before a
+    /// media/clipboard insertion, then selects precisely that token.
+    func selectValidatedToken(
+        for request: AccessibilityReplacementRequest
+    ) throws {
+        let currentElement = try validateCurrentElement(for: request)
+        guard
+            try system.isAttributeSettable(
+                kAXSelectedTextRangeAttribute,
+                in: currentElement
+            )
+        else {
+            throw AccessibilityTextError.unsupportedAttribute(
+                kAXSelectedTextRangeAttribute
+            )
+        }
+        try system.setSelectedTextRange(request.tokenRange, in: currentElement)
+    }
+
+    /// Best-effort cleanup when event creation/posting fails after selection.
+    func restoreExpectedSelection(
+        for request: AccessibilityReplacementRequest
+    ) {
+        guard
+            let currentElement = try? system.focusedElement(),
+            (try? system.processIdentifier(of: currentElement))
+                == request.target.processIdentifier,
+            system.elementsAreEqual(currentElement, request.target.element)
+        else {
+            return
+        }
+        try? system.setSelectedTextRange(
+            request.expectedSelection,
+            in: currentElement
+        )
+    }
+
+    func isSecure(_ target: AccessibilityTextTarget) -> Bool {
+        (try? secureStatus(of: target)) == true
+    }
+
+    func secureStatus(of target: AccessibilityTextTarget) throws -> Bool {
+        try system.subrole(of: target.element) == kAXSecureTextFieldSubrole
+    }
+
+    static func validate(_ range: NSRange, in string: String) throws {
+        let utf16 = string.utf16
+        guard
+            range.location != NSNotFound,
+            range.location >= 0,
+            range.length >= 0,
+            range.location <= utf16.count,
+            range.length <= utf16.count - range.location
+        else {
+            throw AccessibilityTextError.invalidUTF16Range
+        }
+
+        let utf16Start = utf16.index(
+            utf16.startIndex,
+            offsetBy: range.location
+        )
+        let utf16End = utf16.index(utf16Start, offsetBy: range.length)
+        guard
+            String.Index(utf16Start, within: string) != nil,
+            String.Index(utf16End, within: string) != nil
+        else {
+            throw AccessibilityTextError.invalidUTF16Range
+        }
+    }
+
+    /// Returns the active `:shortcode` or complete `:shortcode:` surrounding the
+    /// caret. The returned locations are UTF-16 offsets, matching AX APIs.
+    static func shortcodeTokenRange(
+        in string: String,
+        selection: NSRange,
+        trigger: Character = ":"
+    ) -> NSRange? {
+        guard selection.length == 0 else {
+            return nil
+        }
+        guard (try? validate(selection, in: string)) != nil else {
+            return nil
+        }
+
+        let utf16 = string as NSString
+        guard trigger.utf16.count == 1, let trigger = trigger.utf16.first else {
+            return nil
+        }
+        if selection.location > 0,
+           utf16.character(at: selection.location - 1) == trigger {
+            let closingTriggerLocation = selection.location - 1
+            var candidateStart = closingTriggerLocation
+            while candidateStart > 0,
+                  isShortcodeCharacter(
+                      utf16.character(at: candidateStart - 1)
+                  ) {
+                candidateStart -= 1
+            }
+            if candidateStart > 0,
+               candidateStart < closingTriggerLocation,
+               utf16.character(at: candidateStart - 1) == trigger {
+                return NSRange(
+                    location: candidateStart - 1,
+                    length: selection.location - candidateStart + 1
+                )
+            }
+            return NSRange(location: closingTriggerLocation, length: 1)
+        }
+
+        var start = selection.location
+        while start > 0 {
+            let character = utf16.character(at: start - 1)
+            if character == trigger {
+                start -= 1
+                break
+            }
+            guard isShortcodeCharacter(character) else {
+                return nil
+            }
+            start -= 1
+        }
+
+        guard
+            start < selection.location,
+            utf16.character(at: start) == trigger
+        else {
+            return nil
+        }
+
+        var end = selection.location
+        if end < utf16.length,
+           utf16.character(at: end) == trigger {
+            end += 1
+        }
+        return NSRange(location: start, length: end - start)
+    }
+
+    private static func isShortcodeCharacter(_ character: unichar) -> Bool {
+        switch character {
+        case 48 ... 57, 65 ... 90, 97 ... 122:
+            true
+        case Character("_").utf16.first,
+             Character("+").utf16.first,
+             Character("-").utf16.first:
+            true
+        default:
+            false
+        }
+    }
+
+    private func rejectSecureTarget(_ target: AccessibilityTextTarget) throws {
+        if try system.subrole(of: target.element) == kAXSecureTextFieldSubrole {
+            throw AccessibilityTextError.secureTextField
+        }
+    }
+
+    private func validateCurrentElement(
+        for request: AccessibilityReplacementRequest
+    ) throws -> AccessibilityElementReference {
+        let currentElement = try system.focusedElement()
+        let currentProcessIdentifier = try system.processIdentifier(of: currentElement)
+        guard
+            currentProcessIdentifier == request.target.processIdentifier,
+            system.elementsAreEqual(currentElement, request.target.element)
+        else {
+            throw AccessibilityTextError.staleTarget
+        }
+
+        let currentTarget = AccessibilityTextTarget(
+            element: currentElement,
+            processIdentifier: currentProcessIdentifier
+        )
+        try rejectSecureTarget(currentTarget)
+
+        let selection = try system.selectedTextRange(of: currentElement)
+        guard selection == request.expectedSelection else {
+            throw AccessibilityTextError.staleSelection
+        }
+        guard
+            selection.length == 0,
+            request.tokenRange.location != NSNotFound,
+            request.tokenRange.location >= 0,
+            request.tokenRange.length >= 0,
+            request.tokenRange.location <= selection.location,
+            request.tokenRange.length
+                == selection.location - request.tokenRange.location
+        else {
+            throw AccessibilityTextError.invalidUTF16Range
+        }
+
+        let token = try text(in: request.tokenRange, from: currentElement)
+        guard token == request.expectedToken else {
+            throw AccessibilityTextError.tokenChanged
+        }
+        return currentElement
+    }
+
+    private func text(
+        in range: NSRange,
+        from element: AccessibilityElementReference
+    ) throws -> String {
+        if let rangedString = try system.string(for: range, in: element) {
+            guard rangedString.utf16.count == range.length else {
+                throw AccessibilityTextError.invalidAttributeValue(
+                    kAXStringForRangeParameterizedAttribute
+                )
+            }
+            return rangedString
+        }
+
+        // Some controls do not implement AXStringForRange. Only fall back to
+        // AXValue after proving the control is small, avoiding full-document
+        // reads from browsers, editors, and message histories.
+        guard
+            let characterCount = try system.numberOfCharacters(in: element),
+            characterCount <= maximumFallbackDocumentLength
+        else {
+            throw AccessibilityTextError.unsupportedAttribute(
+                kAXStringForRangeParameterizedAttribute
+            )
+        }
+        let value = try system.value(of: element)
+        guard value.utf16.count == characterCount else {
+            throw AccessibilityTextError.invalidAttributeValue(kAXValueAttribute)
+        }
+        try Self.validate(range, in: value)
+        return (value as NSString).substring(with: range)
+    }
+}
