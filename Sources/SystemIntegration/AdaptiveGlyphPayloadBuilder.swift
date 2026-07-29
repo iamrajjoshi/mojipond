@@ -18,6 +18,11 @@ enum AdaptiveGlyphPayloadError: Error, Equatable {
     case richTextTooLarge(limit: Int)
 }
 
+enum AdaptiveGlyphFramePolicy: Hashable, Sendable {
+    case requireSingleFrame
+    case firstFrame
+}
+
 /// Builds the rich pasteboard representation that Messages uses for an
 /// inline custom image glyph. The public AppKit type is available on macOS 15,
 /// while the app keeps its macOS 14 image-attachment fallback.
@@ -36,7 +41,8 @@ enum AdaptiveGlyphPayloadBuilder {
         sourceType: UTType,
         contentIdentifier: String,
         accessibilityDescription: String,
-        plainTextFallback: String
+        plainTextFallback: String,
+        framePolicy: AdaptiveGlyphFramePolicy = .requireSingleFrame
     ) -> PasteboardItemPayload? {
         guard #available(macOS 15.0, *) else {
             return nil
@@ -46,7 +52,8 @@ enum AdaptiveGlyphPayloadBuilder {
             sourceType: sourceType,
             contentIdentifier: contentIdentifier,
             accessibilityDescription: accessibilityDescription,
-            plainTextFallback: plainTextFallback
+            plainTextFallback: plainTextFallback,
+            framePolicy: framePolicy
         )
     }
 
@@ -56,7 +63,8 @@ enum AdaptiveGlyphPayloadBuilder {
         sourceType: UTType,
         contentIdentifier: String,
         accessibilityDescription: String,
-        plainTextFallback: String
+        plainTextFallback: String,
+        framePolicy: AdaptiveGlyphFramePolicy = .requireSingleFrame
     ) throws -> PasteboardItemPayload {
         guard !sourceData.isEmpty else {
             throw AdaptiveGlyphPayloadError.emptyInput
@@ -79,7 +87,8 @@ enum AdaptiveGlyphPayloadBuilder {
 
         let image = try decodeImage(
             sourceData,
-            expectedType: sourceType
+            expectedType: sourceType,
+            framePolicy: framePolicy
         )
         let encodedImage = try encodeImage(
             image,
@@ -153,7 +162,8 @@ enum AdaptiveGlyphPayloadBuilder {
 
     private static func decodeImage(
         _ data: Data,
-        expectedType: UTType
+        expectedType: UTType,
+        framePolicy: AdaptiveGlyphFramePolicy
     ) throws -> CGImage {
         guard
             let source = CGImageSourceCreateWithData(
@@ -168,9 +178,14 @@ enum AdaptiveGlyphPayloadBuilder {
         else {
             throw AdaptiveGlyphPayloadError.imageDecodeFailed
         }
-        guard CGImageSourceGetCount(source) == 1 else {
+        guard
+            framePolicy == .firstFrame
+                || CGImageSourceGetCount(source) == 1
+        else {
             throw AdaptiveGlyphPayloadError.animatedSource
         }
+        // Adaptive image glyphs are static. The explicit first-frame policy
+        // decodes index zero while leaving the original animation unchanged.
         guard
             let image = CGImageSourceCreateThumbnailAtIndex(
                 source,
@@ -328,25 +343,28 @@ enum AdaptiveGlyphPayloadBuilder {
 }
 
 struct AdaptiveGlyphPayloadCacheKey: Hashable, Sendable {
-    private static let currentSchemaVersion = 1
+    private static let currentSchemaVersion = 2
 
     private let schemaVersion: Int
     private let sourceTypeIdentifier: String
     private let contentIdentifier: String
     private let accessibilityDescription: String
     private let plainTextFallback: String
+    private let framePolicy: AdaptiveGlyphFramePolicy
 
     init(
         sourceType: UTType,
         contentIdentifier: String,
         accessibilityDescription: String,
-        plainTextFallback: String
+        plainTextFallback: String,
+        framePolicy: AdaptiveGlyphFramePolicy = .requireSingleFrame
     ) {
         schemaVersion = Self.currentSchemaVersion
         sourceTypeIdentifier = sourceType.identifier
         self.contentIdentifier = contentIdentifier
         self.accessibilityDescription = accessibilityDescription
         self.plainTextFallback = plainTextFallback
+        self.framePolicy = framePolicy
     }
 }
 
@@ -432,13 +450,31 @@ struct AdaptiveGlyphPayloadRequest: Sendable {
     let contentIdentifier: String
     let accessibilityDescription: String
     let plainTextFallback: String
+    let framePolicy: AdaptiveGlyphFramePolicy
+
+    init(
+        sourceData: Data,
+        sourceType: UTType,
+        contentIdentifier: String,
+        accessibilityDescription: String,
+        plainTextFallback: String,
+        framePolicy: AdaptiveGlyphFramePolicy = .requireSingleFrame
+    ) {
+        self.sourceData = sourceData
+        self.sourceType = sourceType
+        self.contentIdentifier = contentIdentifier
+        self.accessibilityDescription = accessibilityDescription
+        self.plainTextFallback = plainTextFallback
+        self.framePolicy = framePolicy
+    }
 
     var cacheKey: AdaptiveGlyphPayloadCacheKey {
         AdaptiveGlyphPayloadCacheKey(
             sourceType: sourceType,
             contentIdentifier: contentIdentifier,
             accessibilityDescription: accessibilityDescription,
-            plainTextFallback: plainTextFallback
+            plainTextFallback: plainTextFallback,
+            framePolicy: framePolicy
         )
     }
 }
@@ -506,7 +542,8 @@ final class AdaptiveGlyphPayloadService: @unchecked Sendable {
                 contentIdentifier: request.contentIdentifier,
                 accessibilityDescription:
                     request.accessibilityDescription,
-                plainTextFallback: request.plainTextFallback
+                plainTextFallback: request.plainTextFallback,
+                framePolicy: request.framePolicy
             )
         }
     ) {

@@ -361,7 +361,7 @@ struct LibraryItemDetailView: View {
                 if item.format == .webP {
                     Label(
                         item.isAnimated
-                            ? "Animated WebP is experimental and uses Copy Media Instead until Messages compatibility is proven."
+                            ? "On macOS 15, animated WebP inserts frame 0 as an inline emoji. The original animation stays stored, and Copy Media Instead remains available if conversion fails."
                             : "Static WebP is checked at insertion time and includes a PNG compatibility fallback.",
                         systemImage: item.isAnimated
                             ? "flask"

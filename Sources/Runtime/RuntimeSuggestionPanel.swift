@@ -5,8 +5,29 @@ import SwiftUI
 struct RuntimeSuggestionRow: Identifiable, Equatable, Sendable {
     let id: EmojiItem.ID
     let glyph: String
+    let artworkURL: URL?
+    let artworkFallbackURL: URL?
+    let artworkRootURL: URL?
     let shortcode: String
     let name: String
+
+    init(
+        id: EmojiItem.ID,
+        glyph: String,
+        artworkURL: URL? = nil,
+        artworkFallbackURL: URL? = nil,
+        artworkRootURL: URL? = nil,
+        shortcode: String,
+        name: String
+    ) {
+        self.id = id
+        self.glyph = glyph
+        self.artworkURL = artworkURL
+        self.artworkFallbackURL = artworkFallbackURL
+        self.artworkRootURL = artworkRootURL
+        self.shortcode = shortcode
+        self.name = name
+    }
 }
 
 struct RuntimeSuggestionPanelSnapshot: Equatable, Sendable {
@@ -397,7 +418,9 @@ struct RuntimeSuggestionPanelView: View {
             if snapshot.mode == .browser {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        rows
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            rows
+                        }
                     }
                     .onAppear {
                         if let selected = snapshot.selectedRow {
@@ -464,12 +487,11 @@ struct RuntimeSuggestionPanelView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, minHeight: 44)
         } else {
-            ForEach(Array(snapshot.rows.enumerated()), id: \.element.id) {
-                index,
-                row in
+            let selectedID = snapshot.selectedRow?.id
+            ForEach(snapshot.rows) { row in
                 RuntimeSuggestionRowView(
                     row: row,
-                    isSelected: index == snapshot.selectedIndex,
+                    isSelected: row.id == selectedID,
                     compact: snapshot.mode == .browser
                 )
                 .id(row.id)
@@ -485,9 +507,19 @@ private struct RuntimeSuggestionRowView: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Text(row.glyph)
-                .font(.system(size: compact ? 22 : 25))
-                .frame(width: 32)
+            Group {
+                if let artworkURL = row.artworkURL {
+                    LibraryAssetArtwork(
+                        url: artworkURL,
+                        fallbackURL: row.artworkFallbackURL,
+                        managedRootURL: row.artworkRootURL
+                    )
+                } else {
+                    Text(row.glyph)
+                        .font(.system(size: compact ? 22 : 25))
+                }
+            }
+            .frame(width: 32, height: 32)
             VStack(alignment: .leading, spacing: 1) {
                 Text(":\(row.shortcode):")
                     .font(.system(.body, design: .monospaced, weight: .medium))

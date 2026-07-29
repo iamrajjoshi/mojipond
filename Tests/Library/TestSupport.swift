@@ -103,6 +103,12 @@ enum TestSupport {
         try data.write(to: url)
         return url
     }
+
+    static var tinyAnimatedWebPData: Data {
+        let base64 =
+            "UklGRpAAAABXRUJQVlA4WAoAAAACAAAAAAAAAAAAQU5JTQYAAAAAAAAAAABBTk1GLgAAAAAAAAAAAAAAAAAAAGQAAABWUDggFgAAADABAJ0BKgEAAQAMwM4lpAADcAD+/z1BTk1GLgAAAAAAAAAAAAAAAAAAAMgAAABWUDggFgAAADABAJ0BKgEAAQAMwM4lpAADcAD+/z0="
+        return Data(base64Encoded: base64)!
+    }
 }
 
 enum TestSupportError: Error {

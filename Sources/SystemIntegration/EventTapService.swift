@@ -396,7 +396,7 @@ final class SessionEventTapService: @unchecked Sendable {
         }
     }
 
-    private static func snapshot(
+    static func snapshot(
         type: CGEventType,
         event: CGEvent
     ) -> KeyboardEventSnapshot {
@@ -407,28 +407,41 @@ final class SessionEventTapService: @unchecked Sendable {
             ),
             flagsRawValue: event.flags.rawValue,
             timestamp: event.timestamp,
-            characters: keyboardCharacters(from: event)
+            characters: keyboardCharacters(type: type, from: event)
         )
     }
 
-    private static func keyboardCharacters(from event: CGEvent) -> String? {
+    private static func keyboardCharacters(
+        type: CGEventType,
+        from event: CGEvent
+    ) -> String? {
+        guard type == .keyDown else {
+            return nil
+        }
+
         var length = 0
         event.keyboardGetUnicodeString(
             maxStringLength: 0,
             actualStringLength: &length,
             unicodeString: nil
         )
-        guard length > 0 else {
+        guard length > 0, length <= 64 else {
             return nil
         }
 
         var units = [UniChar](repeating: 0, count: length)
-        event.keyboardGetUnicodeString(
-            maxStringLength: units.count,
-            actualStringLength: &length,
-            unicodeString: &units
-        )
-        return String(utf16CodeUnits: units, count: length)
+        var actualLength = 0
+        units.withUnsafeMutableBufferPointer { buffer in
+            event.keyboardGetUnicodeString(
+                maxStringLength: buffer.count,
+                actualStringLength: &actualLength,
+                unicodeString: buffer.baseAddress
+            )
+        }
+        guard actualLength > 0, actualLength <= units.count else {
+            return nil
+        }
+        return String(utf16CodeUnits: units, count: actualLength)
     }
 
     private func emitDiagnostic(_ diagnostic: EventTapDiagnostic) {

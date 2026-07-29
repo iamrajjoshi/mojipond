@@ -51,6 +51,118 @@ final class LibraryThumbnailPipelineTests: XCTestCase {
         )
     }
 
+    func testCandidateLoaderFallsBackFromInvalidThumbnailToOriginal()
+        async throws
+    {
+        let workspace = try TestSupport.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let invalidThumbnailURL = workspace.appendingPathComponent(
+            "invalid-thumbnail.png"
+        )
+        try Data("not an image".utf8).write(to: invalidThumbnailURL)
+        let originalURL = try TestSupport.writeImage(
+            to: workspace.appendingPathComponent("original.png"),
+            width: 80,
+            height: 40
+        )
+        let pipeline = LibraryThumbnailPipeline(
+            rootURL: workspace.appendingPathComponent(
+                "Thumbnails",
+                isDirectory: true
+            )
+        )
+
+        let thumbnail = try await LibraryThumbnailCandidateLoader.thumbnail(
+            primaryURL: invalidThumbnailURL,
+            fallbackURL: originalURL,
+            managedRootURL: workspace,
+            using: pipeline
+        )
+
+        XCTAssertEqual(thumbnail.pixelWidth, 80)
+        XCTAssertEqual(thumbnail.pixelHeight, 40)
+    }
+
+    func testCandidateLoaderRevalidatesAfterParentSymlinkSwap()
+        async throws
+    {
+        let workspace = try TestSupport.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let managedRoot = workspace.appendingPathComponent(
+            "Library",
+            isDirectory: true
+        )
+        let thumbnailDirectory = managedRoot.appendingPathComponent(
+            "thumbnails",
+            isDirectory: true
+        )
+        let originalDirectory = managedRoot.appendingPathComponent(
+            "assets",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: thumbnailDirectory,
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: originalDirectory,
+            withIntermediateDirectories: true
+        )
+        let primaryURL = try TestSupport.writeImage(
+            to: thumbnailDirectory.appendingPathComponent("bufo.png"),
+            width: 32,
+            height: 24
+        )
+        let originalURL = try TestSupport.writeImage(
+            to: originalDirectory.appendingPathComponent("bufo.png"),
+            width: 80,
+            height: 40
+        )
+        let externalRoot = workspace.appendingPathComponent(
+            "External",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: externalRoot,
+            withIntermediateDirectories: true
+        )
+        _ = try TestSupport.writeImage(
+            to: externalRoot.appendingPathComponent("bufo.png"),
+            width: 16,
+            height: 16
+        )
+        let pipeline = LibraryThumbnailPipeline(
+            rootURL: workspace.appendingPathComponent(
+                "Cache",
+                isDirectory: true
+            )
+        )
+
+        let first = try await LibraryThumbnailCandidateLoader.thumbnail(
+            primaryURL: primaryURL,
+            fallbackURL: originalURL,
+            managedRootURL: managedRoot,
+            using: pipeline
+        )
+        XCTAssertEqual(first.pixelWidth, 32)
+        XCTAssertEqual(first.pixelHeight, 24)
+
+        try FileManager.default.removeItem(at: thumbnailDirectory)
+        try FileManager.default.createSymbolicLink(
+            at: thumbnailDirectory,
+            withDestinationURL: externalRoot
+        )
+
+        let second = try await LibraryThumbnailCandidateLoader.thumbnail(
+            primaryURL: primaryURL,
+            fallbackURL: originalURL,
+            managedRootURL: managedRoot,
+            using: pipeline
+        )
+        XCTAssertEqual(second.pixelWidth, 80)
+        XCTAssertEqual(second.pixelHeight, 40)
+    }
+
     func testRendersOffMainActorAndReusesMemoryAndDiskCache()
         async throws
     {

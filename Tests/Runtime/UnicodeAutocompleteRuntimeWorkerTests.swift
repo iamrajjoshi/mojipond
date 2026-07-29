@@ -304,6 +304,70 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         )
     }
 
+    func testBrowserSelectionKeyRepeatReusesRowsForLargeLibrary()
+        async throws
+    {
+        let items = (0..<1_700).map {
+            emoji(
+                shortcode: String(format: "pond_%04d", $0),
+                value: "🐸"
+            )
+        }
+        let harness = try makeHarness(
+            items: items,
+            targetText: "hello",
+            parserTimeout: 10
+        )
+        harness.worker.setCaptureEnabled(true)
+        harness.worker.openBrowser()
+
+        let browserShown = await eventually(timeout: .seconds(5)) {
+            harness.presenter.latestShown?.mode == .browser
+                && harness.presenter.latestShown?.rows.count == items.count
+                && harness.gate.mode == .browser
+        }
+        XCTAssertTrue(browserShown)
+        let initialSnapshot = try XCTUnwrap(
+            harness.presenter.latestShown
+        )
+        let updateStart = harness.presenter.updates.count
+
+        let keyRepeatCount = 64
+        for _ in 0..<keyRepeatCount {
+            harness.worker.enqueue(
+                keySnapshot(
+                    keyCode: RuntimeKeyboardKeyCode.downArrow
+                )
+            )
+        }
+
+        let keyRepeatPresented = await eventually(timeout: .seconds(5)) {
+            harness.presenter.latestShown?.selectedIndex == keyRepeatCount
+                && harness.presenter.updates.count
+                    >= updateStart + keyRepeatCount
+        }
+        XCTAssertTrue(keyRepeatPresented)
+
+        let selectionSnapshots = harness.presenter.updates
+            .dropFirst(updateStart)
+            .compactMap { update -> RuntimeSuggestionPanelSnapshot? in
+                guard case let .show(snapshot, _) = update else {
+                    return nil
+                }
+                return snapshot
+            }
+        XCTAssertEqual(selectionSnapshots.count, keyRepeatCount)
+        XCTAssertEqual(
+            Set(
+                ([initialSnapshot] + selectionSnapshots).map {
+                    rowStorageAddress($0.rows)
+                }
+            ).count,
+            1,
+            "Selection-only updates must reuse immutable presentation rows."
+        )
+    }
+
     func testBrowserOwnsAFilteredVirtualQueryAndBackspace() async throws {
         let harness = try makeHarness(
             items: [
@@ -704,6 +768,17 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
             content: .unicode(UnicodeEmojiContent(value: value)),
             packID: "test"
         )
+    }
+
+    private func rowStorageAddress(
+        _ rows: [RuntimeSuggestionRow]
+    ) -> Int {
+        rows.withUnsafeBufferPointer { buffer in
+            guard let baseAddress = buffer.baseAddress else {
+                return 0
+            }
+            return Int(bitPattern: baseAddress)
+        }
     }
 
     private func eventually(

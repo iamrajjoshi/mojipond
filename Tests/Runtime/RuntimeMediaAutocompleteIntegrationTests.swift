@@ -17,8 +17,19 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
         temporaryRoots = []
     }
 
-    func testCustomGIFExactTokenPastesOriginalInMessages() async throws {
-        let gif = validGIFData
+    func testAnimatedGIFExactTokenUsesFirstFrameGlyphInMessages()
+        async throws
+    {
+        let sourceRoot = try TestSupport.makeTemporaryDirectory()
+        temporaryRoots.append(sourceRoot)
+        let gifURL = try TestSupport.writeImage(
+            to: sourceRoot.appendingPathComponent("animated.gif"),
+            format: .gif,
+            width: 8,
+            height: 8,
+            frameCount: 2
+        )
+        let gif = try Data(contentsOf: gifURL)
         let fixture = try makeMediaFixture(data: gif, filename: "bufo.gif")
         let harness = try makeHarness(
             items: [
@@ -44,18 +55,33 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
         let temporaryPayload = try XCTUnwrap(
             harness.pasteboard.successfulWrites.first?.first
         )
-        XCTAssertEqual(
-            temporaryPayload.representations.first {
-                $0.typeIdentifier == UTType.gif.identifier
-            }?.data,
-            gif
-        )
-        XCTAssertFalse(
-            temporaryPayload.representations.contains {
-                $0.typeIdentifier
-                    == NSPasteboard.PasteboardType.rtfd.rawValue
-            }
-        )
+        if #available(macOS 15.0, *) {
+            XCTAssertEqual(
+                temporaryPayload.representations.first?.typeIdentifier,
+                NSPasteboard.PasteboardType.rtfd.rawValue
+            )
+            XCTAssertFalse(
+                temporaryPayload.representations.contains {
+                    $0.typeIdentifier == UTType.gif.identifier
+                }
+            )
+            let glyph = try adaptiveGlyph(from: temporaryPayload)
+            let glyphSource = try XCTUnwrap(
+                CGImageSourceCreateWithData(
+                    glyph.imageContent as CFData,
+                    nil
+                )
+            )
+            XCTAssertEqual(CGImageSourceGetCount(glyphSource), 1)
+            XCTAssertTrue(glyph.contentIdentifier.hasSuffix(":bufo:f0"))
+        } else {
+            XCTAssertEqual(
+                temporaryPayload.representations.first {
+                    $0.typeIdentifier == UTType.gif.identifier
+                }?.data,
+                gif
+            )
+        }
         XCTAssertFalse(
             harness.diagnostics.values.contains {
                 switch $0 {
@@ -68,6 +94,77 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
                     false
                 }
             }
+        )
+    }
+
+    func testAnimatedPNGExactTokenUsesFirstFrameGlyphInMessages()
+        async throws
+    {
+        guard #available(macOS 15.0, *) else {
+            throw XCTSkip("Adaptive image glyphs require macOS 15.")
+        }
+        let sourceRoot = try TestSupport.makeTemporaryDirectory()
+        temporaryRoots.append(sourceRoot)
+        let pngURL = try TestSupport.writeImage(
+            to: sourceRoot.appendingPathComponent("animated.png"),
+            format: .png,
+            width: 8,
+            height: 8,
+            frameCount: 2
+        )
+        let png = try Data(contentsOf: pngURL)
+        let source = try XCTUnwrap(
+            CGImageSourceCreateWithData(png as CFData, nil)
+        )
+        XCTAssertEqual(CGImageSourceGetCount(source), 2)
+        let fixture = try makeMediaFixture(
+            data: png,
+            filename: "animated.png"
+        )
+        let harness = try makeHarness(
+            items: [
+                mediaEmoji(
+                    shortcode: "animated_png",
+                    mediaType: .png,
+                    relativePath: fixture.relativePath,
+                    data: png,
+                    isAnimated: true
+                )
+            ],
+            targetText: ":animated_png:",
+            bundleIdentifier: messages,
+            managedMediaRoot: fixture.root
+        )
+
+        harness.worker.setCaptureEnabled(true)
+        type(":animated_png:", into: harness.worker)
+
+        let didPaste = await eventually {
+            harness.poster.pasteCount == 1
+        }
+        XCTAssertTrue(didPaste)
+        let temporaryPayload = try XCTUnwrap(
+            harness.pasteboard.successfulWrites.first?.first
+        )
+        XCTAssertEqual(
+            temporaryPayload.representations.first?.typeIdentifier,
+            NSPasteboard.PasteboardType.rtfd.rawValue
+        )
+        XCTAssertFalse(
+            temporaryPayload.representations.contains {
+                $0.typeIdentifier == UTType.png.identifier
+            }
+        )
+        let glyph = try adaptiveGlyph(from: temporaryPayload)
+        let glyphSource = try XCTUnwrap(
+            CGImageSourceCreateWithData(
+                glyph.imageContent as CFData,
+                nil
+            )
+        )
+        XCTAssertEqual(CGImageSourceGetCount(glyphSource), 1)
+        XCTAssertTrue(
+            glyph.contentIdentifier.hasSuffix(":animated_png:f0")
         )
     }
 
@@ -102,6 +199,21 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
                 .contains(where: { $0.shortcode == "bufo" }) == true
         }
         XCTAssertTrue(didShowSuggestion)
+        let suggestion = try XCTUnwrap(
+            harness.presenter.latestSuggestion?.rows.first(
+                where: { $0.shortcode == "bufo" }
+            )
+        )
+        XCTAssertEqual(
+            suggestion.artworkURL,
+            fixture.root
+                .appendingPathComponent(
+                    fixture.relativePath,
+                    isDirectory: false
+                )
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
+        )
         harness.worker.enqueue(
             keySnapshot(keyCode: RuntimeKeyboardKeyCode.tab)
         )
@@ -132,6 +244,276 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
                 UTType.png.identifier
             )
         }
+    }
+
+    func testSuggestionFallsBackToOriginalWhenThumbnailEscapesManagedRoot()
+        async throws
+    {
+        let sourceRoot = try TestSupport.makeTemporaryDirectory()
+        temporaryRoots.append(sourceRoot)
+        let pngURL = try TestSupport.writeImage(
+            to: sourceRoot.appendingPathComponent("source.png"),
+            width: 16,
+            height: 12
+        )
+        let png = try Data(contentsOf: pngURL)
+        let fixture = try makeMediaFixture(
+            data: png,
+            filename: "bufo.png"
+        )
+        let externalRoot = try TestSupport.makeTemporaryDirectory()
+        temporaryRoots.append(externalRoot)
+        try png.write(
+            to: externalRoot.appendingPathComponent("thumbnail.png")
+        )
+        try FileManager.default.createSymbolicLink(
+            at: fixture.root.appendingPathComponent(
+                "thumbnails",
+                isDirectory: true
+            ),
+            withDestinationURL: externalRoot
+        )
+        let item = EmojiItem(
+            id: "custom.bufo",
+            shortcode: Shortcode(rawValue: "bufo")!,
+            name: "Bufo",
+            category: "Custom",
+            content: .media(
+                MediaEmojiContent(
+                    mediaType: .png,
+                    relativePath: fixture.relativePath,
+                    thumbnailRelativePath:
+                        "thumbnails/thumbnail.png",
+                    originalFilename: "bufo.png",
+                    contentHash: digest(png),
+                    isAnimated: false
+                )
+            ),
+            packID: "custom"
+        )
+        let harness = try makeHarness(
+            items: [item],
+            targetText: ":bu",
+            bundleIdentifier: messages,
+            managedMediaRoot: fixture.root
+        )
+
+        harness.worker.setCaptureEnabled(true)
+        type(":bu", into: harness.worker)
+
+        let didShowSuggestion = await eventually {
+            harness.presenter.latestSuggestion?.rows
+                .contains(where: { $0.shortcode == "bufo" }) == true
+        }
+        XCTAssertTrue(didShowSuggestion)
+        let suggestion = try XCTUnwrap(
+            harness.presenter.latestSuggestion?.rows.first(
+                where: { $0.shortcode == "bufo" }
+            )
+        )
+        XCTAssertEqual(
+            suggestion.artworkURL,
+            fixture.root
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
+                .appendingPathComponent(
+                    "thumbnails/thumbnail.png",
+                    isDirectory: false
+                )
+                .standardizedFileURL
+        )
+        XCTAssertEqual(
+            suggestion.artworkFallbackURL,
+            fixture.root
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
+                .appendingPathComponent(
+                    fixture.relativePath,
+                    isDirectory: false
+                )
+                .standardizedFileURL
+        )
+        XCTAssertEqual(
+            suggestion.artworkRootURL,
+            fixture.root
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
+        )
+    }
+
+    func testSuggestionFallsBackToOriginalWhenThumbnailIsMissing()
+        async throws
+    {
+        let sourceRoot = try TestSupport.makeTemporaryDirectory()
+        temporaryRoots.append(sourceRoot)
+        let pngURL = try TestSupport.writeImage(
+            to: sourceRoot.appendingPathComponent("source.png"),
+            width: 16,
+            height: 12
+        )
+        let png = try Data(contentsOf: pngURL)
+        let fixture = try makeMediaFixture(
+            data: png,
+            filename: "bufo.png"
+        )
+        let item = EmojiItem(
+            id: "custom.bufo",
+            shortcode: Shortcode(rawValue: "bufo")!,
+            name: "Bufo",
+            category: "Custom",
+            content: .media(
+                MediaEmojiContent(
+                    mediaType: .png,
+                    relativePath: fixture.relativePath,
+                    thumbnailRelativePath:
+                        "thumbnails/missing.png",
+                    originalFilename: "bufo.png",
+                    contentHash: digest(png),
+                    isAnimated: false
+                )
+            ),
+            packID: "custom"
+        )
+        let harness = try makeHarness(
+            items: [item],
+            targetText: ":bu",
+            bundleIdentifier: messages,
+            managedMediaRoot: fixture.root
+        )
+
+        harness.worker.setCaptureEnabled(true)
+        type(":bu", into: harness.worker)
+
+        let didShowSuggestion = await eventually {
+            harness.presenter.latestSuggestion?.rows
+                .contains(where: { $0.shortcode == "bufo" }) == true
+        }
+        XCTAssertTrue(didShowSuggestion)
+        let suggestion = try XCTUnwrap(
+            harness.presenter.latestSuggestion?.rows.first(
+                where: { $0.shortcode == "bufo" }
+            )
+        )
+        XCTAssertEqual(
+            suggestion.artworkURL,
+            fixture.root
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
+                .appendingPathComponent(
+                    "thumbnails/missing.png",
+                    isDirectory: false
+                )
+                .standardizedFileURL
+        )
+        XCTAssertEqual(
+            suggestion.artworkFallbackURL,
+            fixture.root
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
+                .appendingPathComponent(
+                    fixture.relativePath,
+                    isDirectory: false
+                )
+                .standardizedFileURL
+        )
+        XCTAssertEqual(
+            suggestion.artworkRootURL,
+            fixture.root
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
+        )
+    }
+
+    func testSuggestionRetainsOriginalAsFallbackForInvalidThumbnail()
+        async throws
+    {
+        let sourceRoot = try TestSupport.makeTemporaryDirectory()
+        temporaryRoots.append(sourceRoot)
+        let pngURL = try TestSupport.writeImage(
+            to: sourceRoot.appendingPathComponent("source.png"),
+            width: 16,
+            height: 12
+        )
+        let png = try Data(contentsOf: pngURL)
+        let fixture = try makeMediaFixture(
+            data: png,
+            filename: "bufo.png"
+        )
+        let thumbnailRelativePath = "thumbnails/invalid.png"
+        let thumbnailURL = fixture.root.appendingPathComponent(
+            thumbnailRelativePath,
+            isDirectory: false
+        )
+        try FileManager.default.createDirectory(
+            at: thumbnailURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("not an image".utf8).write(to: thumbnailURL)
+        let item = EmojiItem(
+            id: "custom.bufo",
+            shortcode: Shortcode(rawValue: "bufo")!,
+            name: "Bufo",
+            category: "Custom",
+            content: .media(
+                MediaEmojiContent(
+                    mediaType: .png,
+                    relativePath: fixture.relativePath,
+                    thumbnailRelativePath: thumbnailRelativePath,
+                    originalFilename: "bufo.png",
+                    contentHash: digest(png),
+                    isAnimated: false
+                )
+            ),
+            packID: "custom"
+        )
+        let harness = try makeHarness(
+            items: [item],
+            targetText: ":bu",
+            bundleIdentifier: messages,
+            managedMediaRoot: fixture.root
+        )
+
+        harness.worker.setCaptureEnabled(true)
+        type(":bu", into: harness.worker)
+
+        let didShowSuggestion = await eventually {
+            harness.presenter.latestSuggestion?.rows
+                .contains(where: { $0.shortcode == "bufo" }) == true
+        }
+        XCTAssertTrue(didShowSuggestion)
+        let suggestion = try XCTUnwrap(
+            harness.presenter.latestSuggestion?.rows.first(
+                where: { $0.shortcode == "bufo" }
+            )
+        )
+        XCTAssertEqual(
+            suggestion.artworkURL,
+            fixture.root
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
+                .appendingPathComponent(
+                    thumbnailRelativePath,
+                    isDirectory: false
+                )
+                .standardizedFileURL
+        )
+        XCTAssertEqual(
+            suggestion.artworkFallbackURL,
+            fixture.root
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
+                .appendingPathComponent(
+                    fixture.relativePath,
+                    isDirectory: false
+                )
+                .standardizedFileURL
+        )
+        XCTAssertEqual(
+            suggestion.artworkRootURL,
+            fixture.root
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
+        )
     }
 
     func testSuccessfulStaticGlyphDoesNotBuildPhotoFallback() async throws {
@@ -193,6 +575,77 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
                 .first?
                 .data,
             Data("native glyph".utf8)
+        )
+    }
+
+    func testAnimatedGlyphPreparationUsesFirstFramePolicy() async throws {
+        let sourceRoot = try TestSupport.makeTemporaryDirectory()
+        temporaryRoots.append(sourceRoot)
+        let gifURL = try TestSupport.writeImage(
+            to: sourceRoot.appendingPathComponent("prepared.gif"),
+            format: .gif,
+            width: 16,
+            height: 12,
+            frameCount: 2
+        )
+        let gif = try Data(contentsOf: gifURL)
+        let fixture = try makeMediaFixture(
+            data: gif,
+            filename: "prepared.gif"
+        )
+        let buildStarted = expectation(
+            description: "first-frame glyph preparation started"
+        )
+        let fallbackRecorder = RuntimeMediaPayloadBuilderRecorder()
+        let service = AdaptiveGlyphPayloadService(
+            queueLabel:
+                "com.rajjoshi.MojiPond.tests.prepared-animated-glyph.\(UUID())",
+            builder: { request in
+                XCTAssertEqual(request.framePolicy, .firstFrame)
+                XCTAssertTrue(
+                    request.contentIdentifier.hasSuffix(":bufo:f0")
+                )
+                buildStarted.fulfill()
+                return .text("prepared first-frame glyph")
+            }
+        )
+        let harness = try makeHarness(
+            items: [
+                mediaEmoji(
+                    shortcode: "bufo",
+                    mediaType: .gif,
+                    relativePath: fixture.relativePath,
+                    data: gif
+                )
+            ],
+            targetText: ":buf",
+            bundleIdentifier: messages,
+            managedMediaRoot: fixture.root,
+            adaptiveGlyphPayloadService: service,
+            managedMediaPayloadBuilder: { resolved in
+                fallbackRecorder.build(resolved)
+            }
+        )
+
+        harness.worker.setCaptureEnabled(true)
+        type(":buf", into: harness.worker)
+        await fulfillment(of: [buildStarted], timeout: 2)
+
+        harness.worker.enqueue(
+            keySnapshot(keyCode: RuntimeKeyboardKeyCode.tab)
+        )
+        let didPaste = await eventually {
+            harness.poster.pasteCount == 1
+        }
+        XCTAssertTrue(didPaste)
+        XCTAssertEqual(fallbackRecorder.buildCount, 0)
+        XCTAssertEqual(
+            harness.pasteboard.successfulWrites.first?
+                .first?
+                .representations
+                .first?
+                .data,
+            Data("prepared first-frame glyph".utf8)
         )
     }
 
@@ -470,13 +923,15 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
         XCTAssertTrue(warningReported)
     }
 
-    func testAnimatedWebPUsesExplicitExperimentalCopyFallback() async throws {
-        let webP = try XCTUnwrap(
-            Data(
-                base64Encoded:
-                    "UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADMDOJaQAA3AA/v89WAAAAA=="
-            )
+    func testAnimatedWebPUsesFirstFrameGlyphInMessages() async throws {
+        guard #available(macOS 15.0, *) else {
+            throw XCTSkip("Adaptive image glyphs require macOS 15.")
+        }
+        let webP = TestSupport.tinyAnimatedWebPData
+        let source = try XCTUnwrap(
+            CGImageSourceCreateWithData(webP as CFData, nil)
         )
+        XCTAssertEqual(CGImageSourceGetCount(source), 2)
         let fixture = try makeMediaFixture(
             data: webP,
             filename: "experimental.webp"
@@ -493,6 +948,63 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
             targetText: ":experimental:",
             bundleIdentifier: messages,
             managedMediaRoot: fixture.root
+        )
+
+        harness.worker.setCaptureEnabled(true)
+        type(":experimental:", into: harness.worker)
+
+        let didPaste = await eventually(timeout: .seconds(15)) {
+            harness.poster.pasteCount == 1
+        }
+        XCTAssertTrue(didPaste)
+        let temporaryPayload = try XCTUnwrap(
+            harness.pasteboard.successfulWrites.first?.first
+        )
+        XCTAssertEqual(
+            temporaryPayload.representations.first?.typeIdentifier,
+            NSPasteboard.PasteboardType.rtfd.rawValue
+        )
+        XCTAssertFalse(
+            temporaryPayload.representations.contains {
+                $0.typeIdentifier == UTType.webP.identifier
+            }
+        )
+        XCTAssertFalse(
+            harness.diagnostics.values.contains {
+                guard case let .mediaCopyFallbackAvailable(value) = $0 else {
+                    return false
+                }
+                return value.reason == .animatedWebPExperimental
+            }
+        )
+    }
+
+    func testAnimatedWebPGlyphFailureKeepsExplicitCopyFallback()
+        async throws
+    {
+        let webP = TestSupport.tinyAnimatedWebPData
+        let fixture = try makeMediaFixture(
+            data: webP,
+            filename: "experimental.webp"
+        )
+        let service = AdaptiveGlyphPayloadService(
+            queueLabel:
+                "com.rajjoshi.MojiPond.tests.failed-webp-glyph.\(UUID())",
+            builder: { _ in nil }
+        )
+        let harness = try makeHarness(
+            items: [
+                mediaEmoji(
+                    shortcode: "experimental",
+                    mediaType: .webP,
+                    relativePath: fixture.relativePath,
+                    data: webP
+                )
+            ],
+            targetText: ":experimental:",
+            bundleIdentifier: messages,
+            managedMediaRoot: fixture.root,
+            adaptiveGlyphPayloadService: service
         )
 
         harness.worker.setCaptureEnabled(true)
@@ -1111,7 +1623,8 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
         shortcode: String,
         mediaType: EmojiMediaType,
         relativePath: String,
-        data: Data
+        data: Data,
+        isAnimated: Bool? = nil
     ) -> EmojiItem {
         EmojiItem(
             id: "custom.\(shortcode)",
@@ -1126,7 +1639,8 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
                         fileURLWithPath: relativePath
                     ).lastPathComponent,
                     contentHash: digest(data),
-                    isAnimated: mediaType.supportsAnimation
+                    isAnimated:
+                        isAnimated ?? mediaType.supportsAnimation
                 )
             ),
             packID: "custom"
@@ -1160,6 +1674,35 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
         SHA256.hash(data: data)
             .map { String(format: "%02x", $0) }
             .joined()
+    }
+
+    @available(macOS 15.0, *)
+    private func adaptiveGlyph(
+        from payload: PasteboardItemPayload
+    ) throws -> NSAdaptiveImageGlyph {
+        let pasteboard = NSPasteboard(
+            name: NSPasteboard.Name(
+                "MojiPondRuntimeGlyphTests-\(UUID().uuidString)"
+            )
+        )
+        defer {
+            pasteboard.clearContents()
+            pasteboard.releaseGlobally()
+        }
+        let access = MacPasteboardAccess(pasteboard: pasteboard)
+        XCTAssertTrue(access.replaceContents(with: [payload]))
+        let attributed = try XCTUnwrap(
+            pasteboard.readObjects(
+                forClasses: [NSAttributedString.self]
+            )?.first as? NSAttributedString
+        )
+        return try XCTUnwrap(
+            attributed.attribute(
+                .adaptiveImageGlyph,
+                at: 0,
+                effectiveRange: nil
+            ) as? NSAdaptiveImageGlyph
+        )
     }
 
     private var validGIFData: Data {

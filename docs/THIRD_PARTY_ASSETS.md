@@ -8,7 +8,7 @@ resource or its required notices are missing.
 
 ## AdaptiveGlyphKit
 
-MojiPond does not link AdaptiveGlyphKit. Its static adaptive-glyph bridge was
+MojiPond does not link AdaptiveGlyphKit. Its adaptive-image-glyph bridge was
 informed by the project's HEIC metadata discovery and defensive Objective-C
 initializer path, pinned at revision
 `33976203876adfb91676f3729199a0f40433a96a`:
