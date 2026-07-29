@@ -104,6 +104,8 @@ struct LibraryEmojiArtwork: View {
 
 struct LibraryAssetArtwork: View {
     let url: URL
+    var fallbackURL: URL? = nil
+    var managedRootURL: URL? = nil
     var loadStateChanged:
         ((LibraryArtworkLoadState) -> Void)? = nil
 
@@ -149,11 +151,23 @@ struct LibraryAssetArtwork: View {
             }
         }
         .padding(5)
-        .task(id: url) {
+        .task(
+            id: LibraryArtworkLoadRequest(
+                primaryURL: url,
+                fallbackURL: fallbackURL,
+                managedRootURL: managedRootURL
+            )
+        ) {
             thumbnail = nil
             updateLoadState(.loading)
             do {
-                let loaded = try await loader.thumbnail(for: url)
+                let loaded = try await LibraryThumbnailCandidateLoader
+                    .thumbnail(
+                        primaryURL: url,
+                        fallbackURL: fallbackURL,
+                        managedRootURL: managedRootURL,
+                        using: loader
+                    )
                 try Task.checkCancellation()
                 thumbnail = loaded
                 updateLoadState(.loaded)
@@ -173,6 +187,87 @@ struct LibraryAssetArtwork: View {
     ) {
         loadState = state
         loadStateChanged?(state)
+    }
+}
+
+private struct LibraryArtworkLoadRequest: Equatable {
+    let primaryURL: URL
+    let fallbackURL: URL?
+    let managedRootURL: URL?
+}
+
+enum LibraryThumbnailCandidateError: Error, Equatable {
+    case unsafeSource
+    case unavailable
+}
+
+enum LibraryThumbnailCandidateLoader {
+    static func thumbnail(
+        primaryURL: URL,
+        fallbackURL: URL?,
+        managedRootURL: URL? = nil,
+        using loader: any LibraryThumbnailLoading
+    ) async throws -> LibraryThumbnail {
+        let candidates = [primaryURL, fallbackURL]
+            .compactMap { $0 }
+            .reduce(into: [URL]()) { result, candidate in
+                if !result.contains(candidate) {
+                    result.append(candidate)
+                }
+            }
+        var lastError: (any Error)?
+        for candidate in candidates {
+            do {
+                let validatedURL = try validatedURL(
+                    candidate,
+                    beneath: managedRootURL
+                )
+                return try await loader.thumbnail(for: validatedURL)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                lastError = error
+            }
+        }
+        if let lastError {
+            throw lastError
+        }
+        throw LibraryThumbnailCandidateError.unavailable
+    }
+
+    private static func validatedURL(
+        _ candidate: URL,
+        beneath managedRootURL: URL?
+    ) throws -> URL {
+        let standardizedCandidate = candidate.standardizedFileURL
+        guard let managedRootURL else {
+            return standardizedCandidate
+        }
+        let canonicalRoot = managedRootURL
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        let canonicalCandidate = standardizedCandidate
+            .resolvingSymlinksInPath()
+        let rootPath = canonicalRoot.path
+        guard canonicalCandidate.path.hasPrefix(
+            rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+        ) else {
+            throw LibraryThumbnailCandidateError.unsafeSource
+        }
+        var isDirectory: ObjCBool = false
+        guard
+            FileManager.default.fileExists(
+                atPath: canonicalCandidate.path,
+                isDirectory: &isDirectory
+            ),
+            !isDirectory.boolValue,
+            (try? canonicalCandidate.resourceValues(
+                forKeys: [.isRegularFileKey]
+            ).isRegularFile) == true
+        else {
+            throw LibraryThumbnailCandidateError.unavailable
+        }
+        return canonicalCandidate
     }
 }
 

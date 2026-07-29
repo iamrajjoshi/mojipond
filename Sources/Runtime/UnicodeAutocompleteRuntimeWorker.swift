@@ -142,6 +142,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         var expectedToken: String
         var caretBounds: CGRect?
         var results: [EmojiSearchResult]
+        var presentationRows: [RuntimeSuggestionRow]
         var selectedIndex: Int
         var visibleMode: RuntimeInterceptionMode
         var browserQuery: String
@@ -235,7 +236,9 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         self.frontmostApplication = frontmostApplication
         self.managedMediaResolver = managedMediaResolver
         self.managedMediaPayloadBuilder = managedMediaPayloadBuilder
-        self.managedMediaRoot = managedMediaRoot?.standardizedFileURL
+        self.managedMediaRoot = managedMediaRoot?
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
         self.adaptiveGlyphPayloadService = adaptiveGlyphPayloadService
         self.mediaCommandCoordinator = mediaCommandCoordinator
         self.remoteMediaCache = remoteMediaCache
@@ -311,7 +314,9 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             guard let self else {
                 return
             }
-            managedMediaRoot = root?.standardizedFileURL
+            managedMediaRoot = root?
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
             cancelAllTransactions(reason: .externallyCancelled)
         }
     }
@@ -1468,6 +1473,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             expectedToken: token.rendered,
             caretBounds: nil,
             results: [],
+            presentationRows: [],
             selectedIndex: 0,
             visibleMode: .hidden,
             browserQuery: "",
@@ -1495,12 +1501,15 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         }
 
         transaction.expectedToken = token.rendered
-        transaction.results = Array(
-            searchIndex.search(
-                query,
-                usage: usageSnapshot,
-                limit: max(configuration.suggestionLimit, 1)
-            ).prefix(configuration.suggestionLimit)
+        setResults(
+            Array(
+                searchIndex.search(
+                    query,
+                    usage: usageSnapshot,
+                    limit: max(configuration.suggestionLimit, 1)
+                ).prefix(configuration.suggestionLimit)
+            ),
+            in: &transaction
         )
         transaction.selectedIndex = 0
         armShortcodeInactivityTimeout(for: &transaction)
@@ -1563,12 +1572,15 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         }
         transaction.expectedToken = expectedToken
         transaction.browserQuery = ""
-        transaction.results = Array(
-            searchIndex.search(
-                "",
-                usage: usageSnapshot,
-                limit: max(searchIndex.count, 1)
-            )
+        setResults(
+            Array(
+                searchIndex.search(
+                    "",
+                    usage: usageSnapshot,
+                    limit: max(searchIndex.count, 1)
+                )
+            ),
+            in: &transaction
         )
         transaction.selectedIndex = 0
         transaction.visibleMode = .hidden
@@ -1597,12 +1609,15 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             return
         }
         transaction.browserQuery = query
-        transaction.results = Array(
-            searchIndex.search(
-                query,
-                usage: usageSnapshot,
-                limit: max(searchIndex.count, 1)
-            )
+        setResults(
+            Array(
+                searchIndex.search(
+                    query,
+                    usage: usageSnapshot,
+                    limit: max(searchIndex.count, 1)
+                )
+            ),
+            in: &transaction
         )
         transaction.selectedIndex = 0
         armShortcodeInactivityTimeout(for: &transaction)
@@ -1974,31 +1989,18 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         let captureBundleIdentifier =
             activeTransaction?.bundleIdentifier
         if resolved.insertionPolicy
-            == .copyOnlyAnimatedWebPExperimental
+            == .copyOnlyAnimatedWebPExperimental,
+            !Self.canInsertFirstFrameGlyph(
+                into: captureBundleIdentifier
+            )
         {
-            buildManagedMediaPayload(
+            offerAnimatedWebPCopyFallback(
                 resolved,
+                item: item,
+                request: request,
                 transactionID: transactionID,
-                pendingRevision: pendingRevision,
-                targetProcessIdentifier:
-                    request.target.processIdentifier
-            ) { [weak self] payload in
-                guard let self else {
-                    return
-                }
-                diagnosticHandler?(
-                    .mediaCopyFallbackAvailable(
-                        RuntimeMediaCopyFallbackDiagnostic(
-                            source: .customEmoji(
-                                shortcode: item.shortcode.rawValue
-                            ),
-                            reason: .animatedWebPExperimental,
-                            payload: payload
-                        )
-                    )
-                )
-                clear(transactionID: transactionID)
-            }
+                pendingRevision: pendingRevision
+            )
             return
         }
         guard
@@ -2033,26 +2035,18 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
 
         let shortcode = item.shortcode.rawValue
         let inlineFallback = ":\(shortcode):"
-        let contentIdentifier =
-            "mojipond:\(media.contentHash.lowercased()):\(shortcode)"
+        let contentIdentifier = adaptiveGlyphContentIdentifier(
+            for: media,
+            shortcode: shortcode
+        )
         let glyphRequest = AdaptiveGlyphPayloadRequest(
             sourceData: resolved.originalData,
             sourceType: resolved.uniformType,
             contentIdentifier: contentIdentifier,
             accessibilityDescription: inlineFallback,
-            plainTextFallback: inlineFallback
+            plainTextFallback: inlineFallback,
+            framePolicy: adaptiveGlyphFramePolicy(for: media)
         )
-
-        guard !media.isAnimated else {
-            buildAndInsertManagedMediaFallback(
-                resolved,
-                item: item,
-                request: request,
-                transactionID: transactionID,
-                pendingRevision: pendingRevision
-            )
-            return
-        }
 
         let targetProcessIdentifier = request.target.processIdentifier
         adaptiveGlyphPayloadService.payload(for: glyphRequest) {
@@ -2077,6 +2071,16 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                         item: item,
                         request: request,
                         transactionID: transactionID
+                    )
+                } else if resolved.insertionPolicy
+                    == .copyOnlyAnimatedWebPExperimental
+                {
+                    offerAnimatedWebPCopyFallback(
+                        resolved,
+                        item: item,
+                        request: request,
+                        transactionID: transactionID,
+                        pendingRevision: pendingRevision
                     )
                 } else {
                     buildAndInsertManagedMediaFallback(
@@ -2113,6 +2117,37 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                 request: request,
                 transactionID: transactionID
             )
+        }
+    }
+
+    private func offerAnimatedWebPCopyFallback(
+        _ resolved: RuntimeResolvedManagedMedia,
+        item: EmojiItem,
+        request: AccessibilityReplacementRequest,
+        transactionID: ParserTransactionID,
+        pendingRevision: UInt64
+    ) {
+        buildManagedMediaPayload(
+            resolved,
+            transactionID: transactionID,
+            pendingRevision: pendingRevision,
+            targetProcessIdentifier: request.target.processIdentifier
+        ) { [weak self] payload in
+            guard let self else {
+                return
+            }
+            diagnosticHandler?(
+                .mediaCopyFallbackAvailable(
+                    RuntimeMediaCopyFallbackDiagnostic(
+                        source: .customEmoji(
+                            shortcode: item.shortcode.rawValue
+                        ),
+                        reason: .animatedWebPExperimental,
+                        payload: payload
+                    )
+                )
+            )
+            clear(transactionID: transactionID)
         }
     }
 
@@ -2263,24 +2298,31 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         }
 
         let item = transaction.results[transaction.selectedIndex].item
+        let canInsertFirstFrameGlyph = Self.canInsertFirstFrameGlyph(
+            into: transaction.bundleIdentifier
+        )
         guard
             item.shortcode.rawValue.lowercased().hasPrefix(query),
             case let .media(media) = item.content,
-            !media.isAnimated
+            !media.isAnimated || canInsertFirstFrameGlyph
         else {
             return
         }
 
         let shortcode = item.shortcode.rawValue
         let inlineFallback = ":\(shortcode):"
-        let contentIdentifier =
-            "mojipond:\(media.contentHash.lowercased()):\(shortcode)"
+        let contentIdentifier = adaptiveGlyphContentIdentifier(
+            for: media,
+            shortcode: shortcode
+        )
         let sourceType = adaptiveGlyphSourceType(for: media.mediaType)
+        let framePolicy = adaptiveGlyphFramePolicy(for: media)
         let key = AdaptiveGlyphPayloadCacheKey(
             sourceType: sourceType,
             contentIdentifier: contentIdentifier,
             accessibilityDescription: inlineFallback,
-            plainTextFallback: inlineFallback
+            plainTextFallback: inlineFallback,
+            framePolicy: framePolicy
         )
         let resolver = managedMediaResolver
         adaptiveGlyphPayloadService.prepare(
@@ -2291,7 +2333,8 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                         media,
                         beneath: managedMediaRoot
                     ),
-                    resolved.insertionPolicy == .automatic,
+                    resolved.insertionPolicy == .automatic
+                        || canInsertFirstFrameGlyph,
                     resolved.uniformType == sourceType
                 else {
                     return nil
@@ -2301,7 +2344,8 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                     sourceType: resolved.uniformType,
                     contentIdentifier: contentIdentifier,
                     accessibilityDescription: inlineFallback,
-                    plainTextFallback: inlineFallback
+                    plainTextFallback: inlineFallback,
+                    framePolicy: framePolicy
                 )
             }
         )
@@ -2322,6 +2366,56 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         }
     }
 
+    private func adaptiveGlyphFramePolicy(
+        for media: MediaEmojiContent
+    ) -> AdaptiveGlyphFramePolicy {
+        media.isAnimated ? .firstFrame : .requireSingleFrame
+    }
+
+    private func adaptiveGlyphContentIdentifier(
+        for media: MediaEmojiContent,
+        shortcode: String
+    ) -> String {
+        let frameSuffix = media.isAnimated ? ":f0" : ""
+        return "mojipond:\(media.contentHash.lowercased()):\(shortcode)\(frameSuffix)"
+    }
+
+    private static func canInsertFirstFrameGlyph(
+        into bundleIdentifier: String?
+    ) -> Bool {
+        guard
+            bundleIdentifier
+                == MediaCommandParser.messagesBundleIdentifier
+        else {
+            return false
+        }
+        if #available(macOS 15.0, *) {
+            return true
+        }
+        return false
+    }
+
+    private func setResults(
+        _ results: [EmojiSearchResult],
+        in transaction: inout ActiveTransaction
+    ) {
+        transaction.results = results
+        transaction.presentationRows = results.map { result in
+            let artworkURLs = displayArtworkURLs(for: result.item)
+            return RuntimeSuggestionRow(
+                id: result.item.id,
+                glyph: displayGlyph(for: result.item),
+                artworkURL: artworkURLs.first,
+                artworkFallbackURL: artworkURLs.dropFirst().first,
+                artworkRootURL: artworkURLs.isEmpty
+                    ? nil
+                    : managedMediaRoot,
+                shortcode: result.item.shortcode.rawValue,
+                name: result.item.name
+            )
+        }
+    }
+
     private func present(_ transaction: ActiveTransaction) {
         guard
             transaction.visibleMode != .hidden,
@@ -2338,14 +2432,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             revision: uiRevision,
             transactionID: transaction.transactionID,
             mode: transaction.visibleMode,
-            rows: transaction.results.map { result in
-                RuntimeSuggestionRow(
-                    id: result.item.id,
-                    glyph: displayGlyph(for: result.item),
-                    shortcode: result.item.shortcode.rawValue,
-                    name: result.item.name
-                )
-            },
+            rows: transaction.presentationRows,
             selectedIndex: transaction.selectedIndex,
             query: transaction.visibleMode == .browser
                 ? transaction.browserQuery
@@ -2460,6 +2547,31 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             unicodeValue(for: item) ?? "◇"
         case let .media(media):
             media.isAnimated ? "GIF" : "▧"
+        }
+    }
+
+    private func displayArtworkURLs(for item: EmojiItem) -> [URL] {
+        guard
+            let managedMediaRoot,
+            case let .media(media) = item.content
+        else {
+            return []
+        }
+        return [
+            media.thumbnailRelativePath,
+            media.relativePath
+        ]
+        .compactMap { $0 }
+        .filter(StoredAsset.isSafeRelativePath)
+        .map {
+            managedMediaRoot
+                .appendingPathComponent($0, isDirectory: false)
+                .standardizedFileURL
+        }
+        .reduce(into: [URL]()) { result, candidate in
+            if !result.contains(candidate) {
+                result.append(candidate)
+            }
         }
     }
 

@@ -17,6 +17,66 @@ final class EventTapServiceTests: XCTestCase {
         XCTAssertTrue(SessionEventTapService.isSyntheticEvent(event))
     }
 
+    func testSnapshotReadsKeyboardTextFromKeyDownEvent() throws {
+        let event = try XCTUnwrap(
+            CGEvent(
+                keyboardEventSource: nil,
+                virtualKey: 0,
+                keyDown: true
+            )
+        )
+        let expected = "pond"
+        let units = Array(expected.utf16)
+        units.withUnsafeBufferPointer { buffer in
+            event.keyboardSetUnicodeString(
+                stringLength: buffer.count,
+                unicodeString: buffer.baseAddress
+            )
+        }
+
+        let snapshot = SessionEventTapService.snapshot(
+            type: .keyDown,
+            event: event
+        )
+
+        XCTAssertEqual(snapshot.characters, expected)
+    }
+
+    func testSnapshotDoesNotReadKeyboardTextFromMouseEvent() throws {
+        let event = try XCTUnwrap(
+            CGEvent(
+                mouseEventSource: nil,
+                mouseType: .leftMouseDown,
+                mouseCursorPosition: .zero,
+                mouseButton: .left
+            )
+        )
+
+        let snapshot = SessionEventTapService.snapshot(
+            type: .leftMouseDown,
+            event: event
+        )
+
+        XCTAssertNil(snapshot.characters)
+    }
+
+    func testSnapshotDoesNotReadKeyboardTextFromFlagsEvent() throws {
+        let event = try XCTUnwrap(
+            CGEvent(
+                keyboardEventSource: nil,
+                virtualKey: 56,
+                keyDown: true
+            )
+        )
+
+        let snapshot = SessionEventTapService.snapshot(
+            type: .flagsChanged,
+            event: event
+        )
+
+        XCTAssertNil(snapshot.characters)
+    }
+
     func testHandlerAloneControlsActiveInterception() {
         let passThrough = SessionEventTapService(
             interceptionPolicy: { _ in .passThrough },

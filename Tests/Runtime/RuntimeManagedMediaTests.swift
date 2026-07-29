@@ -56,14 +56,14 @@ final class RuntimeManagedMediaTests: XCTestCase {
     }
 
     func testWebPCapabilityAndAnimatedExperimentalPolicy() throws {
-        let webP = try XCTUnwrap(
+        let staticWebP = try XCTUnwrap(
             Data(
                 base64Encoded:
                     "UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADMDOJaQAA3AA/v89WAAAAA=="
             )
         )
-        let fixture = try makeFixture(
-            data: webP,
+        let staticFixture = try makeFixture(
+            data: staticWebP,
             filename: "frog.webp"
         )
         let resolver = RuntimeManagedMediaResolver()
@@ -71,10 +71,10 @@ final class RuntimeManagedMediaTests: XCTestCase {
         let staticResult = try resolver.resolve(
             media(
                 type: .webP,
-                path: fixture.relativePath,
-                data: webP
+                path: staticFixture.relativePath,
+                data: staticWebP
             ),
-            beneath: fixture.root
+            beneath: staticFixture.root
         )
         XCTAssertEqual(staticResult.insertionPolicy, .automatic)
         XCTAssertNotNil(
@@ -83,15 +83,21 @@ final class RuntimeManagedMediaTests: XCTestCase {
             }
         )
 
+        let animatedWebP = TestSupport.tinyAnimatedWebPData
+        let animatedFixture = try makeFixture(
+            data: animatedWebP,
+            filename: "animated-frog.webp"
+        )
         let animatedResult = try resolver.resolve(
             media(
                 type: .webP,
-                path: fixture.relativePath,
-                data: webP,
+                path: animatedFixture.relativePath,
+                data: animatedWebP,
                 isAnimated: true
             ),
-            beneath: fixture.root
+            beneath: animatedFixture.root
         )
+        XCTAssertEqual(animatedResult.originalData, animatedWebP)
         XCTAssertEqual(
             animatedResult.insertionPolicy,
             .copyOnlyAnimatedWebPExperimental

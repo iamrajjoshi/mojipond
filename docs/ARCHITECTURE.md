@@ -212,15 +212,22 @@ SHA-256, and magic-byte checks against the imported asset. Remote downloads
 are likewise size-, content-type-, and signature-checked. Failure leaves the
 source token intact and publishes a copy-fallback diagnostic.
 
-On macOS 15 or later, a single-frame custom image then passes through the
-adaptive-glyph bridge. It is orientation-normalized, bounded while preserving
-its aspect ratio, encoded as a metadata-bearing HEIC, validated by
+On macOS 15 or later, a custom image then passes through the adaptive-glyph
+bridge. Single-frame assets use their decoded image; multi-frame assets decode
+frame 0 as a static glyph so Messages can resize it with surrounding text.
+The selected frame is orientation-normalized, bounded while preserving its
+aspect ratio, encoded as a metadata-bearing HEIC, validated by
 `NSAdaptiveImageGlyph`, and exposed to Messages as RTFD plus a plain-text
-shortcode fallback. The successful pasteboard item deliberately omits raw
-PNG/TIFF representations so Messages does not prefer photo semantics.
-Multi-frame assets, macOS 14, and any rejected conversion use the unchanged
-validated media payload instead. This path adds no permission beyond the
-existing Accessibility, Input Monitoring, and Event Posting requirements.
+shortcode fallback. The managed source asset is never rewritten, so the
+original animation remains stored unchanged. The successful pasteboard item
+deliberately omits raw PNG/TIFF representations so Messages does not prefer
+photo semantics.
+
+macOS 14 and rejected conversions retain the existing validated-media fallback
+policy. If animated WebP conversion fails, the runtime preserves the token and
+offers **Copy Media Instead** with the original animation. This path adds no
+permission beyond the existing Accessibility, Input Monitoring, and Event
+Posting requirements.
 
 ## Network boundaries
 

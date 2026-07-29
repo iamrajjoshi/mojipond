@@ -52,6 +52,19 @@ final class AdaptiveGlyphPayloadBuilderTests: XCTestCase {
         XCTAssertEqual(buildCount, 1)
     }
 
+    func testCacheKeySeparatesFirstFrameFromSingleFramePolicy() {
+        XCTAssertNotEqual(
+            cacheKey(
+                contentIdentifier: "same",
+                framePolicy: .requireSingleFrame
+            ),
+            cacheKey(
+                contentIdentifier: "same",
+                framePolicy: .firstFrame
+            )
+        )
+    }
+
     func testPayloadCacheSeparatesMetadataAndSourceTypes() {
         var cache = AdaptiveGlyphPayloadCache()
         let keys = [
@@ -1115,7 +1128,7 @@ final class AdaptiveGlyphPayloadBuilderTests: XCTestCase {
         )
     }
 
-    func testAnimatedSourceIsRejectedInsteadOfFlattened() throws {
+    func testAnimatedSourceRequiresExplicitFirstFramePolicy() throws {
         guard #available(macOS 15.0, *) else {
             throw XCTSkip("Adaptive image glyphs require macOS 15.")
         }
@@ -1131,6 +1144,10 @@ final class AdaptiveGlyphPayloadBuilderTests: XCTestCase {
             frameCount: 2
         )
         let imageData = try Data(contentsOf: imageURL)
+        let source = try XCTUnwrap(
+            CGImageSourceCreateWithData(imageData as CFData, nil)
+        )
+        XCTAssertEqual(CGImageSourceGetCount(source), 2)
 
         XCTAssertThrowsError(
             try AdaptiveGlyphPayloadBuilder.buildPayload(
@@ -1147,9 +1164,55 @@ final class AdaptiveGlyphPayloadBuilderTests: XCTestCase {
                 .animatedSource
             )
         }
+
+        let payload = try AdaptiveGlyphPayloadBuilder.buildPayload(
+            sourceData: imageData,
+            sourceType: .gif,
+            contentIdentifier:
+                "mojipond:\(String(repeating: "b", count: 64)):f0",
+            accessibilityDescription: ":animated_bufo:",
+            plainTextFallback: ":animated_bufo:",
+            framePolicy: .firstFrame
+        )
+        let glyph = try adaptiveGlyph(from: payload)
+        let glyphSource = try XCTUnwrap(
+            CGImageSourceCreateWithData(
+                glyph.imageContent as CFData,
+                nil
+            )
+        )
+        XCTAssertEqual(CGImageSourceGetCount(glyphSource), 1)
+        let firstFrame = try XCTUnwrap(
+            CGImageSourceCreateImageAtIndex(source, 0, nil)
+        )
+        let secondFrame = try XCTUnwrap(
+            CGImageSourceCreateImageAtIndex(source, 1, nil)
+        )
+        let glyphFrame = try XCTUnwrap(
+            CGImageSourceCreateImageAtIndex(glyphSource, 0, nil)
+        )
+        XCTAssertLessThan(
+            colorDistance(
+                centerColor(of: glyphFrame),
+                centerColor(of: firstFrame)
+            ),
+            colorDistance(
+                centerColor(of: glyphFrame),
+                centerColor(of: secondFrame)
+            )
+        )
+        XCTAssertEqual(
+            payload.representations.first?.typeIdentifier,
+            NSPasteboard.PasteboardType.rtfd.rawValue
+        )
+        XCTAssertFalse(
+            payload.representations.contains {
+                $0.typeIdentifier == UTType.gif.identifier
+            }
+        )
     }
 
-    func testAnimatedPNGIsRejectedEvenWhenCallerTreatsItAsStatic()
+    func testAnimatedPNGFirstFrameBuildsInlineGlyph()
         throws
     {
         guard #available(macOS 15.0, *) else {
@@ -1172,21 +1235,70 @@ final class AdaptiveGlyphPayloadBuilderTests: XCTestCase {
         )
         XCTAssertEqual(CGImageSourceGetCount(source), 2)
 
-        XCTAssertThrowsError(
-            try AdaptiveGlyphPayloadBuilder.buildPayload(
-                sourceData: imageData,
-                sourceType: .png,
-                contentIdentifier:
-                    "mojipond:\(String(repeating: "d", count: 64))",
-                accessibilityDescription: ":animated_png:",
-                plainTextFallback: ":animated_png:"
+        let payload = try AdaptiveGlyphPayloadBuilder.buildPayload(
+            sourceData: imageData,
+            sourceType: .png,
+            contentIdentifier:
+                "mojipond:\(String(repeating: "d", count: 64)):f0",
+            accessibilityDescription: ":animated_png:",
+            plainTextFallback: ":animated_png:",
+            framePolicy: .firstFrame
+        )
+        let glyph = try adaptiveGlyph(from: payload)
+        let glyphSource = try XCTUnwrap(
+            CGImageSourceCreateWithData(
+                glyph.imageContent as CFData,
+                nil
             )
-        ) {
-            XCTAssertEqual(
-                $0 as? AdaptiveGlyphPayloadError,
-                .animatedSource
-            )
+        )
+        XCTAssertEqual(CGImageSourceGetCount(glyphSource), 1)
+        XCTAssertEqual(
+            payload.representations.first?.typeIdentifier,
+            NSPasteboard.PasteboardType.rtfd.rawValue
+        )
+        XCTAssertFalse(
+            payload.representations.contains {
+                $0.typeIdentifier == UTType.png.identifier
+            }
+        )
+    }
+
+    func testAnimatedWebPFirstFrameBuildsInlineGlyph() throws {
+        guard #available(macOS 15.0, *) else {
+            throw XCTSkip("Adaptive image glyphs require macOS 15.")
         }
+        let imageData = TestSupport.tinyAnimatedWebPData
+        let source = try XCTUnwrap(
+            CGImageSourceCreateWithData(imageData as CFData, nil)
+        )
+        XCTAssertEqual(CGImageSourceGetCount(source), 2)
+
+        let payload = try AdaptiveGlyphPayloadBuilder.buildPayload(
+            sourceData: imageData,
+            sourceType: .webP,
+            contentIdentifier:
+                "mojipond:\(String(repeating: "e", count: 64)):f0",
+            accessibilityDescription: ":animated_webp:",
+            plainTextFallback: ":animated_webp:",
+            framePolicy: .firstFrame
+        )
+        let glyph = try adaptiveGlyph(from: payload)
+        let glyphSource = try XCTUnwrap(
+            CGImageSourceCreateWithData(
+                glyph.imageContent as CFData,
+                nil
+            )
+        )
+        XCTAssertEqual(CGImageSourceGetCount(glyphSource), 1)
+        XCTAssertEqual(
+            payload.representations.first?.typeIdentifier,
+            NSPasteboard.PasteboardType.rtfd.rawValue
+        )
+        XCTAssertFalse(
+            payload.representations.contains {
+                $0.typeIdentifier == UTType.webP.identifier
+            }
+        )
     }
 
     func testInvalidImageReturnsNoInlinePayload() {
@@ -1254,14 +1366,75 @@ final class AdaptiveGlyphPayloadBuilderTests: XCTestCase {
         contentIdentifier: String,
         sourceType: UTType = .png,
         accessibilityDescription: String = ":bufo:",
-        plainTextFallback: String = ":bufo:"
+        plainTextFallback: String = ":bufo:",
+        framePolicy: AdaptiveGlyphFramePolicy = .requireSingleFrame
     ) -> AdaptiveGlyphPayloadCacheKey {
         AdaptiveGlyphPayloadCacheKey(
             sourceType: sourceType,
             contentIdentifier: contentIdentifier,
             accessibilityDescription: accessibilityDescription,
-            plainTextFallback: plainTextFallback
+            plainTextFallback: plainTextFallback,
+            framePolicy: framePolicy
         )
+    }
+
+    @available(macOS 15.0, *)
+    private func adaptiveGlyph(
+        from payload: PasteboardItemPayload
+    ) throws -> NSAdaptiveImageGlyph {
+        let pasteboard = NSPasteboard(
+            name: NSPasteboard.Name(
+                "MojiPondAdaptiveGlyphTests-\(UUID().uuidString)"
+            )
+        )
+        defer {
+            pasteboard.clearContents()
+            pasteboard.releaseGlobally()
+        }
+        let access = MacPasteboardAccess(pasteboard: pasteboard)
+        XCTAssertTrue(access.replaceContents(with: [payload]))
+        let attributed = try XCTUnwrap(
+            pasteboard.readObjects(
+                forClasses: [NSAttributedString.self]
+            )?.first as? NSAttributedString
+        )
+        return try XCTUnwrap(
+            attributed.attribute(
+                .adaptiveImageGlyph,
+                at: 0,
+                effectiveRange: nil
+            ) as? NSAdaptiveImageGlyph
+        )
+    }
+
+    private func centerColor(of image: CGImage) -> SIMD3<Double> {
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let context = CGContext(
+            data: &pixel,
+            width: 1,
+            height: 1,
+            bitsPerComponent: 8,
+            bytesPerRow: 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )!
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return SIMD3(
+            Double(pixel[0]) / 255,
+            Double(pixel[1]) / 255,
+            Double(pixel[2]) / 255
+        )
+    }
+
+    private func colorDistance(
+        _ lhs: SIMD3<Double>,
+        _ rhs: SIMD3<Double>
+    ) -> Double {
+        let delta = lhs - rhs
+        return delta.x * delta.x
+            + delta.y * delta.y
+            + delta.z * delta.z
     }
 
     private func payloadRequest(

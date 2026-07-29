@@ -112,6 +112,44 @@ final class LibrarySearchAdapterTests: XCTestCase {
         )
     }
 
+    func testAdapterMarksAnimatedPNGForFirstFrameInsertion() throws {
+        let digest = String(repeating: "b", count: 64)
+        let item = LibraryEmoji(
+            shortcode: try Shortcode(validating: "animated_png"),
+            sourceFilename: "animated.png",
+            payload: .asset(
+                StoredAsset(
+                    relativePath: "packs/custom/animated.png",
+                    format: .png,
+                    sha256: digest,
+                    byteCount: 789,
+                    pixelWidth: 64,
+                    pixelHeight: 64,
+                    frameCount: 3
+                )
+            )
+        )
+        let pack = EmojiPack(
+            name: "Custom",
+            source: PackSource(kind: .folder),
+            items: [item]
+        )
+
+        let catalog = try EmojiLibrarySearchAdapter.catalogPack(
+            from: pack,
+            priority: 0
+        )
+        guard
+            case let .media(media) =
+                try XCTUnwrap(catalog.items.first).content
+        else {
+            return XCTFail("Expected media content")
+        }
+
+        XCTAssertEqual(media.mediaType, .png)
+        XCTAssertTrue(media.isAnimated)
+    }
+
     func testAdapterRejectsMalformedPayloadInsteadOfOpeningAnAsset() {
         let itemID = UUID()
         let item = LibraryEmoji(

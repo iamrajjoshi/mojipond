@@ -108,7 +108,6 @@ enum EmojiLibrarySearchAdapter {
                         height: asset.pixelHeight
                     ),
                     isAnimated: asset.frameCount > 1
-                        && (asset.format == .gif || asset.format == .webP)
                 )
             )
         }
