@@ -29,7 +29,6 @@ enum RuntimeMediaNetworkPolicy {
                 )
             ),
             stickerSearcher: NotoStickerClient(session: session),
-            gifSearcher: GiphyClient(session: session),
             assetResolver: MediaCommandAssetResolver(
                 remoteDownloader: RemoteMediaDownloader(session: session)
             )
@@ -70,7 +69,6 @@ extension MediaCommandCoordinator: RuntimeMediaCommandCoordinating {}
 enum RuntimeMediaInsertionSource: Equatable, Sendable {
     case customEmoji(shortcode: String)
     case sticker
-    case gif
 }
 
 enum RuntimeMediaCopyFallbackReason: Equatable, Sendable {
@@ -181,8 +179,7 @@ enum RuntimeMediaPayloadBuilder {
 extension MediaCommandNetworkOptions {
     init(preferences: NetworkPreferences) {
         self.init(
-            allowsNotoNetwork: preferences.allowsStickerSearch,
-            allowsGIPHYNetwork: preferences.allowsGIFSearch
+            allowsNotoNetwork: preferences.allowsStickerSearch
         )
     }
 }
@@ -217,8 +214,6 @@ extension MediaCommandSearchState {
             .empty
         case .cancelled:
             .cancelled
-        case .networkDisabled:
-            .networkDisabled
         case .rateLimited:
             .rateLimited
         case let .failed(_, failure):

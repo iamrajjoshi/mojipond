@@ -6,26 +6,16 @@ struct SettingsRootView: View {
     @ObservedObject var appState: AppState
     @ObservedObject private var permissions: SystemPermissionCenter
     @ObservedObject private var updates: AppUpdateController
-    @StateObject private var giphyKey: GiphyKeySettingsModel
 
     @State private var domainDraft = ""
     @State private var exclusionError: String?
     @State private var showsManualUpdateConfirmation = false
     @State private var showsNativeUpdateConfirmation = false
 
-    init(
-        appState: AppState,
-        giphyKeyStore: any GiphyAPIKeyStoring =
-            KeychainGiphyAPIKeyStore()
-    ) {
+    init(appState: AppState) {
         self.appState = appState
         permissions = appState.permissions
         updates = appState.updates
-        _giphyKey = StateObject(
-            wrappedValue: GiphyKeySettingsModel(
-                store: giphyKeyStore
-            )
-        )
     }
 
     var body: some View {
@@ -76,16 +66,8 @@ struct SettingsRootView: View {
 
             Section("Online features") {
                 Toggle(
-                    "Allow public GitHub pack imports",
-                    isOn: preference(\.network.allowsGitHubImports)
-                )
-                Toggle(
                     "Allow /sticker downloads in Messages",
                     isOn: preference(\.network.allowsStickerSearch)
-                )
-                Toggle(
-                    "Allow /gif search in Messages",
-                    isOn: preference(\.network.allowsGIFSearch)
                 )
                 Toggle(
                     "Check for signed updates",
@@ -93,74 +75,15 @@ struct SettingsRootView: View {
                 )
                 Text(
                     "Online features are independent and off by default. "
-                        + "GitHub imports send the requested repository URL; "
                         + "Noto sticker queries stay local after a fixed "
-                        + "manifest download; GIPHY and update traffic are "
-                        + "described in Privacy."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-
-            Section("GIPHY API key") {
-                SecureField(
-                    "Paste a GIPHY API key",
-                    text: $giphyKey.draftKey
-                )
-                .accessibilityHint(
-                    "The key is stored in Keychain and is never shown again."
-                )
-
-                HStack {
-                    Label(
-                        giphyKey.statusTitle,
-                        systemImage: giphyKey.statusSymbolName
-                    )
-                    .foregroundStyle(
-                        giphyKey.hasStoredKey
-                            ? PondDesign.lily
-                            : Color.secondary
-                    )
-
-                    Spacer()
-
-                    Button("Remove", role: .destructive) {
-                        giphyKey.remove()
-                    }
-                    .disabled(!giphyKey.hasStoredKey)
-
-                    Button("Save to Keychain") {
-                        giphyKey.save()
-                    }
-                    .disabled(
-                        giphyKey.draftKey.trimmingCharacters(
-                            in: .whitespacesAndNewlines
-                        ).isEmpty
-                    )
-                }
-
-                if case let .failed(message) = giphyKey.status {
-                    Text(message)
-                        .font(.caption)
-                        .foregroundStyle(PondDesign.errorForeground)
-                }
-
-                Text(
-                    "Used only for explicit /gif searches in Messages. "
-                        + "When GIF search is enabled, MojiPond sends the "
-                        + "exact query and this key to GIPHY. Preview "
-                        + "renditions for displayed results and the selected "
-                        + "original are requested directly and are not persisted. "
-                        + "MojiPond does not invoke GIPHY action analytics."
+                        + "manifest download. Update traffic is described "
+                        + "in Privacy."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
-        .onAppear {
-            giphyKey.refresh()
-        }
     }
 
     private var shortcuts: some View {
@@ -247,8 +170,8 @@ struct SettingsRootView: View {
 
             Section("Portable packs") {
                 Text(
-                    "MojiPond supports individual files, folders, ZIPs, "
-                        + "Slack-style emoji.json files, and public GitHub URLs."
+                    "The Library imports one local ZIP archive at a time and "
+                        + "shows a review before installing it."
                 )
                 .foregroundStyle(.secondary)
             }

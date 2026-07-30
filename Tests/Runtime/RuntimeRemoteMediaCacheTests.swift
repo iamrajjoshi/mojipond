@@ -15,7 +15,7 @@ final class RuntimeRemoteMediaCacheTests: XCTestCase {
     func testNotoDiskCacheRoundTripsValidatedOriginalBytes() async throws {
         let root = temporaryRoot()
         let cache = RuntimeNotoMediaDiskCache(rootURL: root)
-        let result = mediaResult(provider: .notoAnimatedEmoji)
+        let result = mediaResult()
         let download = gifDownload()
 
         try await cache.store(download, for: result)
@@ -26,25 +26,13 @@ final class RuntimeRemoteMediaCacheTests: XCTestCase {
         XCTAssertEqual(cached?.suggestedFilename.hasSuffix(".gif"), true)
     }
 
-    func testGIPHYNeverTouchesPersistentMediaCache() async throws {
-        let root = temporaryRoot()
-        let cache = RuntimeNotoMediaDiskCache(rootURL: root)
-        let result = mediaResult(provider: .giphy)
-
-        try await cache.store(gifDownload(), for: result)
-        let cached = try await cache.cachedDownload(for: result)
-
-        XCTAssertNil(cached)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
-    }
-
     func testNotoDiskCacheHonorsConfiguredByteBound() async throws {
         let root = temporaryRoot()
         let cache = RuntimeNotoMediaDiskCache(
             rootURL: root,
             maximumBytes: 1
         )
-        let result = mediaResult(provider: .notoAnimatedEmoji)
+        let result = mediaResult()
 
         try await cache.store(gifDownload(), for: result)
         let cached = try await cache.cachedDownload(for: result)
@@ -52,7 +40,7 @@ final class RuntimeRemoteMediaCacheTests: XCTestCase {
         XCTAssertNil(cached)
     }
 
-    func testResolverUsesNotoCacheButBypassesItForGIPHY() async throws {
+    func testResolverUsesNotoCacheWhenAvailable() async throws {
         let cachedDownload = gifDownload()
         let cache = RuntimeRemoteMediaCacheSpy(cached: cachedDownload)
         let coordinator = RuntimeRemoteMediaCoordinatorSpy(
@@ -64,24 +52,13 @@ final class RuntimeRemoteMediaCacheTests: XCTestCase {
         )
 
         let noto = try await resolver.resolve(
-            mediaResult(provider: .notoAnimatedEmoji)
+            mediaResult()
         )
         let resolveCountAfterNoto = await coordinator.resolveCount()
         let readCountAfterNoto = await cache.readCount()
         XCTAssertEqual(noto, cachedDownload)
         XCTAssertEqual(resolveCountAfterNoto, 0)
         XCTAssertEqual(readCountAfterNoto, 1)
-
-        let giphy = try await resolver.resolve(
-            mediaResult(provider: .giphy)
-        )
-        let resolveCountAfterGIPHY = await coordinator.resolveCount()
-        let readCountAfterGIPHY = await cache.readCount()
-        let writeCountAfterGIPHY = await cache.writeCount()
-        XCTAssertEqual(giphy.data, gifDownload(suffix: "-network").data)
-        XCTAssertEqual(resolveCountAfterGIPHY, 1)
-        XCTAssertEqual(readCountAfterGIPHY, 1)
-        XCTAssertEqual(writeCountAfterGIPHY, 0)
     }
 
     func testNotoCacheMissDownloadsThenStoresForNextSelection() async throws {
@@ -96,7 +73,7 @@ final class RuntimeRemoteMediaCacheTests: XCTestCase {
         )
 
         let resolved = try await resolver.resolve(
-            mediaResult(provider: .notoAnimatedEmoji)
+            mediaResult()
         )
         let resolveCount = await coordinator.resolveCount()
         let readCount = await cache.readCount()
@@ -111,7 +88,7 @@ final class RuntimeRemoteMediaCacheTests: XCTestCase {
     func testRuntimeNetworkPolicyDisablesURLCaching() {
         let session = RuntimeMediaNetworkPolicy.nonCachingSession()
         let request = RuntimeMediaNetworkPolicy.nonCachingRequest(
-            for: URL(string: "https://media.giphy.com/example.gif")!
+            for: URL(string: "https://fonts.gstatic.com/example.gif")!
         )
 
         XCTAssertNil(session.configuration.urlCache)
@@ -128,14 +105,7 @@ final class RuntimeRemoteMediaCacheTests: XCTestCase {
     func testAttributionPolicyAlwaysAddsProviderAttribution() {
         XCTAssertEqual(
             RuntimeMediaAttributionPolicy.normalized(
-                items: [mediaResult(provider: .giphy)],
-                declared: []
-            ),
-            [.giphy]
-        )
-        XCTAssertEqual(
-            RuntimeMediaAttributionPolicy.normalized(
-                items: [mediaResult(provider: .notoAnimatedEmoji)],
+                items: [mediaResult()],
                 declared: []
             ),
             [.notoAnimatedEmoji]
@@ -166,24 +136,19 @@ final class RuntimeRemoteMediaCacheTests: XCTestCase {
         )
     }
 
-    private func mediaResult(
-        provider: RemoteMediaProvider
-    ) -> MediaCommandResult {
+    private func mediaResult() -> MediaCommandResult {
         let url = URL(
-            string: "https://media.example/\(provider.rawValue).gif"
+            string: "https://fonts.gstatic.com/noto.gif"
         )!
         return MediaCommandResult(
             media: RemoteMediaItem(
-                id: provider.rawValue,
-                provider: provider,
-                title: provider.rawValue,
+                id: "noto",
+                provider: .notoAnimatedEmoji,
+                title: "Noto",
                 previewURL: url,
                 originalURL: url,
                 dimensions: nil,
-                attribution: provider == .giphy
-                    ? "Powered by GIPHY"
-                    : "Noto Animated Emoji by Google",
-                analytics: nil
+                attribution: "Noto Animated Emoji by Google"
             ),
             origin: .remote
         )

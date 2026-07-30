@@ -44,10 +44,10 @@ jobs:
           fi
 
           if git grep -I -n -E \
-            '(GIPHY_API_KEY|NOTARIZATION_PASSWORD|AC_PASSWORD)[[:space:]]*=[[:space:]]*[^$[:space:]]{8,}' \
+            '(NOTARIZATION_PASSWORD|AC_PASSWORD)[[:space:]]*=[[:space:]]*[^$[:space:]]{8,}' \
             -- .
           then
-            echo "A likely hard-coded release or provider secret was found."
+            echo "A likely hard-coded release secret was found."
             exit 1
           fi
 

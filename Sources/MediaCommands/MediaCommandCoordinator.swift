@@ -4,17 +4,11 @@ protocol MediaCommandStickerSearching: Sendable {
     func search(_ query: String, limit: Int) async throws -> [RemoteMediaItem]
 }
 
-protocol MediaCommandGIFSearching: Sendable {
-    func search(_ query: String, limit: Int) async throws -> [RemoteMediaItem]
-}
-
 extension NotoStickerClient: MediaCommandStickerSearching {}
-extension GiphyClient: MediaCommandGIFSearching {}
 
 actor MediaCommandCoordinator {
     private let offlineCatalog: NotoOfflineCatalog
     private let stickerSearcher: (any MediaCommandStickerSearching)?
-    private let gifSearcher: (any MediaCommandGIFSearching)?
     private let assetResolver: MediaCommandAssetResolver
 
     private var requestCounter: UInt64 = 0
@@ -26,13 +20,11 @@ actor MediaCommandCoordinator {
         offlineCatalog: NotoOfflineCatalog,
         stickerSearcher: (any MediaCommandStickerSearching)? =
             NotoStickerClient(),
-        gifSearcher: (any MediaCommandGIFSearching)? = GiphyClient(),
         assetResolver: MediaCommandAssetResolver =
             MediaCommandAssetResolver()
     ) {
         self.offlineCatalog = offlineCatalog
         self.stickerSearcher = stickerSearcher
-        self.gifSearcher = gifSearcher
         self.assetResolver = assetResolver
     }
 
@@ -94,8 +86,7 @@ actor MediaCommandCoordinator {
                 networkOptions: networkOptions,
                 limit: boundedLimit,
                 offlineCatalog: offlineCatalog,
-                stickerSearcher: stickerSearcher,
-                gifSearcher: gifSearcher
+                stickerSearcher: stickerSearcher
             )
         }
         activeTask = operation
@@ -138,28 +129,16 @@ actor MediaCommandCoordinator {
         networkOptions: MediaCommandNetworkOptions,
         limit: Int,
         offlineCatalog: NotoOfflineCatalog,
-        stickerSearcher: (any MediaCommandStickerSearching)?,
-        gifSearcher: (any MediaCommandGIFSearching)?
+        stickerSearcher: (any MediaCommandStickerSearching)?
     ) async -> MediaCommandSearchState {
-        switch request.command {
-        case .sticker:
-            return await searchStickers(
-                request: request,
-                query: query,
-                networkOptions: networkOptions,
-                limit: limit,
-                offlineCatalog: offlineCatalog,
-                stickerSearcher: stickerSearcher
-            )
-        case .gif:
-            return await searchGIFs(
-                request: request,
-                query: query,
-                networkOptions: networkOptions,
-                limit: min(limit, 50),
-                gifSearcher: gifSearcher
-            )
-        }
+        await searchStickers(
+            request: request,
+            query: query,
+            networkOptions: networkOptions,
+            limit: limit,
+            offlineCatalog: offlineCatalog,
+            stickerSearcher: stickerSearcher
+        )
     }
 
     private static func searchStickers(
@@ -217,36 +196,6 @@ actor MediaCommandCoordinator {
         }
     }
 
-    private static func searchGIFs(
-        request: MediaCommandRequest,
-        query: String,
-        networkOptions: MediaCommandNetworkOptions,
-        limit: Int,
-        gifSearcher: (any MediaCommandGIFSearching)?
-    ) async -> MediaCommandSearchState {
-        guard networkOptions.allowsGIPHYNetwork else {
-            return .networkDisabled(request)
-        }
-        guard let gifSearcher else {
-            return .failed(request, .providerUnavailable)
-        }
-
-        do {
-            let items = try await gifSearcher.search(query, limit: limit)
-            try Task.checkCancellation()
-            let boundedItems = items.prefix(limit).map { $0 }
-            return completedState(
-                request: request,
-                items: boundedItems.map {
-                    MediaCommandResult(media: $0, origin: .remote)
-                },
-                isOffline: false
-            )
-        } catch {
-            return state(for: error, request: request, fallback: [])
-        }
-    }
-
     private static func completedState(
         request: MediaCommandRequest,
         items: [MediaCommandResult],
@@ -276,15 +225,13 @@ actor MediaCommandCoordinator {
         }
         if let error = error as? RemoteMediaError {
             switch error {
-            case .missingAPIKey:
-                return .failed(request, .missingGIPHYAPIKey)
             case .emptyQuery, .queryTooLong:
                 return .failed(request, .invalidQuery)
             case .statusCode(429):
                 return .rateLimited(request)
             case .unsupportedContentType, .unsafeImage:
                 return .failed(request, .unsupportedMedia)
-            case .invalidRequest, .invalidResponse, .insecureURL,
+            case .invalidResponse, .insecureURL,
                  .responseTooLarge, .statusCode:
                 return .failed(request, .invalidProviderResponse)
             }
@@ -299,9 +246,6 @@ actor MediaCommandCoordinator {
         var attributions: [MediaCommandAttribution] = []
         if items.contains(where: { $0.media.provider == .notoAnimatedEmoji }) {
             attributions.append(.notoAnimatedEmoji)
-        }
-        if items.contains(where: { $0.media.provider == .giphy }) {
-            attributions.append(.giphy)
         }
         return MediaCommandResults(
             request: request,

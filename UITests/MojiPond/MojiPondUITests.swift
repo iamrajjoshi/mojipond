@@ -16,6 +16,11 @@ final class MojiPondUITests: XCTestCase {
             "Every emote, right where you type"
         ].waitForExistence(timeout: 5)
         XCTAssertTrue(welcomeExists)
+        XCTAssertTrue(
+            application.staticTexts[
+                "Import one reviewed ZIP at a time."
+            ].exists
+        )
         let onboardingWindow = application.windows["Set Up MojiPond"]
         XCTAssertTrue(onboardingWindow.waitForExistence(timeout: 2))
         attachScreen(
@@ -88,6 +93,50 @@ final class MojiPondUITests: XCTestCase {
             lightScreenshot,
             darkScreenshot,
             "Light and dark screenshots must render distinct appearances"
+        )
+    }
+
+    func testPackDetailsKeepsImageImportZIPOnly() {
+        continueAfterFailure = false
+        let application = launch(
+            initialScreen: "library",
+            appearance: .light
+        )
+        defer {
+            application.terminate()
+        }
+
+        assertLibraryIsReady(application)
+        let newPackButton = application.buttons["New Empty Pack…"]
+        XCTAssertTrue(newPackButton.waitForExistence(timeout: 2))
+        newPackButton.click()
+
+        XCTAssertTrue(
+            application.staticTexts[
+                "Create an empty pack"
+            ].waitForExistence(timeout: 2)
+        )
+        let nameField = application.textFields["Name"]
+        XCTAssertTrue(nameField.waitForExistence(timeout: 2))
+        nameField.click()
+        nameField.typeText("ZIP Only Pack")
+        application.buttons["Create Pack"].click()
+
+        let packLabel = application.staticTexts["ZIP Only Pack"].firstMatch
+        XCTAssertTrue(packLabel.waitForExistence(timeout: 3))
+        packLabel.click()
+        let detailsButton = application.buttons["Pack Details"]
+        XCTAssertTrue(detailsButton.waitForExistence(timeout: 2))
+        detailsButton.click()
+
+        XCTAssertTrue(
+            application.buttons[
+                "Replace Contents from ZIP…"
+            ].waitForExistence(timeout: 2)
+        )
+        XCTAssertFalse(application.buttons["Add Files…"].exists)
+        XCTAssertFalse(
+            application.buttons["Check GitHub Revision…"].exists
         )
     }
 
@@ -192,9 +241,18 @@ final class MojiPondUITests: XCTestCase {
         importPackButton.click()
         XCTAssertTrue(
             application.staticTexts[
-                "Import an emoji pack"
+                "Import a ZIP pack"
             ].waitForExistence(timeout: 2)
         )
+        XCTAssertTrue(application.buttons["Choose ZIP…"].exists)
+        for removedControl in [
+            "Choose Images…",
+            "Choose Folder…",
+            "Choose emoji.json…",
+            "Review GitHub Import"
+        ] {
+            XCTAssertFalse(application.buttons[removedControl].exists)
+        }
         return attachScreen(
             named: screenshotName,
             element: application.windows["MojiPond Library"]

@@ -1129,7 +1129,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                     diagnosticHandler?(
                         .mediaCopyFallbackAvailable(
                             RuntimeMediaCopyFallbackDiagnostic(
-                                source: command == .gif ? .gif : .sticker,
+                                source: .sticker,
                                 reason: .downloadFailed
                             )
                         )
@@ -1174,9 +1174,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                         diagnosticHandler?(
                             .mediaCopyFallbackAvailable(
                                 RuntimeMediaCopyFallbackDiagnostic(
-                                    source: command == .gif
-                                        ? .gif
-                                        : .sticker,
+                                    source: .sticker,
                                     reason: .insertionFailed(reason),
                                     payload: payload
                                 )
@@ -1206,7 +1204,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                     diagnosticHandler?(
                         .mediaCopyFallbackAvailable(
                             RuntimeMediaCopyFallbackDiagnostic(
-                                source: command == .gif ? .gif : .sticker,
+                                source: .sticker,
                                 reason: .unsupportedDownloadedMedia
                             )
                         )
@@ -1259,11 +1257,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                     id: $0.id,
                     title: $0.media.title,
                     previewURL: $0.media.previewURL,
-                    provider: $0.media.provider,
-                    creatorAttribution:
-                        $0.media.creatorAttribution,
-                    sourceAttribution:
-                        $0.media.sourceAttribution
+                    provider: $0.media.provider
                 )
             },
             selectedIndex: transaction.grid.selectedIndex,

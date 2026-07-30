@@ -4,25 +4,14 @@ import UniformTypeIdentifiers
 
 struct LibraryImportSourceView: View {
     @ObservedObject var viewModel: LibraryViewModel
-    let githubImportsAllowed: Bool
     let didSubmit: () -> Void
-
-    @State private var source = ImportSource.files
-    @State private var githubURL = ""
-    @State private var githubRef = ""
-    @State private var githubSubdirectory = ""
-    @State private var githubPackName = ""
-    @State private var allowGitHubNetwork = false
-    @State private var allowSlackNetwork = false
-    @State private var sourceError: String?
-    @FocusState private var focusedField: Field?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack(alignment: .top, spacing: 14) {
                 PondMark(size: 46)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Import an emoji pack")
+                    Text("Import a ZIP pack")
                         .font(.title2.weight(.semibold))
                     Text("Every import is reviewed before files are copied into MojiPond.")
                         .font(.callout)
@@ -30,63 +19,36 @@ struct LibraryImportSourceView: View {
                 }
             }
 
-            Picker("Source", selection: $source) {
-                ForEach(ImportSource.allCases) { source in
-                    Label(source.title, systemImage: source.icon)
-                        .tag(source)
+            PondCard {
+                HStack(spacing: 16) {
+                    Image(systemName: "doc.zipper")
+                        .font(.system(size: 30))
+                        .foregroundStyle(PondDesign.pond)
+                        .frame(width: 40)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("ZIP archive")
+                            .font(.headline)
+                        Text(
+                            "Choose a ZIP containing a portable pack or supported images. "
+                                + "MojiPond safety-checks the archive and shows a preview before install."
+                        )
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Choose ZIP…", action: chooseZIP)
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut(.defaultAction)
                 }
             }
-            .pickerStyle(.segmented)
-            .accessibilityHint("Choose where the emoji pack comes from")
-
-            Group {
-                switch source {
-                case .files:
-                    localSourceCard(
-                        title: "Individual image files",
-                        detail: "Choose PNG, JPEG, GIF, or WebP files. Filenames become shortcodes.",
-                        buttonTitle: "Choose Images…",
-                        action: chooseFiles
-                    )
-                case .folder:
-                    VStack(alignment: .leading, spacing: 12) {
-                        localSourceCard(
-                            title: "Folder",
-                            detail: "Scans supported images, portable MojiPond manifests, and Slack emoji.json automatically.",
-                            buttonTitle: "Choose Folder…",
-                            action: chooseFolder
-                        )
-                        Toggle("Allow remote URLs if this folder contains a Slack manifest", isOn: $allowSlackNetwork)
-                            .font(.callout)
-                        networkExplanation
-                    }
-                case .zip:
-                    localSourceCard(
-                        title: "ZIP archive",
-                        detail: "The archive is safety-checked, extracted into a temporary workspace, and previewed.",
-                        buttonTitle: "Choose ZIP…",
-                        action: chooseZIP
-                    )
-                case .slack:
-                    VStack(alignment: .leading, spacing: 12) {
-                        localSourceCard(
-                            title: "Slack emoji.json",
-                            detail: "Local image paths work offline. Remote Slack asset URLs require explicit network access.",
-                            buttonTitle: "Choose emoji.json…",
-                            action: chooseSlackManifest
-                        )
-                        Toggle("Allow this import to download remote Slack emoji", isOn: $allowSlackNetwork)
-                            .font(.callout)
-                        networkExplanation
-                    }
-                case .github:
-                    githubForm
-                }
-            }
-            .frame(maxWidth: .infinity, minHeight: 190, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: 150, alignment: .topLeading)
 
             HStack {
-                Text("Files stay local unless you explicitly enable a network import.")
+                Label(
+                    "The archive is inspected locally. Importing it does not contact the network.",
+                    systemImage: "lock.shield"
+                )
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -96,167 +58,6 @@ struct LibraryImportSourceView: View {
         }
         .padding(24)
         .frame(width: 680)
-        .onChange(of: source) {
-            if source == .github {
-                focusedField = .githubURL
-            }
-        }
-        .onChange(of: githubImportsAllowed) {
-            if !githubImportsAllowed {
-                allowGitHubNetwork = false
-            }
-        }
-    }
-
-    private var githubForm: some View {
-        PondCard {
-            VStack(alignment: .leading, spacing: 14) {
-                Label("Public GitHub repository", systemImage: "network")
-                    .font(.headline)
-
-                if !githubImportsAllowed {
-                    Label(
-                        "Public GitHub imports are off. Enable them in MojiPond Settings → General before reviewing this source.",
-                        systemImage: "network.slash"
-                    )
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel(
-                        "Public GitHub imports are disabled in Settings"
-                    )
-                }
-
-                TextField("https://github.com/owner/repository", text: $githubURL)
-                    .textFieldStyle(.roundedBorder)
-                    .focused($focusedField, equals: .githubURL)
-                    .accessibilityLabel("GitHub repository URL")
-                if let sourceError {
-                    Label(sourceError, systemImage: "exclamationmark.circle")
-                        .font(.caption)
-                        .foregroundStyle(PondDesign.errorForeground)
-                }
-
-                HStack {
-                    TextField("Branch, tag, or commit (optional)", text: $githubRef)
-                        .textFieldStyle(.roundedBorder)
-                        .accessibilityLabel("Git reference")
-                    TextField("Subfolder (optional)", text: $githubSubdirectory)
-                        .textFieldStyle(.roundedBorder)
-                        .accessibilityLabel("Repository subfolder")
-                }
-
-                TextField("Pack name override (optional)", text: $githubPackName)
-                    .textFieldStyle(.roundedBorder)
-
-                Toggle("Allow this import to contact GitHub", isOn: $allowGitHubNetwork)
-                    .disabled(!githubImportsAllowed)
-
-                HStack {
-                    networkExplanation
-                    Spacer()
-                    Button("Review GitHub Import") {
-                        guard let url = URL(string: githubURL) else {
-                            sourceError = "Enter a full public github.com repository URL."
-                            return
-                        }
-                        sourceError = nil
-                        viewModel.prepareImport(
-                            .github(
-                                url,
-                                ref: nilIfBlank(githubRef),
-                                subdirectory: nilIfBlank(githubSubdirectory),
-                                packName: nilIfBlank(githubPackName)
-                            ),
-                            networkAccessGranted: allowGitHubNetwork
-                        )
-                        if allowGitHubNetwork {
-                            didSubmit()
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(
-                        !githubImportsAllowed
-                            || githubURL.trimmingCharacters(
-                                in: .whitespacesAndNewlines
-                            ).isEmpty
-                    )
-                    .keyboardShortcut(.defaultAction)
-                }
-            }
-        }
-    }
-
-    private var networkExplanation: some View {
-        Label(
-            "Only the selected source is contacted for this import.",
-            systemImage: "lock.shield"
-        )
-        .font(.caption)
-        .foregroundStyle(.secondary)
-    }
-
-    private func localSourceCard(
-        title: String,
-        detail: String,
-        buttonTitle: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        PondCard {
-            HStack(spacing: 16) {
-                Image(systemName: source.icon)
-                    .font(.system(size: 30))
-                    .foregroundStyle(PondDesign.pond)
-                    .frame(width: 40)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(.headline)
-                    Text(detail)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button(buttonTitle, action: action)
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.defaultAction)
-            }
-        }
-    }
-
-    private func chooseFiles() {
-        let panel = NSOpenPanel()
-        panel.title = "Choose emoji images"
-        panel.prompt = "Review"
-        panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = false
-        panel.allowedContentTypes = supportedImageTypes
-        guard panel.runModal() == .OK, !panel.urls.isEmpty else {
-            return
-        }
-        let name = panel.urls.count == 1
-            ? panel.urls[0].deletingPathExtension().lastPathComponent
-            : "Imported Emoji"
-        viewModel.prepareImport(.files(panel.urls, packName: name))
-        didSubmit()
-    }
-
-    private func chooseFolder() {
-        let panel = NSOpenPanel()
-        panel.title = "Choose an emoji folder"
-        panel.prompt = "Review"
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        guard panel.runModal() == .OK, let url = panel.url else {
-            return
-        }
-        viewModel.prepareImport(
-            .folder(
-                url,
-                allowRemoteSlackAssets: allowSlackNetwork
-            ),
-            networkAccessGranted: allowSlackNetwork
-        )
-        didSubmit()
     }
 
     private func chooseZIP() {
@@ -270,79 +71,6 @@ struct LibraryImportSourceView: View {
         }
         viewModel.prepareImport(.zipArchive(url))
         didSubmit()
-    }
-
-    private func chooseSlackManifest() {
-        let panel = NSOpenPanel()
-        panel.title = "Choose Slack emoji.json"
-        panel.prompt = "Review"
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [.json]
-        guard panel.runModal() == .OK, let url = panel.url else {
-            return
-        }
-        viewModel.prepareImport(
-            .slackManifest(
-                url,
-                allowRemoteAssets: allowSlackNetwork
-            ),
-            networkAccessGranted: allowSlackNetwork
-        )
-        didSubmit()
-    }
-
-    private var supportedImageTypes: [UTType] {
-        [.png, .jpeg, .gif] + [UTType(filenameExtension: "webp")].compactMap { $0 }
-    }
-
-    private func nilIfBlank(_ value: String) -> String? {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
-    private enum Field {
-        case githubURL
-    }
-
-    private enum ImportSource: String, CaseIterable, Identifiable {
-        case files
-        case folder
-        case zip
-        case slack
-        case github
-
-        var id: Self { self }
-
-        var title: String {
-            switch self {
-            case .files:
-                "Files"
-            case .folder:
-                "Folder"
-            case .zip:
-                "ZIP"
-            case .slack:
-                "Slack"
-            case .github:
-                "GitHub"
-            }
-        }
-
-        var icon: String {
-            switch self {
-            case .files:
-                "photo.on.rectangle.angled"
-            case .folder:
-                "folder"
-            case .zip:
-                "doc.zipper"
-            case .slack:
-                "number.square"
-            case .github:
-                "network"
-            }
-        }
     }
 }
 

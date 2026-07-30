@@ -23,50 +23,6 @@ final class MediaCommandCoordinatorTests: XCTestCase {
         XCTAssertEqual(callCount, 0)
     }
 
-    func testGIFSearchRequiresExplicitNetworkOptIn() async throws {
-        let searcher = MediaSearchStub(
-            behaviors: [.results([remoteItem(provider: .giphy, id: "gif")])]
-        )
-        let coordinator = try makeCoordinator(searcher: searcher)
-
-        let state = await coordinator.search(
-            command: .gif,
-            query: "frog",
-            bundleIdentifier: messages,
-            networkOptions: .offlineOnly
-        )
-
-        XCTAssertEqual(
-            state,
-            .networkDisabled(MediaCommandRequest(id: 1, command: .gif))
-        )
-        let callCount = await searcher.numberOfCalls()
-        XCTAssertEqual(callCount, 0)
-    }
-
-    func testGIPHYResultsExposeRequiredAttribution() async throws {
-        let searcher = MediaSearchStub(
-            behaviors: [
-                .results([remoteItem(provider: .giphy, id: "giphy-frog")])
-            ]
-        )
-        let coordinator = try makeCoordinator(searcher: searcher)
-
-        let state = await coordinator.search(
-            command: .gif,
-            query: "frog",
-            bundleIdentifier: messages,
-            networkOptions: network(giphy: true)
-        )
-
-        guard case let .results(results) = state else {
-            return XCTFail("Expected GIPHY results, got \(state)")
-        }
-        XCTAssertEqual(results.items.map(\.id), ["giphy-frog"])
-        XCTAssertEqual(results.attributions, [.giphy])
-        XCTAssertEqual(results.items.first?.attribution, .giphy)
-    }
-
     func testNetworkFailureSurfacesOfflineStickerFallback() async throws {
         let searcher = MediaSearchStub(
             behaviors: [.urlError(.notConnectedToInternet)]
@@ -104,15 +60,15 @@ final class MediaCommandCoordinatorTests: XCTestCase {
         )
 
         let failed = await offlineCoordinator.search(
-            command: .gif,
-            query: "frog",
+            command: .sticker,
+            query: "no-such-sticker",
             bundleIdentifier: messages,
-            networkOptions: network(giphy: true)
+            networkOptions: network(noto: true)
         )
         XCTAssertEqual(
             failed,
             .failed(
-                MediaCommandRequest(id: 2, command: .gif),
+                MediaCommandRequest(id: 2, command: .sticker),
                 .invalidProviderResponse
             )
         )
@@ -125,36 +81,36 @@ final class MediaCommandCoordinatorTests: XCTestCase {
         let coordinator = try makeCoordinator(searcher: searcher)
 
         let state = await coordinator.search(
-            command: .gif,
-            query: "frog",
+            command: .sticker,
+            query: "no-such-sticker",
             bundleIdentifier: messages,
-            networkOptions: network(giphy: true)
+            networkOptions: network(noto: true)
         )
 
         XCTAssertEqual(
             state,
-            .rateLimited(MediaCommandRequest(id: 1, command: .gif))
+            .rateLimited(MediaCommandRequest(id: 1, command: .sticker))
         )
     }
 
     func testNonMessagesRequestIsCancelledBeforeProviderCall() async throws {
         let searcher = MediaSearchStub(
             behaviors: [
-                .results([remoteItem(provider: .giphy, id: "unexpected")])
+                .results([remoteItem(id: "unexpected")])
             ]
         )
         let coordinator = try makeCoordinator(searcher: searcher)
 
         let state = await coordinator.search(
-            command: .gif,
+            command: .sticker,
             query: "private phrase",
             bundleIdentifier: "com.apple.TextEdit",
-            networkOptions: network(giphy: true)
+            networkOptions: network(noto: true)
         )
 
         XCTAssertEqual(
             state,
-            .cancelled(MediaCommandRequest(id: 1, command: .gif))
+            .cancelled(MediaCommandRequest(id: 1, command: .sticker))
         )
         let callCount = await searcher.numberOfCalls()
         XCTAssertEqual(callCount, 0)
@@ -166,18 +122,18 @@ final class MediaCommandCoordinatorTests: XCTestCase {
             behaviors: [
                 .delayedResults(
                     .milliseconds(500),
-                    [remoteItem(provider: .giphy, id: "stale")]
+                    [remoteItem(id: "stale")]
                 ),
-                .results([remoteItem(provider: .giphy, id: "fresh")])
+                .results([remoteItem(id: "fresh")])
             ]
         )
         let coordinator = try makeCoordinator(searcher: searcher)
         let bundleIdentifier = messages
-        let options = network(giphy: true)
+        let options = network(noto: true)
 
         let staleTask = Task {
             await coordinator.search(
-                command: .gif,
+                command: .sticker,
                 query: "first",
                 bundleIdentifier: bundleIdentifier,
                 networkOptions: options
@@ -189,11 +145,11 @@ final class MediaCommandCoordinatorTests: XCTestCase {
         let loadingState = await coordinator.currentState()
         XCTAssertEqual(
             loadingState,
-            .loading(MediaCommandRequest(id: 1, command: .gif))
+            .loading(MediaCommandRequest(id: 1, command: .sticker))
         )
 
         let fresh = await coordinator.search(
-            command: .gif,
+            command: .sticker,
             query: "second",
             bundleIdentifier: bundleIdentifier,
             networkOptions: options
@@ -202,7 +158,7 @@ final class MediaCommandCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(
             stale,
-            .cancelled(MediaCommandRequest(id: 1, command: .gif))
+            .cancelled(MediaCommandRequest(id: 1, command: .sticker))
         )
         guard case let .results(freshResults) = fresh else {
             return XCTFail("Expected fresh results, got \(fresh)")
@@ -218,16 +174,16 @@ final class MediaCommandCoordinatorTests: XCTestCase {
             behaviors: [
                 .delayedResults(
                     .seconds(1),
-                    [remoteItem(provider: .giphy, id: "late")]
+                    [remoteItem(id: "late")]
                 )
             ]
         )
         let coordinator = try makeCoordinator(searcher: searcher)
         let bundleIdentifier = messages
-        let options = network(giphy: true)
+        let options = network(noto: true)
         let searchTask = Task {
             await coordinator.search(
-                command: .gif,
+                command: .sticker,
                 query: "frog",
                 bundleIdentifier: bundleIdentifier,
                 networkOptions: options
@@ -242,7 +198,7 @@ final class MediaCommandCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(
             cancelled,
-            .cancelled(MediaCommandRequest(id: 1, command: .gif))
+            .cancelled(MediaCommandRequest(id: 1, command: .sticker))
         )
         XCTAssertEqual(completed, cancelled)
         let currentState = await coordinator.currentState()
@@ -266,7 +222,7 @@ final class MediaCommandCoordinatorTests: XCTestCase {
             downloader: downloader
         )
         let result = MediaCommandResult(
-            media: remoteItem(provider: .giphy, id: "original"),
+            media: remoteItem(id: "original"),
             origin: .remote
         )
 
@@ -298,48 +254,34 @@ final class MediaCommandCoordinatorTests: XCTestCase {
                 )
             ),
             stickerSearcher: searcher,
-            gifSearcher: searcher,
             assetResolver: MediaCommandAssetResolver(
                 remoteDownloader: downloader
             )
         )
     }
 
-    private func network(
-        noto: Bool = false,
-        giphy: Bool = false
-    ) -> MediaCommandNetworkOptions {
+    private func network(noto: Bool = false) -> MediaCommandNetworkOptions {
         MediaCommandNetworkOptions(
-            allowsNotoNetwork: noto,
-            allowsGIPHYNetwork: giphy
+            allowsNotoNetwork: noto
         )
     }
 
-    private func remoteItem(
-        provider: RemoteMediaProvider,
-        id: String
-    ) -> RemoteMediaItem {
-        let preview = URL(string: "https://media.example/\(id)-preview.gif")!
-        let original = URL(string: "https://media.example/\(id)-original.gif")!
+    private func remoteItem(id: String) -> RemoteMediaItem {
+        let preview = URL(string: "https://fonts.gstatic.com/\(id)-preview.gif")!
+        let original = URL(string: "https://fonts.gstatic.com/\(id)-original.gif")!
         return RemoteMediaItem(
             id: id,
-            provider: provider,
+            provider: .notoAnimatedEmoji,
             title: id,
             previewURL: preview,
             originalURL: original,
             dimensions: RemoteMediaDimensions(width: 512, height: 512),
-            attribution: provider == .giphy
-                ? "Powered by GIPHY"
-                : "Noto Animated Emoji by Google",
-            analytics: nil
+            attribution: "Noto Animated Emoji by Google"
         )
     }
 }
 
-private actor MediaSearchStub:
-    MediaCommandStickerSearching,
-    MediaCommandGIFSearching
-{
+private actor MediaSearchStub: MediaCommandStickerSearching {
     enum Behavior: Sendable {
         case results([RemoteMediaItem])
         case delayedResults(Duration, [RemoteMediaItem])

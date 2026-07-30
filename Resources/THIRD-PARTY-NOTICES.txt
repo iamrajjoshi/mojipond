@@ -85,16 +85,3 @@ The license permits sharing and adaptation subject to its attribution
 requirements and other terms. The canonical legal code governs. The exact
 source codepoint, byte count, and SHA-256 digest for every bundled asset are
 recorded in noto-offline-manifest.json.
-
-
-GIPHY attribution mark
-----------------------
-
-PoweredByGIPHY.png is the unmodified Powered by GIPHY mark from GIPHY's
-official attribution archive:
-https://media.giphy.com/giphy-attribution-marks.zip
-
-It is displayed only where MojiPond presents GIPHY API results, under GIPHY's
-API Terms and branding requirements. GIPHY and the GIPHY logo are trademarks
-of GIPHY, Inc. Their inclusion does not imply sponsorship or endorsement of
-MojiPond.

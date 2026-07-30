@@ -10,12 +10,12 @@ final class AppStateTests: XCTestCase {
         state.setEnabled(false)
         state.updatePreferences {
             $0.shortcode.trigger = .pipe
-            $0.network.allowsGitHubImports = true
+            $0.network.allowsStickerSearch = true
         }
 
         XCTAssertFalse(state.isEnabled)
         XCTAssertEqual(state.preferences.shortcode.trigger, .pipe)
-        XCTAssertTrue(state.preferences.network.allowsGitHubImports)
+        XCTAssertTrue(state.preferences.network.allowsStickerSearch)
         XCTAssertEqual(store.saved.last, state.preferences)
     }
 

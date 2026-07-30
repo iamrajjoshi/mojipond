@@ -128,8 +128,7 @@ actor NotoStickerClient {
             previewURL: gifURL,
             originalURL: gifURL,
             dimensions: RemoteMediaDimensions(width: 512, height: 512),
-            attribution: "Noto Animated Emoji by Google",
-            analytics: nil
+            attribution: "Noto Animated Emoji by Google"
         )
     }
 }

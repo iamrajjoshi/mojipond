@@ -11,7 +11,6 @@ enum RuntimeMediaPanelState: Equatable, Sendable {
     case offline
     case empty
     case cancelled
-    case networkDisabled
     case rateLimited
     case failed(MediaCommandFailure)
     case resolving
@@ -118,11 +117,6 @@ enum RuntimeMediaAttributionPolicy {
         }), !result.contains(.notoAnimatedEmoji) {
             result.append(.notoAnimatedEmoji)
         }
-        if items.contains(where: {
-            $0.media.provider == .giphy
-        }), !result.contains(.giphy) {
-            result.append(.giphy)
-        }
         return result
     }
 }
@@ -132,23 +126,17 @@ struct RuntimeMediaPanelItem: Identifiable, Equatable, Sendable {
     let title: String
     let previewURL: URL
     let provider: RemoteMediaProvider
-    let creatorAttribution: String?
-    let sourceAttribution: String?
 
     init(
         id: String,
         title: String,
         previewURL: URL,
-        provider: RemoteMediaProvider,
-        creatorAttribution: String? = nil,
-        sourceAttribution: String? = nil
+        provider: RemoteMediaProvider
     ) {
         self.id = id
         self.title = title
         self.previewURL = previewURL
         self.provider = provider
-        self.creatorAttribution = creatorAttribution
-        self.sourceAttribution = sourceAttribution
     }
 }
 
@@ -256,11 +244,7 @@ struct RuntimeMediaPanelView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Image(
-                systemName: snapshot.command == .gif
-                    ? "photo.stack"
-                    : "sparkles.rectangle.stack"
-            )
+            Image(systemName: "sparkles.rectangle.stack")
             .foregroundStyle(.tint)
             Text(snapshot.command?.invocation ?? "Media")
                 .font(.headline.monospaced())
@@ -331,7 +315,6 @@ struct RuntimeMediaPanelView: View {
     ) -> some View {
         RuntimeMediaCell(
             item: item,
-            attributionDetail: attributionDetail(for: item),
             isSelected: index == snapshot.selectedIndex
         )
     }
@@ -366,11 +349,6 @@ struct RuntimeMediaPanelView: View {
             Label("No matching media.", systemImage: "tray")
         case .cancelled:
             Label("Search cancelled.", systemImage: "xmark.circle")
-        case .networkDisabled:
-            Label(
-                "Network GIF search is off. Enable it in Settings.",
-                systemImage: "network.slash"
-            )
         case .rateLimited:
             Label(
                 "The provider is busy. Try again shortly.",
@@ -390,27 +368,9 @@ struct RuntimeMediaPanelView: View {
     private var footer: some View {
         HStack(spacing: 8) {
             ForEach(snapshot.attributions, id: \.text) { attribution in
-                if attribution == .giphy {
-                    Image("PoweredByGIPHY")
-                        .resizable()
-                        .interpolation(.high)
-                        .scaledToFit()
-                        .frame(width: 100, height: 13)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 4)
-                        .background(
-                            Color.black,
-                            in: RoundedRectangle(
-                                cornerRadius: 5,
-                                style: .continuous
-                            )
-                        )
-                        .accessibilityLabel("Powered by GIPHY")
-                } else {
-                    Text(attribution.text)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
+                Text(attribution.text)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
             Spacer()
             if !snapshot.items.isEmpty {
@@ -422,22 +382,10 @@ struct RuntimeMediaPanelView: View {
         .frame(minHeight: 22)
     }
 
-    private func attributionDetail(
-        for item: RuntimeMediaPanelItem
-    ) -> String? {
-        let values = [
-            item.creatorAttribution.map { "by \($0)" },
-            item.sourceAttribution.map { "via \($0)" }
-        ].compactMap { $0 }
-        return values.isEmpty ? nil : values.joined(separator: " · ")
-    }
-
     private func failureMessage(_ failure: MediaCommandFailure) -> String {
         switch failure {
         case .invalidQuery:
             "Enter a shorter search term."
-        case .missingGIPHYAPIKey:
-            "Add a GIPHY API key in Settings."
         case .providerUnavailable:
             "The media provider is unavailable."
         case .invalidProviderResponse:
@@ -450,7 +398,6 @@ struct RuntimeMediaPanelView: View {
 
 private struct RuntimeMediaCell: View {
     let item: RuntimeMediaPanelItem
-    let attributionDetail: String?
     let isSelected: Bool
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -481,12 +428,6 @@ private struct RuntimeMediaCell: View {
             Text(item.title)
                 .font(.caption2)
                 .lineLimit(1)
-            if let attributionDetail {
-                Text(attributionDetail)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
         }
         .padding(5)
         .foregroundStyle(
@@ -543,7 +484,6 @@ private struct RuntimeMediaCell: View {
     private var accessibilityLabel: String {
         [
             item.title,
-            attributionDetail,
             previewState.accessibilityDescription
         ]
         .compactMap { $0 }

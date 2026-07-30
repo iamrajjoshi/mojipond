@@ -256,8 +256,7 @@ struct NotoOfflineCatalog: Sendable {
             previewURL: entry.fileURL,
             originalURL: entry.fileURL,
             dimensions: RemoteMediaDimensions(width: 512, height: 512),
-            attribution: "Noto Animated Emoji by Google",
-            analytics: nil
+            attribution: "Noto Animated Emoji by Google"
         )
         return MediaCommandResult(
             media: media,

@@ -23,7 +23,8 @@ Confirm third-party provenance and licenses. Confirm that
 `Resources/Branding/MojiPond-AppIcon-Source.png` is the reviewed first-party
 source and that every file in `Resources/Assets.xcassets/AppIcon.appiconset/`
 was regenerated from it. Do not bundle `knobiknows/all-the-bufo`; its repository
-is an import target. The public repository audit on 2026-07-28 recorded 1,715
+is a retained importer-engine compatibility target, not a source exposed by the
+current public UI. The public repository audit on 2026-07-28 recorded 1,715
 tree entries (1,403 PNG, 295 GIF, and 10 JPG), found only `README` among
 license-like paths, and detected no `LICENSE`, repository license metadata, or
 other redistribution grant. Do not redistribute that artwork without suitable
@@ -508,15 +509,14 @@ manual replacement. Every other safety failure remains a hard failure.
 - [ ] DMG or ZIP tested after download and extraction on a clean environment.
 - [ ] Permissions, secure-field suspension, exclusions, Unicode, PNG, GIF, and
       clipboard behavior manually verified without sending a Message.
+- [ ] ZIP picker, ZIP drag and drop, preview, install, and ZIP replacement
+      manually verified; no direct file, folder, Slack-manifest, or GitHub
+      import entry point is exposed.
 - [ ] Light, dark, reduced-motion, keyboard, and VoiceOver UI audits complete.
 - [ ] Compatibility ledger updated with exact evidence.
 - [ ] Release notes and third-party attributions reviewed.
 - [ ] AppIcon renditions reviewed against the first-party source artwork at
       `Resources/Branding/MojiPond-AppIcon-Source.png`.
-- [ ] If GIPHY is enabled, `Powered by GIPHY` remains conspicuous; optional
-      analytics remain off; media and URLs are not cached, proxied, or
-      rewritten; and current provider terms have been reviewed with the live
-      production key.
 - [ ] Signed update metadata published only if the feed-generation and trusted
       public-key and Team-ID configuration are fully verified.
 - [ ] Update ZIP contains exactly one notarized `MojiPond.app`, and its final

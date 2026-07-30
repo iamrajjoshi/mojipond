@@ -294,7 +294,7 @@ struct OnboardingView: View {
         FeatureCard(
             icon: "square.grid.2x2",
             title: "Bring your packs",
-            detail: "Folders, ZIPs, Slack, and GitHub."
+            detail: "Import one reviewed ZIP at a time."
         )
         FeatureCard(
             icon: "lock.shield",
