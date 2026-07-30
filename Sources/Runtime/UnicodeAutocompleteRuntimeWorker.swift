@@ -1513,7 +1513,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             hideSurface()
             return
         }
-        suspendSurfaceInterceptionRetainingPresentation()
+        retainSurfacePresentationDuringRefresh()
         scheduleCapture(
             transactionID: transactionID,
             expectedToken: token.rendered,
@@ -2496,12 +2496,11 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         }
     }
 
-    private func suspendSurfaceInterceptionRetainingPresentation() {
-        interceptionGate.setMode(
-            .hidden,
-            acceptsTab: configuration.preferences.shortcode.acceptsTab,
-            acceptsReturn: configuration.preferences.shortcode.acceptsReturn
-        )
+    private func retainSurfacePresentationDuringRefresh() {
+        // Preserve an already-armed suggestions gate so immediate acceptance
+        // remains responsive. Initial presentation is still fail-closed
+        // because the gate begins hidden and is armed only after visibility is
+        // confirmed.
         // Invalidate any in-flight presentation completion without ordering
         // the current panel out. The next verified capture updates it in place.
         uiRevision &+= 1
