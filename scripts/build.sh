@@ -7,7 +7,7 @@ REPOSITORY_ROOT=${SCRIPT_DIRECTORY:h}
 BUILD_CONFIGURATION=${1:-Debug}
 BUILD_ACTION=${2:-build}
 DERIVED_DATA_PATH=${MOJIPOND_DERIVED_DATA_PATH:-"${REPOSITORY_ROOT}/DerivedData"}
-SIGNING_IDENTITY=${MOJIPOND_SIGNING_IDENTITY:-"-"}
+SIGNING_IDENTITY=${MOJIPOND_SIGNING_IDENTITY:-}
 DEVELOPMENT_TEAM=${MOJIPOND_DEVELOPMENT_TEAM:-}
 BUILD_ARCHITECTURES=${MOJIPOND_ARCHS:-}
 
@@ -38,18 +38,46 @@ if [[ -z "${BUILD_ARCHITECTURES}" && "${BUILD_CONFIGURATION}" == "Release" ]]; t
   BUILD_ARCHITECTURES="arm64 x86_64"
 fi
 
-if [[ "${MOJIPOND_REQUIRE_DEVELOPER_ID:-0}" == "1" \
-      && "${SIGNING_IDENTITY}" != "Developer ID Application:"* ]]; then
-  echo "MOJIPOND_REQUIRE_DEVELOPER_ID=1 requires a Developer ID Application identity." >&2
-  exit 78
-fi
-
 for required_command in xcodegen xcodebuild codesign; do
   if ! command -v "${required_command}" >/dev/null 2>&1; then
     echo "Required command not found: ${required_command}" >&2
     exit 69
   fi
 done
+
+if [[ -z "${SIGNING_IDENTITY}" ]]; then
+  if [[ "${BUILD_CONFIGURATION}" == "Debug" ]]; then
+    APPLE_DEVELOPMENT_IDENTITIES=(${(f)"$(
+      /usr/bin/security find-identity -v -p codesigning 2>/dev/null \
+        | /usr/bin/sed -nE \
+          's/^[[:space:]]*[0-9]+\)[[:space:]]+([[:xdigit:]]{40})[[:space:]]+"Apple Development:.*$/\1/p'
+    )"})
+
+    case "${#APPLE_DEVELOPMENT_IDENTITIES[@]}" in
+      0)
+        SIGNING_IDENTITY="-"
+        echo "No Apple Development identity found; using ad-hoc Debug signing." >&2
+        ;;
+      1)
+        SIGNING_IDENTITY=${APPLE_DEVELOPMENT_IDENTITIES[1]}
+        echo "Using the available Apple Development identity for Debug signing." >&2
+        ;;
+      *)
+        echo "Multiple Apple Development identities found." >&2
+        echo "Set MOJIPOND_SIGNING_IDENTITY to the intended identity or fingerprint." >&2
+        exit 78
+        ;;
+    esac
+  else
+    SIGNING_IDENTITY="-"
+  fi
+fi
+
+if [[ "${MOJIPOND_REQUIRE_DEVELOPER_ID:-0}" == "1" \
+      && "${SIGNING_IDENTITY}" != "Developer ID Application:"* ]]; then
+  echo "MOJIPOND_REQUIRE_DEVELOPER_ID=1 requires a Developer ID Application identity." >&2
+  exit 78
+fi
 
 cd "${REPOSITORY_ROOT}"
 xcodegen generate
