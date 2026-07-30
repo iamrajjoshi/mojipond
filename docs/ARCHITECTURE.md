@@ -65,11 +65,11 @@ token range, and token content.
 | `Sources/Runtime` | Event-to-parser bridge, safety policy, browser host lookup, Unicode and media popup state, managed-media revalidation, and autocomplete lifecycle |
 | `Sources/SystemIntegration` | macOS permission preflights, event tap, Accessibility text adapter, caret geometry, pasteboard transactions, and insertion |
 | `Sources/Library` | Versioned library model, asset validation, collision resolution, persistence, ZIP handling, and pack source metadata |
-| `Sources/Importing` | Local, Slack, ZIP, and public-GitHub import orchestration with bounded network and temporary storage |
-| `Sources/Media` | GIPHY and Noto clients, direct HTTPS downloads, Keychain key storage, and bounded disk-cache primitives |
-| `Sources/MediaCommands` | Messages-only `/sticker` and `/gif` parser, state machine, result grid, offline catalog, and asset resolution |
+| `Sources/Importing` | ZIP orchestration plus retained local, Slack, and public-GitHub import engines with bounded network and temporary storage |
+| `Sources/Media` | Noto client, direct HTTPS downloads, and bounded disk-cache primitives |
+| `Sources/MediaCommands` | Messages-only `/sticker` parser, state machine, result grid, offline catalog, and asset resolution |
 | `Sources/Updates` | Signed-feed verification, explicit bounded asset download, hostile ZIP inspection, Developer ID and Gatekeeper validation, private staging, and a locked one-executable installer with atomic replacement, readiness acknowledgement, and rollback |
-| `Sources/UI` | SwiftUI onboarding, settings, full Library and import workflows, editors, previews, and shared visual language |
+| `Sources/UI` | SwiftUI onboarding, settings, Library, ZIP-only import workflow, editors, previews, and shared visual language |
 
 ## Brand assets
 
@@ -150,11 +150,17 @@ Default locations:
 └── Media/                   bounded, reproducible media cache
 ```
 
-Preferences and permission-request history use `UserDefaults`. A GIPHY key,
-when configured, uses the login Keychain service
-`com.rajjoshi.MojiPond` and account `giphy-api-key`.
+Preferences and permission-request history use `UserDefaults`. One idempotent
+upgrade migration deletes the unused media-provider Keychain credential left by
+older development builds without reading its value.
 
 ## Import trust boundary
+
+The shipping Library UI accepts exactly one local ZIP from the open panel or
+drag and drop. Direct file, folder, Slack-manifest, and GitHub entry points are
+not exposed. A ZIP may still contain a portable pack, a simple image folder, or
+a Slack-style manifest with local assets, so those parsers remain inside the
+archive-processing boundary.
 
 All images pass through ImageIO validation before storage. Default limits
 include 25 MiB per image, 4,096 × 4,096 dimensions, 256 frames, and bounded
@@ -178,12 +184,13 @@ through a bounded `O_NOFOLLOW` file descriptor, then locked read-only.
 MojiPond validates central and local ZIP headers before invoking the system
 `ditto` extractor with closed stdin, and accepts the result only when a second
 walk exactly matches the validated regular-file tree. The snapshot and
-extraction are deleted after preparation. GitHub imports accept public
-`https://github.com` URLs, resolve the requested ref to a commit through the
-GitHub API, and download from GitHub’s codeload host. Remote Slack assets and
-all redirects remain HTTPS-only. They also reject credentials, custom ports,
-localhost and `.local` names, and non-public IPv4 or IPv6 literals and DNS
-answers on the initial request and every redirect.
+extraction are deleted after preparation. The retained, unexposed GitHub engine
+accepts public `https://github.com` URLs, resolves the requested ref to a commit
+through the GitHub API, and downloads from GitHub’s codeload host. The retained
+remote-Slack path and all redirects remain HTTPS-only. They also reject
+credentials, custom ports, localhost and `.local` names, and non-public IPv4 or
+IPv6 literals and DNS answers on the initial request and every redirect. The
+current public UI invokes neither network import path.
 
 Import preparation produces a preview with rejections, shortcode collisions,
 and duplicate content hashes. Installation occurs only after collision
@@ -191,16 +198,15 @@ decisions are complete. The Library UI exposes individual and apply-all
 collision decisions, then installs or discards the prepared import. It also
 supports attributed empty-pack creation, custom Unicode creation and copying,
 item edits and asset replacement, pack enablement and ordering, portable
-export, and transactional local re-import. Custom Unicode entries join the
-same indexed Library and runtime search surfaces as the built-in catalog.
-Remote preparation and GitHub refresh require an explicit network confirmation
-and can be cancelled.
+export, and transactional replacement from another ZIP. Custom Unicode entries
+join the same indexed Library and runtime search surfaces as the built-in
+catalog.
 
 ## Messages media runtime
 
-The global worker contains two separate parsers: Slack-style shortcodes and
-Messages-only `/sticker` and `/gif` commands. A media query is debounced, bound
-to the same focused target and expected token, and displayed in a
+The global worker contains two separate parsers: Slack-style shortcodes and the
+Messages-only `/sticker` command. A media query is debounced, bound to the same
+focused target and expected token, and displayed in a
 non-activating keyboard-navigable grid beside the caret. Arrow keys and Tab
 move selection, Return resolves and inserts the original, and Escape cancels.
 
@@ -231,22 +237,15 @@ Posting requirements.
 
 ## Network boundaries
 
-Every online feature has its own preference and defaults to off:
+Every user-facing online feature has its own preference and defaults to off:
 
-- public GitHub pack imports;
 - online Noto sticker search;
-- GIPHY search;
 - signed update checks.
 
 The offline Noto subset and built-in Unicode catalog require no network.
-Selected online Noto originals may use the bounded on-demand disk cache. The
-GIPHY client attaches the provider-required customer identifier and retains
-provider analytics URLs in result metadata, but the runtime intentionally does
-not invoke optional analytics operations or log requests and queries. GIPHY
-search, preview, and media sessions are ephemeral with URL caching disabled.
-The runtime downloads the selected GIPHY original directly for insertion and
-does not put it in the disk cache, proxy it, or rewrite the provider’s media
-URL. `Powered by GIPHY` remains visible on GIPHY result surfaces.
+Selected online Noto originals may use the bounded on-demand disk cache. ZIP
+import preparation is local and does not grant either retained network-import
+engine permission to run.
 
 Update checking requires both an HTTPS feed and a bundled trusted public key.
 Manual checks are available from the status menu and About settings;

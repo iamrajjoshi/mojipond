@@ -62,4 +62,37 @@ final class NotoStickerClientTests: XCTestCase {
             "https://fonts.gstatic.com/s/e/notoemoji/latest/1f44b/512.gif"
         )
     }
+
+    func testProviderURLPolicyAllowsOnlyStandardHTTPSNotoHost() {
+        XCTAssertTrue(
+            RemoteMediaURLPolicy.allows(
+                URL(string: "https://fonts.gstatic.com/frog.gif")!,
+                for: .notoAnimatedEmoji
+            )
+        )
+        XCTAssertFalse(
+            RemoteMediaURLPolicy.allows(
+                URL(string: "https://example.com/frog.gif")!,
+                for: .notoAnimatedEmoji
+            )
+        )
+        XCTAssertFalse(
+            RemoteMediaURLPolicy.allows(
+                URL(string: "https://127.0.0.1/frog.gif")!,
+                for: .notoAnimatedEmoji
+            )
+        )
+        XCTAssertFalse(
+            RemoteMediaURLPolicy.allows(
+                URL(string: "https://fonts.gstatic.com:444/frog.gif")!,
+                for: .notoAnimatedEmoji
+            )
+        )
+        XCTAssertFalse(
+            RemoteMediaURLPolicy.allows(
+                URL(string: "http://fonts.gstatic.com/frog.gif")!,
+                for: .notoAnimatedEmoji
+            )
+        )
+    }
 }

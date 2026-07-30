@@ -36,17 +36,16 @@ final class MediaCommandGridTests: XCTestCase {
 
     private func items(count: Int) -> [MediaCommandResult] {
         (0..<count).map { index in
-            let url = URL(string: "https://example.com/\(index).gif")!
+            let url = URL(string: "https://fonts.gstatic.com/\(index).gif")!
             return MediaCommandResult(
                 media: RemoteMediaItem(
                     id: "item-\(index)",
-                    provider: .giphy,
+                    provider: .notoAnimatedEmoji,
                     title: "Item \(index)",
                     previewURL: url,
                     originalURL: url,
                     dimensions: nil,
-                    attribution: "Powered by GIPHY",
-                    analytics: nil
+                    attribution: "Noto Animated Emoji by Google"
                 ),
                 origin: .remote
             )

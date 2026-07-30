@@ -14,9 +14,7 @@ final class MojiPondPreferencesTests: XCTestCase {
         XCTAssertTrue(preferences.shortcode.replacesOnExactClosingTrigger)
         XCTAssertTrue(preferences.shortcode.opensBrowserOnDoubleTrigger)
         XCTAssertNil(preferences.defaultSkinTone)
-        XCTAssertFalse(preferences.network.allowsGitHubImports)
         XCTAssertFalse(preferences.network.allowsStickerSearch)
-        XCTAssertFalse(preferences.network.allowsGIFSearch)
         XCTAssertFalse(preferences.network.allowsUpdateChecks)
     }
 

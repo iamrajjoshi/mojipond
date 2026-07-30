@@ -68,21 +68,25 @@ MojiPond stores:
 | Custom pack metadata and copied assets | `~/Library/Application Support/MojiPond/Library/` | Keep imported packs available independently of their source |
 | Import staging | `~/Library/Application Support/MojiPond/Import Staging/` | App-owned preparation area |
 | Recency and use counts | `~/Library/Application Support/MojiPond/usage.json` | Local ranking and recents |
-| Online Noto media cache | `~/Library/Caches/MojiPond/Media/` | Bounded on-demand storage for selected Noto originals; the GIPHY runtime path cannot use it |
+| Online Noto media cache | `~/Library/Caches/MojiPond/Media/` | Bounded on-demand storage for selected Noto originals |
 | Verified update staging | Private `0700` directory below the macOS temporary directory | Verified ZIP stored with `0400` permissions and an extracted candidate app awaiting explicit installation or discard |
 | Preferences and permission-request history | macOS `UserDefaults` for `com.rajjoshi.MojiPond` | Settings and permission UI state |
-| GIPHY API key, when configured | Login Keychain, service `com.rajjoshi.MojiPond`, account `giphy-api-key` | Authenticate GIPHY requests |
 
 Usage records contain emoji identity, use count, and recency—not the surrounding
 message. There is no account or background cloud synchronization.
 
-The Settings Keychain editor can add, replace, or remove the GIPHY key. It
-reports only whether a key exists and never reads the saved value back into the
-visible field.
+Current builds do not create or use media-provider API keys. On first launch
+after an older GIPHY-capable development build, MojiPond deletes only the
+legacy generic-password item for service `com.rajjoshi.MojiPond` and account
+`giphy-api-key`. The value is never read or transmitted. A successful deletion
+or an already-missing item records a local completion marker; a transient
+Keychain failure leaves the marker unset so cleanup retries on the next launch.
 
 Deleting the application does not automatically delete its Application Support
-data, cache, preferences, or Keychain entry. Remove those separately if you
-want to erase all local state.
+data, cache, or preferences. When upgrading from an older development build,
+launch the current app once to run the legacy Keychain cleanup before deleting
+it. Remove the remaining locations separately if you want to erase all local
+state.
 
 ## Clipboard behavior
 
@@ -109,25 +113,14 @@ Every online feature has an independent preference and defaults to off.
 
 | Feature | Data sent | Destination |
 | --- | --- | --- |
-| Public GitHub import | Repository owner/name, ref, and requested subdirectory | `api.github.com` and `codeload.github.com` |
 | Online sticker search | No query; MojiPond downloads a fixed Noto Animated Emoji manifest, filters it locally, and requests only the selected asset | Google’s Noto Animated Emoji manifest and asset hosts |
-| GIPHY search | Exact GIF query, API key, preview-rendition requests for displayed results, and the selected-original request | `api.giphy.com` and GIPHY media hosts |
 | Signed update check | Standard HTTPS request metadata | The separately configured update-feed host |
 | Verified update download | Standard HTTPS request metadata, only after the user selects **Download & Verify** | The download host authenticated by the signed feed metadata, including HTTPS redirect destinations |
 
-Local folder, file, ZIP, portable-manifest, bundled Unicode, and offline Noto
-lookups do not require a network request. A Slack manifest may refer to remote
-HTTPS assets; those are fetched only when remote assets are explicitly allowed
-for that import. Each request and redirect rejects credentials, custom ports,
-localhost and `.local` names, and non-public IPv4 or IPv6 literals and DNS
-answers.
-
-MojiPond displays GIPHY creator and source attribution when the API supplies
-it, alongside the official **Powered by GIPHY** mark. In keeping with
-MojiPond's no-telemetry rule, GIPHY action analytics URLs are not invoked.
-GIPHY media and media URLs are not persisted or placed in MojiPond's disk
-cache. Provider approval and current-term review remain release gates before
-shipping a GIPHY-enabled build.
+The current import UI accepts one local ZIP at a time and makes no network
+request. The archive may contain a portable manifest, a simple image folder, or
+a Slack-style manifest with local assets. Remote asset URLs are not fetched,
+and the retained GitHub import client has no public UI entry point.
 
 Manual update checks are user-initiated. Automatic checking runs only after
 the user enables it. Both paths are hard-disabled without a bundled HTTPS feed
@@ -157,13 +150,10 @@ without following symlinks.
 
 Imported image bytes and filenames can be stored locally as managed pack
 assets. Selected online Noto originals may use the bounded on-demand cache.
-GIPHY results are an explicit exception: search, preview, and media sessions
-are ephemeral with URL caching disabled, and a selected original is downloaded
-directly for the insertion transaction without being stored in
-`MediaDiskCache`, proxied, or rewritten. HTTPS responses, redirects, sizes,
-file types, paths, and archive expansion are validated before installation.
-Selected ZIPs are prepared only from a private, read-only staging snapshot
-that is removed afterward.
+HTTPS responses, redirects, sizes, and file types are validated before an
+online Noto asset or update is accepted. Import paths and archive expansion are
+validated before installation. Selected ZIPs are prepared only from a private,
+read-only staging snapshot that is removed afterward.
 
 ## Telemetry and logging
 
@@ -171,14 +161,6 @@ MojiPond has no first-party analytics or telemetry endpoint. Runtime
 diagnostics are coarse states such as permission unavailable, unsupported
 target, excluded context, or event-tap timeout. They do not include the typed
 token or document text.
-
-The GIPHY client does not expose or invoke action-register operations and does
-not send a stable customer identifier. MojiPond sends no analytics events. It
-also does not log media requests or query text. The UI retains conspicuous
-`Powered by GIPHY` attribution. A distributed build must keep GIPHY media and
-URLs uncached, unproxied, and unmodified unless written provider approval says
-otherwise. Live-key use and a final review against then-current provider terms
-remain release requirements.
 
 ## Safety defaults
 

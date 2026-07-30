@@ -1113,12 +1113,7 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
 
     func testStickerCommandShowsOfflineGridAndInsertsSelectedOriginal() async throws {
         let original = validGIFData
-        let results = commandResults(
-            command: .sticker,
-            provider: .notoAnimatedEmoji,
-            ids: ["frog", "fox"],
-            offline: true
-        )
+        let results = commandResults(ids: ["frog", "fox"])
         let coordinator = RuntimeMediaCoordinatorStub(
             response: .offline(results),
             download: MediaCommandDownload(
@@ -1162,10 +1157,12 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
         XCTAssertEqual(harness.gate.mode, .hidden)
     }
 
-    func testGIFCommandIsMessagesOnlyAndPassesExplicitNetworkOptions() async throws {
+    func testGIFCommandRemainsOrdinaryTextAndDoesNotInterceptReturn()
+        async throws
+    {
         let coordinator = RuntimeMediaCoordinatorStub(
             response: .empty(
-                MediaCommandRequest(id: 1, command: .gif)
+                MediaCommandRequest(id: 1, command: .sticker)
             ),
             download: MediaCommandDownload(
                 data: Data("GIF89a-unused".utf8),
@@ -1173,33 +1170,55 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
                 suggestedFilename: "unused.gif"
             )
         )
-        let outsideMessages = try makeHarness(
+        let harness = try makeHarness(
             targetText: "/gif frog",
-            bundleIdentifier: "com.apple.TextEdit",
+            bundleIdentifier: messages,
             mediaCoordinator: coordinator
         )
-        outsideMessages.worker.setCaptureEnabled(true)
-        type("/gif frog", into: outsideMessages.worker)
+        harness.worker.setCaptureEnabled(true)
+        type("/gif frog", into: harness.worker)
         try? await Task.sleep(for: .milliseconds(80))
-        let outsideSearchCount = await coordinator.searchCount()
-        XCTAssertEqual(outsideSearchCount, 0)
-        XCTAssertNil(outsideMessages.presenter.latestMedia)
 
-        let options = MediaCommandNetworkOptions(
-            allowsNotoNetwork: false,
-            allowsGIPHYNetwork: true
+        let searchCount = await coordinator.searchCount()
+        XCTAssertEqual(searchCount, 0)
+        XCTAssertNil(harness.presenter.latestMedia)
+        XCTAssertEqual(harness.system.text, "/gif frog")
+        XCTAssertEqual(harness.gate.mode, .hidden)
+        XCTAssertEqual(
+            harness.gate.decision(
+                for: keySnapshot(
+                    keyCode: RuntimeKeyboardKeyCode.returnKey
+                )
+            ),
+            .passThrough
         )
-        let inMessages = try makeHarness(
-            targetText: "/gif frog",
+    }
+
+    func testStickerCommandPassesExplicitNetworkOptions() async throws {
+        let coordinator = RuntimeMediaCoordinatorStub(
+            response: .empty(
+                MediaCommandRequest(id: 1, command: .sticker)
+            ),
+            download: MediaCommandDownload(
+                data: Data("GIF89a-unused".utf8),
+                contentType: "image/gif",
+                suggestedFilename: "unused.gif"
+            )
+        )
+        let options = MediaCommandNetworkOptions(
+            allowsNotoNetwork: true
+        )
+        let harness = try makeHarness(
+            targetText: "/sticker frog",
             bundleIdentifier: messages,
             mediaCoordinator: coordinator,
             networkOptions: options
         )
-        inMessages.worker.setCaptureEnabled(true)
-        type("/gif frog", into: inMessages.worker)
+        harness.worker.setCaptureEnabled(true)
+        type("/sticker frog", into: harness.worker)
 
         let didShowEmpty = await eventually {
-            inMessages.presenter.latestMedia?.state == .empty
+            harness.presenter.latestMedia?.state == .empty
         }
         XCTAssertTrue(didShowEmpty)
         let searchCount = await coordinator.searchCount()
@@ -1257,12 +1276,7 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
         async throws {
         let coordinator = RuntimeMediaCoordinatorStub(
             response: .results(
-                commandResults(
-                    command: .sticker,
-                    provider: .notoAnimatedEmoji,
-                    ids: ["frog"],
-                    offline: true
-                )
+                commandResults(ids: ["frog"])
             ),
             download: MediaCommandDownload(
                 data: validGIFData,
@@ -1300,12 +1314,7 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
     func testStaleMediaSearchIsCancelledAndCannotOverwriteFreshResults() async throws {
         let coordinator = RuntimeMediaCoordinatorStub(
             response: .results(
-                commandResults(
-                    command: .gif,
-                    provider: .giphy,
-                    ids: ["fresh"],
-                    offline: false
-                )
+                commandResults(ids: ["fresh"])
             ),
             download: MediaCommandDownload(
                 data: Data("GIF89a-unused".utf8),
@@ -1315,22 +1324,21 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
             firstSearchDelay: .milliseconds(300)
         )
         let harness = try makeHarness(
-            targetText: "/gif first",
+            targetText: "/sticker first",
             bundleIdentifier: messages,
             mediaCoordinator: coordinator,
             networkOptions: MediaCommandNetworkOptions(
-                allowsNotoNetwork: false,
-                allowsGIPHYNetwork: true
+                allowsNotoNetwork: true
             )
         )
         harness.worker.setCaptureEnabled(true)
-        type("/gif first", into: harness.worker)
+        type("/sticker first", into: harness.worker)
         let didStartFirstSearch = await eventually {
             await coordinator.searchCount() == 1
         }
         XCTAssertTrue(didStartFirstSearch)
 
-        harness.system.text = "/gif firstx"
+        harness.system.text = "/sticker firstx"
         harness.system.selection = NSRange(
             location: harness.system.text.utf16.count,
             length: 0
@@ -1348,12 +1356,7 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
     }
 
     func testEscapeDuringResolveCannotPasteCancelledMedia() async throws {
-        let results = commandResults(
-            command: .gif,
-            provider: .giphy,
-            ids: ["delayed"],
-            offline: false
-        )
+        let results = commandResults(ids: ["delayed"])
         let coordinator = RuntimeMediaCoordinatorStub(
             response: .results(results),
             download: MediaCommandDownload(
@@ -1365,16 +1368,15 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
             ignoresResolveCancellation: true
         )
         let harness = try makeHarness(
-            targetText: "/gif delayed",
+            targetText: "/sticker delayed",
             bundleIdentifier: messages,
             mediaCoordinator: coordinator,
             networkOptions: MediaCommandNetworkOptions(
-                allowsNotoNetwork: false,
-                allowsGIPHYNetwork: true
+                allowsNotoNetwork: true
             )
         )
         harness.worker.setCaptureEnabled(true)
-        type("/gif delayed", into: harness.worker)
+        type("/sticker delayed", into: harness.worker)
         let didShowResults = await eventually {
             harness.presenter.latestMedia?.state == .results
         }
@@ -1393,19 +1395,14 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
 
         try? await Task.sleep(for: .milliseconds(250))
         XCTAssertEqual(harness.poster.pasteCount, 0)
-        XCTAssertEqual(harness.system.text, "/gif delayed")
+        XCTAssertEqual(harness.system.text, "/sticker delayed")
         XCTAssertEqual(harness.gate.mode, .hidden)
     }
 
     func testVisibleMediaGridExpiresBeforeLateActivation() async throws {
         let coordinator = RuntimeMediaCoordinatorStub(
             response: .results(
-                commandResults(
-                    command: .gif,
-                    provider: .giphy,
-                    ids: ["stale"],
-                    offline: false
-                )
+                commandResults(ids: ["stale"])
             ),
             download: MediaCommandDownload(
                 data: validGIFData,
@@ -1414,17 +1411,16 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
             )
         )
         let harness = try makeHarness(
-            targetText: "/gif stale",
+            targetText: "/sticker stale",
             bundleIdentifier: messages,
             mediaCoordinator: coordinator,
             networkOptions: MediaCommandNetworkOptions(
-                allowsNotoNetwork: false,
-                allowsGIPHYNetwork: true
+                allowsNotoNetwork: true
             ),
             mediaInactivityTimeoutMilliseconds: 100
         )
         harness.worker.setCaptureEnabled(true)
-        type("/gif stale", into: harness.worker)
+        type("/sticker stale", into: harness.worker)
         let shown = await eventually {
             harness.presenter.latestMedia?.state == .results
         }
@@ -1443,7 +1439,7 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
     }
 
     func testMediaPanelStateMappingCoversEverySearchState() {
-        let request = MediaCommandRequest(id: 1, command: .gif)
+        let request = MediaCommandRequest(id: 1, command: .sticker)
         let results = MediaCommandResults(
             request: request,
             items: [],
@@ -1471,19 +1467,15 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
             .cancelled
         )
         XCTAssertEqual(
-            MediaCommandSearchState.networkDisabled(request).runtimePanelState,
-            .networkDisabled
-        )
-        XCTAssertEqual(
             MediaCommandSearchState.rateLimited(request).runtimePanelState,
             .rateLimited
         )
         XCTAssertEqual(
             MediaCommandSearchState.failed(
                 request,
-                .missingGIPHYAPIKey
+                .providerUnavailable
             ).runtimePanelState,
-            .failed(.missingGIPHYAPIKey)
+            .failed(.providerUnavailable)
         )
     }
 
@@ -1547,9 +1539,7 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
         )
         var preferences = MojiPondPreferences.defaults
         preferences.network = NetworkPreferences(
-            allowsGitHubImports: false,
             allowsStickerSearch: networkOptions.allowsNotoNetwork,
-            allowsGIFSearch: networkOptions.allowsGIPHYNetwork,
             allowsUpdateChecks: false
         )
         let diagnostics = RuntimeMediaDiagnosticRecorder()
@@ -1712,36 +1702,26 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
         )!
     }
 
-    private func commandResults(
-        command: MediaCommandKind,
-        provider: RemoteMediaProvider,
-        ids: [String],
-        offline: Bool
-    ) -> MediaCommandResults {
+    private func commandResults(ids: [String]) -> MediaCommandResults {
         let items = ids.map { id in
             let url = URL(string: "https://media.example/\(id).gif")!
             return MediaCommandResult(
                 media: RemoteMediaItem(
                     id: id,
-                    provider: provider,
+                    provider: .notoAnimatedEmoji,
                     title: id.capitalized,
                     previewURL: url,
                     originalURL: url,
                     dimensions: nil,
-                    attribution: provider == .giphy
-                        ? "Powered by GIPHY"
-                        : "Noto Animated Emoji by Google",
-                    analytics: nil
+                    attribution: "Noto Animated Emoji by Google"
                 ),
                 origin: .remote
             )
         }
         return MediaCommandResults(
-            request: MediaCommandRequest(id: 1, command: command),
+            request: MediaCommandRequest(id: 1, command: .sticker),
             items: items,
-            attributions: provider == .giphy
-                ? [.giphy]
-                : [.notoAnimatedEmoji]
+            attributions: [.notoAnimatedEmoji]
         )
     }
 

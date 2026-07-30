@@ -3,7 +3,7 @@
 MojiPond is a native macOS menu-bar app for Slack-style emoji autocomplete.
 Type a shortcode such as `:wave:`, choose a result beside the caret, and keep
 typing. The project also contains a local custom-pack library, safe import
-pipelines, and Messages-only sticker and GIF command engines.
+pipelines, and a Messages-only sticker command.
 
 > **Pre-release status:** global Unicode autocomplete, the custom-pack Library,
 > and Messages media commands are connected to the app and exercised by
@@ -24,10 +24,11 @@ pipelines, and Messages-only sticker and GIF command engines.
   excluded browser domains.
 - Local Unicode, PNG, JPEG, GIF, and WebP pack model with aliases and
   metadata.
-- Bounded import engines for files, folders, ZIP archives, portable
-  `mojipond.json` packs, Slack-style `emoji.json`, and public GitHub repositories.
-- Offline Noto Animated Emoji subset plus opt-in online sticker and GIPHY
-  providers for Messages command workflows.
+- A bounded, preview-first ZIP import UI for portable `mojipond.json` packs,
+  simple image folders, and Slack-style `emoji.json` packs contained in an
+  archive.
+- Offline Noto Animated Emoji subset plus opt-in online Noto results for the
+  Messages sticker workflow.
 - Enabled custom Unicode and image entries participate in `:query`, exact
   `:name:`, and `::` browsing beside the built-in catalog.
 - Clipboard-safe media insertion that snapshots all pasteboard items and
@@ -43,16 +44,18 @@ pipelines, and Messages-only sticker and GIF command engines.
 These captures come from the isolated macOS UI-test harness and contain only
 MojiPond windows or panels.
 
-| Onboarding | Library |
+| Permission setup | Library |
 | --- | --- |
-| ![MojiPond onboarding](docs/screenshots/onboarding.png) | ![MojiPond emoji Library](docs/screenshots/library.png) |
-| Import review | Settings |
-| ![MojiPond import preview](docs/screenshots/import-preview.png) | ![MojiPond Settings](docs/screenshots/settings.png) |
-| Caret suggestions | Double-trigger browser |
-| ![MojiPond caret suggestions](docs/screenshots/caret-suggestions.png) | ![MojiPond emoji browser in dark appearance](docs/screenshots/emoji-browser-dark.png) |
+| ![MojiPond permission setup](docs/screenshots/onboarding-permissions-granted.png) | ![MojiPond emoji Library](docs/screenshots/library.png) |
+| ZIP import | Settings |
+| ![MojiPond ZIP import](docs/screenshots/library-import-light.png) | ![MojiPond Settings](docs/screenshots/settings.png) |
+| Import review | Caret suggestions |
+| ![MojiPond import preview](docs/screenshots/import-preview.png) | ![MojiPond caret suggestions](docs/screenshots/caret-suggestions.png) |
+| Double-trigger browser | Native integration fixture |
+| ![MojiPond emoji browser in dark appearance](docs/screenshots/emoji-browser-dark.png) | ![MojiPond integration fixture](docs/screenshots/integration-fixture.png) |
 
-The complete reviewed set also includes permission states, the Library import
-flow in both appearances, and the native integration fixture under
+The complete reviewed set also includes additional permission states and a
+dark-appearance ZIP import under
 [`docs/screenshots`](docs/screenshots).
 
 ## Requirements
@@ -184,9 +187,9 @@ With the default settings:
 - The popup is not shown for a bare `:` until that setting is enabled.
 
 Settings let you pause MojiPond, launch it at login, change the trigger and
-acceptance keys, opt into individual network features, and manage app or
-website exclusions. Password managers, terminals, virtual-machine clients,
-Slack, and Discord are excluded by default.
+acceptance keys, opt into online Noto stickers or signed update checks, and
+manage app or website exclusions. Password managers, terminals,
+virtual-machine clients, Slack, and Discord are excluded by default.
 
 After onboarding, normal and login-item launches stay in the menu bar without
 opening the Library. Open it from the status menu, or launch with
@@ -197,9 +200,9 @@ opening the Library. Open it from the status menu, or launch with
 Open **MojiPond → Emoji Library** to browse, search, and filter built-in and
 custom emoji in a grid or list. From the Library you can:
 
-- Import image files, folders, ZIP archives, portable `mojipond.json` packs,
-  Slack-style `emoji.json`, or a public GitHub repository. Drag and drop is
-  supported.
+- Import one local ZIP archive at a time with the picker or drag and drop. The
+  ZIP may contain a portable `mojipond.json` pack, a Slack-style `emoji.json`
+  pack with local assets, or a simple folder of supported images.
 - Review thumbnails, normalized shortcodes, ignored or rejected entries,
   duplicate hashes, and collisions before anything is installed.
 - Resolve each collision by keeping the existing item, replacing it, renaming
@@ -211,18 +214,14 @@ custom emoji in a grid or list. From the Library you can:
 - Search custom Unicode by shortcode, alias, name, tag, or category, then copy
   the Unicode value directly from its Library detail view.
 
-Network-backed imports require explicit opt-in and can be cancelled while they
-are prepared. Local re-import replaces the prior pack contents transactionally.
-A GitHub-backed pack can be refreshed from its stored ref after another
-explicit network confirmation.
+ZIP preparation is local, cancellable, and reviewed before installation.
+Replacing an installed pack also requires one ZIP and updates its contents
+transactionally.
 
-- Portable pack authors: see [docs/PACK_FORMAT.md](docs/PACK_FORMAT.md).
+- Portable pack authors: see [docs/PACK_FORMAT.md](docs/PACK_FORMAT.md), then
+  wrap the pack folder in a ZIP before importing it.
 - In Messages, type `/sticker <query>` to search the bundled offline Noto
   subset. Online Noto search is a separate opt-in.
-- In Messages, type `/gif <query>` for opt-in GIPHY search. A key must already
-  exist in the login Keychain under service `com.rajjoshi.MojiPond` and account
-  `giphy-api-key`. Add, replace, or remove it under
-  **Settings → General → GIPHY API key**; the saved value is never redisplayed.
 - Use the arrow keys or Tab to move through a media grid, Return to insert the
   selected original, and Escape to close it. Media commands and custom-image
   shortcode insertion are restricted to Messages.
@@ -232,8 +231,6 @@ explicit network confirmation.
   stored unchanged. macOS 14 and glyph-conversion failures retain the existing
   media fallback; failed animated-WebP conversion can use **Copy Media
   Instead**.
-- GIPHY results retain conspicuous attribution. Selected originals are
-  downloaded directly and are not cached, proxied, or rewritten.
 
 ## Signed updates
 
@@ -320,9 +317,9 @@ for a manual paste.
 
 ### An import is rejected
 
-Imports enforce file-count, byte, dimension, frame-count, archive, path, and
-HTTPS limits. Symlinks, path traversal, credentials, custom ports, and
-local/private network destinations are rejected. See
+ZIP imports enforce file-count, byte, dimension, frame-count, archive, and path
+limits. Symlinks, path traversal, and non-regular archive entries are rejected.
+The current import UI does not fetch remote pack assets. See
 [docs/PACK_FORMAT.md](docs/PACK_FORMAT.md) for the exact limits and naming
 rules.
 
@@ -344,6 +341,7 @@ source image is `Resources/Branding/MojiPond-AppIcon-Source.png`; the sized
 files in `Resources/Assets.xcassets/AppIcon.appiconset/` derive from that
 source.
 
-The public `knobiknows/all-the-bufo` repository is an import-compatibility
-target, not bundled content. Its 2026-07-28 audit found no detected license or
-redistribution grant, so MojiPond does not bundle or redistribute its artwork.
+The public `knobiknows/all-the-bufo` repository is an importer-engine
+compatibility fixture, not a source exposed by the current ZIP-only UI or
+bundled content. Its 2026-07-28 audit found no detected license or redistribution
+grant, so MojiPond does not bundle or redistribute its artwork.

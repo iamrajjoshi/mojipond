@@ -15,7 +15,7 @@ only after preserving the evidence named in its notes.
 Local verification environment for this snapshot:
 
 ```text
-Date: 2026-07-28
+Date: 2026-07-29
 Hardware: Apple silicon (arm64)
 macOS: 26.3.1 (25D2128)
 Xcode: 26.5 (17F42)
@@ -28,8 +28,8 @@ Signing identities installed: none
 | Capability | State | Evidence or remaining proof |
 | --- | --- | --- |
 | macOS 14 deployment target | Automated | `project.yml` sets `MACOSX_DEPLOYMENT_TARGET=14.0`; runtime launch on macOS 14 remains pending |
-| Debug build on the environment above | Automated | Final warnings-as-errors test build completed successfully on 2026-07-28 |
-| Unit test suite on the environment above | Automated | 437 executed: 436 passed, 0 failed, and 1 intentionally gated live-network test skipped; the same Bufo test passed separately against the real repository. The adaptive-glyph group passed 24/24, including first-frame conversion, cache, priority, coalescing, supersession, and deferred-preparation coverage |
+| Debug build on the environment above | Automated | Final warnings-as-errors test build completed successfully on 2026-07-29 |
+| Unit test suite on the environment above | Automated | 435 executed: 434 passed, 0 failed, and 1 intentionally gated live-network test skipped; the same Bufo test passed separately against the real repository. The adaptive-glyph group passed 24/24, including first-frame conversion, cache, priority, coalescing, supersession, and deferred-preparation coverage |
 | Universal Release binary (`arm64` + `x86_64`) | Manually verified | The `8c5eb77` 2026-07-28 local Release archive passed strict code-signature verification; `lipo -archs` reported `x86_64 arm64`, both slices declare macOS 14.0 minimum, and the ad-hoc signature carries Hardened Runtime. The static-glyph Release build repeated those checks and weak-imports `NSAdaptiveImageGlyph` in both slices |
 | Xcode archive, ZIP, DMG, metadata, and SHA-256 output | Manually verified | `MojiPond-20260728T095411Z-local`, built from immutable snapshot `8c5eb77`, was independently checked: SHA-256 verification passed (`325e4a79…` ZIP, `103ed3f9…` DMG, `deb898ef…` metadata), metadata records the exact clean revision and branch, the metadata-free ZIP tested clean and expanded to exactly one byte-identical `MojiPond.app`, and the read-only DMG verified, mounted, and contained the same valid app plus an `/Applications` link |
 | Launch from `/Applications` with ad-hoc signing | Manually verified | The `8c5eb77` Universal Release was installed at `/Applications/MojiPond.app`, compared byte-for-byte with the verified archive, and launched successfully on the environment above. The current static-glyph Release was subsequently installed and launched at the same path; its strict signature verifies, it reports `x86_64 arm64`, and all three permission preflights remain granted |
@@ -80,30 +80,27 @@ Signing identities installed: none
 | Collision decisions and duplicate-content preview | Automated | Import and library tests |
 | Atomic library install, edit, replacement, removal, and migration | Automated | Actor store tests |
 | Custom Unicode creation, search, copy, and portable export | Automated | Store tests cover collision-safe creation, validation, digesting, Unicode-only export, and mixed round trips; Library ViewModel tests cover creation, alias search, rejection, and clipboard bytes |
-| Library import workflow in the running app | Pending | Full browse, edit, import-preview, conflict-resolution, install, export, and GitHub-refresh UI is connected; a manual running-app check is not yet recorded |
-| Manual file, folder, ZIP, and Slack-style imports | Pending | Each source and conflict path is covered by deterministic scanner/orchestrator tests; interactive running-app imports are not yet recorded |
-| Manual failed, cancelled, and offline imports | Pending | Failure, cancellation, cleanup, and network-denial behavior are automated; interactive running-app checks are not yet recorded |
-| Real `knobiknows/all-the-bufo` import | Manually verified | Gated live XCTest on 2026-07-28 fetched the public repository, resolved its revision, validated 1,000+ assets including `bufo-fußball.png`, exposed normalized-name conflicts, installed with explicit keep-first/drop-alias decisions, and removed its workspace in 17.5 seconds. The repository audit found no detected license or redistribution grant, so its artwork is neither bundled nor redistributed |
+| Library ZIP import workflow in the running app | Pending | The public UI accepts one local ZIP through the picker or drag and drop, then presents preview, conflict resolution, install, export, and ZIP replacement; a manual running-app check is not yet recorded |
+| Manual ZIP import and replacement | Pending | ZIP extraction, portable/simple-folder/Slack-local parsing, conflicts, and replacement are covered by deterministic scanner/orchestrator tests; interactive running-app checks are not yet recorded |
+| Manual failed and cancelled ZIP imports | Pending | Failure, cancellation, and cleanup behavior are automated; interactive running-app checks are not yet recorded |
+| Real `knobiknows/all-the-bufo` engine import | Manually verified | This verifies the retained importer engine, not a public import entry point. A gated live XCTest on 2026-07-28 fetched the repository, resolved its revision, validated 1,000+ assets including `bufo-fußball.png`, exposed normalized-name conflicts, installed with explicit keep-first/drop-alias decisions, and removed its workspace in 17.5 seconds. The repository audit found no detected license or redistribution grant, so its artwork is neither bundled nor redistributed |
 
 ## Messages media commands
 
 | Capability | State | Evidence or remaining proof |
 | --- | --- | --- |
-| Messages-only `/sticker` and `/gif` parsing | Automated | Parser tests cover app gating, query limits, timeout, cancellation, and modifiers |
+| Messages-only `/sticker` parsing | Automated | Parser tests cover app gating, query limits, timeout, cancellation, and modifiers |
 | Offline Noto manifest and bundled GIF integrity | Automated | Manifest, hash, attribution, and lookup tests |
 | Opt-in online Noto state machine | Automated | Coordinator tests use controlled provider doubles |
-| Opt-in GIPHY search | Automated | HTTP client and coordinator tests use mocked responses; no live key test |
-| GIPHY attribution, privacy, and no-cache constraint | Automated | Runtime intentionally omits optional analytics and request/query logging, displays attribution, uses ephemeral non-caching sessions, downloads a selected original directly, and rejects GIPHY at the disk-cache boundary |
-| Live GIPHY key and production provider review | Pending | No live-key test or production approval is recorded |
-| Media download validation and Noto-only cache | Automated | Downloader/cache tests cover HTTPS, content type, limits, cancellation, atomic cache behavior, and GIPHY rejection |
+| Media download validation and Noto cache | Automated | Downloader/cache tests cover HTTPS, content type, limits, cancellation, and atomic cache behavior |
 | Managed custom-media insertion validation | Automated | Resolver tests cover root containment, symlink escape, regular files, size, digest, magic bytes, and original animated bytes |
 | Static and animated custom-image adaptive glyph conversion | Automated | macOS-15 tests round-trip static images and frame 0 of animated assets through metadata-bearing HEIC and RTFD as one `NSAdaptiveImageGlyph`. The source animation remains stored unchanged; macOS 14 and rejected conversions retain the existing media fallback, including **Copy Media Instead** for failed animated WebP conversion. The successful glyph item omits raw photo representations |
-| `/sticker` grid and GIF insertion in an unsent Messages draft | Pending | Command parser, grid, resolver, and insertion engine are connected to the global runtime and covered by the 437-test suite; a manual Messages check still needs to be recorded |
-| Custom PNG insertion in an unsent Messages draft | Pending | Static glyph conversion and managed-media fallback are covered by the 437-test suite; a manual inline-glyph check with TCC permission still needs to be recorded |
+| `/sticker` grid and GIF insertion in an unsent Messages draft | Pending | Command parser, grid, resolver, and insertion engine are connected to the global runtime and covered by the 435-test suite; a manual Messages check still needs to be recorded |
+| Custom PNG insertion in an unsent Messages draft | Pending | Static glyph conversion and managed-media fallback are covered by the 435-test suite; a manual inline-glyph check with TCC permission still needs to be recorded |
 | Custom animated image inserts frame 0 as an inline glyph in Messages | Pending | First-frame conversion is automated; an unsent-draft check must confirm that the static glyph resizes with surrounding text while the stored source remains animated |
 | Clipboard unchanged after Messages media insertion | Pending | Restoration engine is automated; real-app paste race is not |
 | Messages cancellation and target switch during commit | Pending | Cancellation, transaction IDs, and stale-target revalidation are automated; an unsent-draft check that cancels and switches the focused app/target during commit is not yet recorded |
-| User-visible **Copy Media Instead** recovery | Pending | Status-menu action and notice are connected and covered by the 437-test suite; a manual clipboard check still needs to be recorded |
+| User-visible **Copy Media Instead** recovery | Pending | Status-menu action and notice are connected and covered by the 435-test suite; a manual clipboard check still needs to be recorded |
 
 ## UI and accessibility quality
 
@@ -112,15 +109,14 @@ Signing identities installed: none
 | Onboarding permission states and library-only path | Manually verified | The unlocked five-test app UI suite rendered and captured onboarding, not-requested, denied, granted, revoked, and library-only states without opening System Settings or requesting TCC access |
 | Installed Release permission preflight | Manually verified | `/Applications/MojiPond.app --print-permissions-and-quit` reported Accessibility, Input Monitoring, and Event Posting granted after the final Release install; denial, revocation, and re-grant still require an interactive System Settings audit |
 | First install, denial, grant, revocation, re-grant, and relaunch | Pending | The UI suite now proves every rendered state and the installed app currently preflights all three permissions as granted; changing real TCC state still requires explicit user action in System Settings and has not been recorded |
-| Settings persistence and legacy migration | Automated | Preferences-store tests |
-| GIPHY Keychain settings editor | Pending | Model add, replace, status, and remove behavior is covered by the recorded deterministic suite; a real Keychain/UI check remains pending |
+| Settings persistence and legacy migration | Automated | Preferences-store tests cover schema migration plus one-time, retriable deletion of the unused legacy provider credential without reading its value |
 | Keyboard navigation of suggestion surface | Automated | Runtime keyboard, parser, and worker tests |
 | VoiceOver labels and traversal | Pending | Deterministic tests cover runtime preview labels, selected-state announcements, loading, and failure semantics. The unlocked UI suite additionally requires exactly one accessible `Import Pack` action after removing a duplicate toolbar accessibility element; an interactive spoken VoiceOver traversal is still pending |
-| Light and dark appearance | Manually verified | The unlocked app UI suite rendered separate forced light and dark Library import surfaces, asserted that their PNG data differs, and passed 5/5. Every exported capture was visually inspected |
-| Required documentation screenshot set | Pending | Ten opaque, window-scoped captures for onboarding, permission state, Library, light/dark import, import preview, Settings, caret suggestions, browser, and the native fixture were visually accepted under `docs/screenshots/`. A real unsent-Messages first-frame glyph capture is still required |
+| Light and dark appearance | Manually verified | The current ZIP-only import surface passed its focused unlocked UI test in both forced appearances on 2026-07-29; both captures were visually reviewed and replaced the former multi-source screenshots |
+| Required documentation screenshot set | Pending | Library, ZIP import, Settings, preview, caret-suggestion, browser, permission, and native-fixture captures are current. The welcome onboarding view must be recaptured after its ZIP-only copy update, and a real unsent-Messages first-frame glyph capture is still required |
 | Reduced Motion | Automated | Runtime animated media falls back to a validated static first frame and interaction transitions disable animation; deterministic policy tests passed, while a manual setting audit remains pending |
 | Reduced Transparency and increased contrast | Automated | Runtime surfaces provide solid-material and stronger-border fallbacks and adaptive colors. Deterministic tests verify warning/error text at 4.5:1 or greater against native light, dark, and high-contrast backgrounds; a manual setting audit remains pending |
-| Window resizing and smallest supported size | Automated | Onboarding, Library, and Settings use scrollable or adaptive layouts with explicit minimum sizes. The unlocked app suite passed 5/5 and the native-field fixture passed 2/2 with visually accepted window captures; interactive resizing across the full range remains pending |
+| Window resizing and smallest supported size | Pending | Onboarding, Library, and Settings use scrollable or adaptive layouts with explicit minimum sizes. The ZIP-only Library/import surface passed a fresh unlocked UI run; interactive resizing across the full range remains pending |
 | Multi-display and scaled-display behavior | Pending | Geometry is automated; physical displays are not |
 
 ## Performance

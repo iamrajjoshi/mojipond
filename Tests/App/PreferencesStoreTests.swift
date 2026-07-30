@@ -20,11 +20,11 @@ final class PreferencesStoreTests: XCTestCase {
     }
 
     func testRoundTripsSinglePreferenceDocument() {
-        let store = UserDefaultsPreferencesStore(defaults: defaults)
+        let store = makeStore()
         var expected = MojiPondPreferences.defaults
         expected.shortcode.trigger = .semicolon
         expected.shortcode.showsSuggestionsOnBareTrigger = true
-        expected.network.allowsGitHubImports = true
+        expected.network.allowsStickerSearch = true
         expected.exclusions.domains = [
             DomainExclusion(domain: "example.com")!
         ]
@@ -38,14 +38,14 @@ final class PreferencesStoreTests: XCTestCase {
         defaults.set(false, forKey: "app.isEnabled")
         defaults.set("#", forKey: "shortcuts.trigger")
         defaults.set(false, forKey: "shortcuts.acceptTab")
-        defaults.set(true, forKey: "media.giphyEnabled")
+        defaults.set(true, forKey: "media.stickersEnabled")
 
-        let migrated = UserDefaultsPreferencesStore(defaults: defaults).load()
+        let migrated = makeStore().load()
 
         XCTAssertEqual(migrated.activationMode, .paused)
         XCTAssertEqual(migrated.shortcode.trigger, .hash)
         XCTAssertFalse(migrated.shortcode.acceptsTab)
-        XCTAssertTrue(migrated.network.allowsGIFSearch)
+        XCTAssertTrue(migrated.network.allowsStickerSearch)
         XCTAssertEqual(
             migrated.exclusions,
             ExclusionPreferences.defaults
@@ -58,8 +58,129 @@ final class PreferencesStoreTests: XCTestCase {
         defaults.set(try JSONEncoder().encode(future), forKey: UserDefaultsPreferencesStore.storageKey)
 
         XCTAssertEqual(
-            UserDefaultsPreferencesStore(defaults: defaults).load(),
+            makeStore().load(),
             .defaults
         )
+    }
+
+    func testVersionOneDocumentDropsRemovedNetworkPreferences() throws {
+        var document = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: JSONEncoder().encode(MojiPondPreferences.defaults)
+            ) as? [String: Any]
+        )
+        document["schemaVersion"] = 1
+        var network = try XCTUnwrap(
+            document["network"] as? [String: Any]
+        )
+        network["allowsGitHubImports"] = true
+        network["allowsGIFSearch"] = true
+        document["network"] = network
+        defaults.set(
+            try JSONSerialization.data(withJSONObject: document),
+            forKey: UserDefaultsPreferencesStore.storageKey
+        )
+
+        let migrated = makeStore().load()
+
+        XCTAssertEqual(
+            migrated.schemaVersion,
+            MojiPondPreferences.currentSchemaVersion
+        )
+        let persisted = try XCTUnwrap(
+            defaults.data(
+                forKey: UserDefaultsPreferencesStore.storageKey
+            )
+        )
+        let persistedText = try XCTUnwrap(
+            String(data: persisted, encoding: .utf8)
+        )
+        XCTAssertFalse(persistedText.contains("allowsGitHubImports"))
+        XCTAssertFalse(persistedText.contains("allowsGIFSearch"))
+    }
+
+    func testLegacyCredentialCleanupRunsOnlyOnceAfterSuccess() {
+        let cleaner = LegacyProviderCredentialCleanerSpy()
+        let store = makeStore(legacyCredentialCleaner: cleaner)
+
+        _ = store.load()
+        _ = store.load()
+
+        XCTAssertEqual(cleaner.removeCallCount, 1)
+        XCTAssertTrue(
+            defaults.bool(
+                forKey:
+                    UserDefaultsPreferencesStore
+                        .legacyCredentialCleanupKey
+            )
+        )
+    }
+
+    func testLegacyCredentialCleanupRetriesAfterFailure() {
+        let cleaner = LegacyProviderCredentialCleanerSpy(
+            error:
+                LegacyProviderCredentialCleanupError(
+                    status: -1
+                )
+        )
+        let store = makeStore(legacyCredentialCleaner: cleaner)
+
+        _ = store.load()
+
+        XCTAssertEqual(cleaner.removeCallCount, 1)
+        XCTAssertFalse(
+            defaults.bool(
+                forKey:
+                    UserDefaultsPreferencesStore
+                        .legacyCredentialCleanupKey
+            )
+        )
+
+        cleaner.error = nil
+        _ = store.load()
+
+        XCTAssertEqual(cleaner.removeCallCount, 2)
+        XCTAssertTrue(
+            defaults.bool(
+                forKey:
+                    UserDefaultsPreferencesStore
+                        .legacyCredentialCleanupKey
+            )
+        )
+    }
+
+    private func makeStore(
+        legacyCredentialCleaner:
+            any LegacyProviderCredentialCleaning =
+                NoopLegacyProviderCredentialCleaner()
+    ) -> UserDefaultsPreferencesStore {
+        UserDefaultsPreferencesStore(
+            defaults: defaults,
+            legacyCredentialCleaner: legacyCredentialCleaner
+        )
+    }
+}
+
+private struct NoopLegacyProviderCredentialCleaner:
+    LegacyProviderCredentialCleaning
+{
+    func removeLegacyCredential() throws {}
+}
+
+private final class LegacyProviderCredentialCleanerSpy:
+    LegacyProviderCredentialCleaning
+{
+    var error: Error?
+    private(set) var removeCallCount = 0
+
+    init(error: Error? = nil) {
+        self.error = error
+    }
+
+    func removeLegacyCredential() throws {
+        removeCallCount += 1
+        if let error {
+            throw error
+        }
     }
 }

@@ -46,7 +46,6 @@ struct LibraryShellView: View {
                 }
                 .dropDestination(for: URL.self) { urls, _ in
                     viewModel.prepareDroppedURLs(urls)
-                    return !urls.isEmpty
                 } isTargeted: { targeted in
                     withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) {
                         isDropTargeted = targeted
@@ -83,9 +82,7 @@ struct LibraryShellView: View {
         }
         .sheet(isPresented: $showsImportSource) {
             LibraryImportSourceView(
-                viewModel: viewModel,
-                githubImportsAllowed:
-                    appState.preferences.network.allowsGitHubImports
+                viewModel: viewModel
             ) {
                 showsImportSource = false
             }
@@ -102,9 +99,7 @@ struct LibraryShellView: View {
         .sheet(item: $packDetails) { selection in
             LibraryPackDetailView(
                 viewModel: viewModel,
-                packID: selection.id,
-                githubImportsAllowed:
-                    appState.preferences.network.allowsGitHubImports
+                packID: selection.id
             )
         }
         .sheet(item: $unicodeItemDestination) { destination in
@@ -234,7 +229,7 @@ struct LibraryShellView: View {
                 }
                 .buttonStyle(.plain)
 
-                Text("Drop images, a folder, ZIP, or emoji.json anywhere in this window.")
+                Text("Drop one ZIP archive anywhere in this window.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -288,7 +283,7 @@ struct LibraryShellView: View {
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut("i", modifiers: .command)
                 .accessibilityHint(
-                    "Choose files, a folder, ZIP, Slack manifest, or GitHub source"
+                    "Choose one local ZIP archive"
                 )
 
                 if case .builtIn = viewModel.scope {
@@ -535,15 +530,15 @@ struct LibraryShellView: View {
             return "Try a different shortcode, name, tag, pack, category, or content type."
         }
         if case .custom = viewModel.scope {
-            return "Import image files or a pack to add custom emoji."
+            return "Import a ZIP pack to add custom emoji."
         }
         if case .favorites = viewModel.scope {
             return "Mark emoji as favorites from an item’s context menu or detail view."
         }
         if case .pack = viewModel.scope {
-            return "This pack is empty. Open Pack Details to add files through the review flow."
+            return "This pack is empty. Add Unicode emoji here, or review a replacement ZIP in Pack Details."
         }
-        return "Change the filters or import a custom emoji pack."
+        return "Change the filters or import a custom ZIP pack."
     }
 
     private var importProgressOverlay: some View {

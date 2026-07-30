@@ -13,21 +13,21 @@ final class MediaCommandParserTests: XCTestCase {
         XCTAssertEqual(parser.state, .query(.sticker, "frog"))
     }
 
-    func testRecognizesGIFQueryCaseInsensitively() {
+    func testRemovedGIFCommandIsRejected() {
         var parser = MediaCommandParser()
 
         let action = parser.consume(
             event(text: "/GIF celebration", app: "com.apple.MobileSMS")
         )
 
-        XCTAssertEqual(action, .queryChanged(.gif, "celebration"))
-        XCTAssertEqual(parser.state, .query(.gif, "celebration"))
+        XCTAssertEqual(action, .cancelled)
+        XCTAssertEqual(parser.state, .idle)
     }
 
     func testOtherApplicationsCannotActivateAndChangingAppCancels() {
         var parser = MediaCommandParser()
         XCTAssertEqual(
-            parser.consume(event(text: "/gif frog", app: "com.apple.TextEdit")),
+            parser.consume(event(text: "/sticker frog", app: "com.apple.TextEdit")),
             .none
         )
         XCTAssertEqual(parser.state, .idle)
@@ -52,15 +52,15 @@ final class MediaCommandParserTests: XCTestCase {
 
     func testQueryIsBoundedForEachCommand() {
         var parser = MediaCommandParser()
-        let overlong = String(repeating: "x", count: 51)
+        let overlong = String(repeating: "x", count: 65)
 
         XCTAssertEqual(
-            parser.consume(event(text: "/gif \(overlong)", app: "com.apple.MobileSMS")),
-            .limitReached(.gif, 50)
+            parser.consume(event(text: "/sticker \(overlong)", app: "com.apple.MobileSMS")),
+            .limitReached(.sticker, 64)
         )
         XCTAssertEqual(
             parser.state,
-            .query(.gif, String(repeating: "x", count: 50))
+            .query(.sticker, String(repeating: "x", count: 64))
         )
     }
 
@@ -88,7 +88,7 @@ final class MediaCommandParserTests: XCTestCase {
             .cancelled
         )
 
-        _ = parser.consume(event(text: "/gif ", app: "com.apple.MobileSMS", time: 2))
+        _ = parser.consume(event(text: "/sticker ", app: "com.apple.MobileSMS", time: 2))
         XCTAssertEqual(
             parser.consume(
                 MediaCommandParserEvent(

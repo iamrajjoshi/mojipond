@@ -18,7 +18,6 @@ final class ThirdPartyNoticesTests: XCTestCase {
         XCTAssertTrue(
             notice.contains("Creative Commons Attribution 4.0")
         )
-        XCTAssertTrue(notice.contains("Powered by GIPHY"))
     }
 
     func testGemojiProvenanceNamesBundledNotice() throws {

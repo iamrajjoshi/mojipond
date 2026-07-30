@@ -1,7 +1,6 @@
 import Foundation
 
 enum RemoteMediaProvider: String, Codable, Sendable {
-    case giphy
     case notoAnimatedEmoji
 }
 
@@ -23,24 +22,13 @@ enum RemoteMediaURLPolicy {
             return false
         }
 
-        switch provider {
-        case .giphy:
-            return host == "giphy.com" || host.hasSuffix(".giphy.com")
-        case .notoAnimatedEmoji:
-            return host == "fonts.gstatic.com"
-        }
+        return provider == .notoAnimatedEmoji && host == "fonts.gstatic.com"
     }
 }
 
 struct RemoteMediaDimensions: Codable, Equatable, Sendable {
     let width: Int
     let height: Int
-}
-
-struct RemoteMediaAnalytics: Codable, Equatable, Sendable {
-    let onLoadURL: URL?
-    let onClickURL: URL?
-    let onSentURL: URL?
 }
 
 struct RemoteMediaItem: Identifiable, Codable, Equatable, Sendable {
@@ -51,40 +39,11 @@ struct RemoteMediaItem: Identifiable, Codable, Equatable, Sendable {
     let originalURL: URL
     let dimensions: RemoteMediaDimensions?
     let attribution: String
-    let analytics: RemoteMediaAnalytics?
-    let creatorAttribution: String?
-    let sourceAttribution: String?
-
-    init(
-        id: String,
-        provider: RemoteMediaProvider,
-        title: String,
-        previewURL: URL,
-        originalURL: URL,
-        dimensions: RemoteMediaDimensions?,
-        attribution: String,
-        analytics: RemoteMediaAnalytics?,
-        creatorAttribution: String? = nil,
-        sourceAttribution: String? = nil
-    ) {
-        self.id = id
-        self.provider = provider
-        self.title = title
-        self.previewURL = previewURL
-        self.originalURL = originalURL
-        self.dimensions = dimensions
-        self.attribution = attribution
-        self.analytics = analytics
-        self.creatorAttribution = creatorAttribution
-        self.sourceAttribution = sourceAttribution
-    }
 }
 
 enum RemoteMediaError: Error, Equatable, LocalizedError, Sendable {
-    case missingAPIKey
     case emptyQuery
     case queryTooLong(limit: Int)
-    case invalidRequest
     case invalidResponse
     case statusCode(Int)
     case insecureURL
@@ -94,14 +53,10 @@ enum RemoteMediaError: Error, Equatable, LocalizedError, Sendable {
 
     var errorDescription: String? {
         switch self {
-        case .missingAPIKey:
-            "Add a GIPHY API key in MojiPond settings to enable GIF search."
         case .emptyQuery:
             "Enter a search term."
         case let .queryTooLong(limit):
             "Search terms must be \(limit) characters or fewer."
-        case .invalidRequest:
-            "MojiPond could not create a valid media request."
         case .invalidResponse:
             "The media provider returned an invalid response."
         case let .statusCode(code):

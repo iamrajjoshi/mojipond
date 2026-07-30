@@ -172,7 +172,7 @@ final class RuntimeSafetyAndCatalogTests: XCTestCase {
 
     func testRuntimeCaptureLocatesBoundedMediaCommandSuffix() throws {
         let system = FakeAccessibilityTextSystem()
-        system.text = "draft /gif pond"
+        system.text = "draft /sticker pond"
         system.selection = NSRange(
             location: system.text.utf16.count,
             length: 0
@@ -185,13 +185,13 @@ final class RuntimeSafetyAndCatalogTests: XCTestCase {
         )
 
         let capture = try provider.capture(
-            expectedToken: "/gif pond",
+            expectedToken: "/sticker pond",
             trigger: "/"
         )
 
         XCTAssertEqual(
             capture.context.tokenRange,
-            NSRange(location: 6, length: 9)
+            NSRange(location: 6, length: 13)
         )
         XCTAssertEqual(
             capture.bundleIdentifier,
@@ -201,8 +201,8 @@ final class RuntimeSafetyAndCatalogTests: XCTestCase {
 
     func testRuntimeCaptureRejectsEmbeddedMediaCommandPaths() throws {
         for text in [
-            "https://host.example/gif private words",
-            "draft/foo/gif private words"
+            "https://host.example/sticker private words",
+            "draft/foo/sticker private words"
         ] {
             let system = FakeAccessibilityTextSystem()
             system.text = text
@@ -219,7 +219,7 @@ final class RuntimeSafetyAndCatalogTests: XCTestCase {
 
             XCTAssertThrowsError(
                 try provider.capture(
-                    expectedToken: "/gif private words",
+                    expectedToken: "/sticker private words",
                     trigger: "/"
                 )
             ) { error in

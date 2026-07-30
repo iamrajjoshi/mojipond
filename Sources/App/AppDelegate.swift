@@ -320,17 +320,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let giphyKeyStore: any GiphyAPIKeyStoring
-        if launchConfiguration.isUITesting {
-            giphyKeyStore = UITestGiphyAPIKeyStore()
-        } else {
-            giphyKeyStore = KeychainGiphyAPIKeyStore()
-        }
         let controller = NSHostingController(
-            rootView: SettingsRootView(
-                appState: appState,
-                giphyKeyStore: giphyKeyStore
-            )
+            rootView: SettingsRootView(appState: appState)
         )
         let window = NSWindow(contentViewController: controller)
         window.title = "MojiPond Settings"
@@ -1161,16 +1152,4 @@ private struct UITestLibraryImportPreparer: LibraryImportPreparing {
             reservedShortcodeOwners: reservedShortcodeOwners
         )
     }
-}
-
-private struct UITestGiphyAPIKeyStore: GiphyAPIKeyStoring {
-    func apiKey() throws -> String {
-        throw RemoteMediaError.missingAPIKey
-    }
-
-    func save(_ value: String) throws {
-        _ = value
-    }
-
-    func delete() throws {}
 }

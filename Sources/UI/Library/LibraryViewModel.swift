@@ -660,35 +660,30 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    func prepareDroppedURLs(_ urls: [URL]) {
-        let safeURLs = urls.filter(\.isFileURL)
-        guard !safeURLs.isEmpty else {
+    @discardableResult
+    func prepareDroppedURLs(_ urls: [URL]) -> Bool {
+        guard urls.count == 1, let url = urls.first, url.isFileURL else {
             notice = LibraryNotice(
                 kind: .warning,
                 title: "Nothing to import",
-                message: "Drop local image files, a folder, a ZIP archive, or emoji.json."
+                message: "Drop one local ZIP archive."
             )
-            return
+            return false
         }
-        if safeURLs.count == 1, let url = safeURLs.first {
-            let values = try? url.resourceValues(forKeys: [.isDirectoryKey])
-            if values?.isDirectory == true {
-                prepareImport(.folder(url))
-                return
-            }
-            if url.pathExtension.lowercased() == "zip" {
-                prepareImport(.zipArchive(url))
-                return
-            }
-            if url.lastPathComponent.lowercased() == "emoji.json" {
-                prepareImport(.slackManifest(url))
-                return
-            }
+        let values = try? url.resourceValues(forKeys: [.isDirectoryKey])
+        guard
+            values?.isDirectory != true,
+            url.pathExtension.lowercased() == "zip"
+        else {
+            notice = LibraryNotice(
+                kind: .warning,
+                title: "ZIP archive required",
+                message: "MojiPond currently imports one ZIP archive at a time."
+            )
+            return false
         }
-        let defaultName = safeURLs.count == 1
-            ? safeURLs[0].deletingPathExtension().lastPathComponent
-            : "Imported Emoji"
-        prepareImport(.files(safeURLs, packName: defaultName))
+        prepareImport(.zipArchive(url))
+        return true
     }
 
     func cancelImport() {

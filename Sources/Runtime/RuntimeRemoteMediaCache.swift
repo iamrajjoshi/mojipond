@@ -12,7 +12,6 @@ protocol RuntimeRemoteMediaCaching: Sendable {
 }
 
 /// A bounded, best-effort cache for remote Noto assets selected by the user.
-/// GIPHY results are rejected before the underlying disk cache is touched.
 actor RuntimeNotoMediaDiskCache: RuntimeRemoteMediaCaching {
     private let diskCache: MediaDiskCache
 

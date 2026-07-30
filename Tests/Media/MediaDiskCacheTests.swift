@@ -11,13 +11,12 @@ final class MediaDiskCacheTests: XCTestCase {
         let cache = MediaDiskCache(rootURL: root, maximumBytes: 1_024)
         let item = RemoteMediaItem(
             id: "one",
-            provider: .giphy,
+            provider: .notoAnimatedEmoji,
             title: "One",
-            previewURL: URL(string: "https://example.com/one.gif")!,
-            originalURL: URL(string: "https://example.com/one.gif")!,
+            previewURL: URL(string: "https://fonts.gstatic.com/one.gif")!,
+            originalURL: URL(string: "https://fonts.gstatic.com/one.gif")!,
             dimensions: nil,
-            attribution: "Powered by GIPHY",
-            analytics: nil
+            attribution: "Noto Animated Emoji by Google"
         )
         let download = RemoteMediaDownloader.Download(
             data: Data([0x47, 0x49, 0x46]),
@@ -53,16 +52,15 @@ final class MediaDiskCacheTests: XCTestCase {
     }
 
     private func item(id: String) -> RemoteMediaItem {
-        let url = URL(string: "https://example.com/\(id).gif")!
+        let url = URL(string: "https://fonts.gstatic.com/\(id).gif")!
         return RemoteMediaItem(
             id: id,
-            provider: .giphy,
+            provider: .notoAnimatedEmoji,
             title: id,
             previewURL: url,
             originalURL: url,
             dimensions: nil,
-            attribution: "Powered by GIPHY",
-            analytics: nil
+            attribution: "Noto Animated Emoji by Google"
         )
     }
 
@@ -74,4 +72,3 @@ final class MediaDiskCacheTests: XCTestCase {
         )
     }
 }
-

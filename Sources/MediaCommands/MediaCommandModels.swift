@@ -2,19 +2,13 @@ import Foundation
 
 enum MediaCommandKind: String, CaseIterable, Equatable, Sendable {
     case sticker
-    case gif
 
     var invocation: String {
         "/\(rawValue)"
     }
 
     var maximumQueryLength: Int {
-        switch self {
-        case .sticker:
-            64
-        case .gif:
-            50
-        }
+        64
     }
 }
 
@@ -25,11 +19,9 @@ struct MediaCommandRequest: Equatable, Sendable {
 
 struct MediaCommandNetworkOptions: Equatable, Sendable {
     var allowsNotoNetwork: Bool
-    var allowsGIPHYNetwork: Bool
 
     static let offlineOnly = MediaCommandNetworkOptions(
-        allowsNotoNetwork: false,
-        allowsGIPHYNetwork: false
+        allowsNotoNetwork: false
     )
 }
 
@@ -44,10 +36,6 @@ struct MediaCommandAttribution: Equatable, Sendable {
         )!
     )
 
-    static let giphy = MediaCommandAttribution(
-        text: "Powered by GIPHY",
-        destinationURL: URL(string: "https://giphy.com/")!
-    )
 }
 
 struct BundledMediaAsset: Equatable, Sendable {
@@ -70,12 +58,7 @@ struct MediaCommandResult: Identifiable, Equatable, Sendable {
     }
 
     var attribution: MediaCommandAttribution {
-        switch media.provider {
-        case .giphy:
-            .giphy
-        case .notoAnimatedEmoji:
-            .notoAnimatedEmoji
-        }
+        .notoAnimatedEmoji
     }
 }
 
@@ -87,7 +70,6 @@ struct MediaCommandResults: Equatable, Sendable {
 
 enum MediaCommandFailure: Equatable, Sendable {
     case invalidQuery
-    case missingGIPHYAPIKey
     case providerUnavailable
     case invalidProviderResponse
     case unsupportedMedia
@@ -100,7 +82,6 @@ enum MediaCommandSearchState: Equatable, Sendable {
     case offline(MediaCommandResults)
     case empty(MediaCommandRequest)
     case cancelled(MediaCommandRequest)
-    case networkDisabled(MediaCommandRequest)
     case rateLimited(MediaCommandRequest)
     case failed(MediaCommandRequest, MediaCommandFailure)
 
@@ -111,7 +92,6 @@ enum MediaCommandSearchState: Equatable, Sendable {
         case let .loading(request),
              let .empty(request),
              let .cancelled(request),
-             let .networkDisabled(request),
              let .rateLimited(request):
             request
         case let .results(results), let .offline(results):

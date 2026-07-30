@@ -571,9 +571,9 @@ struct LibraryDropOverlay: View {
                     Image(systemName: "square.and.arrow.down.on.square.fill")
                         .font(.system(size: 38))
                         .foregroundStyle(PondDesign.pond)
-                    Text("Drop to review before importing")
+                    Text("Drop ZIP to review before importing")
                         .font(.headline)
-                    Text("Images, folders, ZIP archives, and Slack emoji.json are supported.")
+                    Text("MojiPond currently imports one ZIP archive at a time.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -587,7 +587,7 @@ struct LibraryDropOverlay: View {
             .transition(.opacity)
             .allowsHitTesting(false)
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("Drop files to prepare an emoji pack import")
+            .accessibilityLabel("Drop one ZIP archive to prepare an emoji pack import")
         }
     }
 }

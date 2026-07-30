@@ -83,8 +83,6 @@ enum RuntimeVoiceOverAnnouncement {
             state = "No matching media."
         case .cancelled:
             state = "Media search cancelled."
-        case .networkDisabled:
-            state = "Network GIF search is disabled."
         case .rateLimited:
             state = "Media provider is busy."
         case .failed:

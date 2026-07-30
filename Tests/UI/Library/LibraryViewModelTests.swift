@@ -157,6 +157,64 @@ final class LibraryViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.importSession)
     }
 
+    func testDroppedImportAcceptsOneLocalZIPCaseInsensitively()
+        async throws
+    {
+        let fixture = try await makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.workspace) }
+        let viewModel = LibraryViewModel(
+            store: fixture.store,
+            paths: fixture.paths,
+            importer: SuspendedImporter(),
+            builtInLoader: { Self.builtInPack() }
+        )
+        await viewModel.reload()
+        let archive = fixture.workspace.appendingPathComponent("Pond.ZIP")
+        try Data([0x50, 0x4B]).write(to: archive)
+
+        XCTAssertTrue(viewModel.prepareDroppedURLs([archive]))
+        XCTAssertTrue(viewModel.isPreparingImport)
+
+        viewModel.cancelImport()
+    }
+
+    func testDroppedImportRejectsNonZIPDirectoriesAndMultipleArchives()
+        async throws
+    {
+        let fixture = try await makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.workspace) }
+        let viewModel = makeViewModel(fixture)
+        await viewModel.reload()
+        let image = fixture.workspace.appendingPathComponent("frog.png")
+        let manifest = fixture.workspace.appendingPathComponent("emoji.json")
+        let firstArchive = fixture.workspace.appendingPathComponent("one.zip")
+        let secondArchive = fixture.workspace.appendingPathComponent("two.zip")
+        let directory = fixture.workspace.appendingPathComponent(
+            "folder.zip",
+            isDirectory: true
+        )
+        for file in [image, manifest, firstArchive, secondArchive] {
+            try Data().write(to: file)
+        }
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: false
+        )
+
+        XCTAssertFalse(viewModel.prepareDroppedURLs([image]))
+        XCTAssertFalse(viewModel.prepareDroppedURLs([manifest]))
+        XCTAssertFalse(viewModel.prepareDroppedURLs([directory]))
+        XCTAssertFalse(
+            viewModel.prepareDroppedURLs([firstArchive, secondArchive])
+        )
+        XCTAssertFalse(viewModel.isPreparingImport)
+        XCTAssertNil(viewModel.importSession)
+        XCTAssertEqual(
+            viewModel.notice?.message,
+            "Drop one local ZIP archive."
+        )
+    }
+
     func testImportPreviewProtectsBuiltInPrimaryAndAliasClaims()
         async throws
     {

@@ -14,7 +14,10 @@ struct LibraryNewPackView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Create an empty pack")
                     .font(.title2.weight(.semibold))
-                Text("Set its identity and attribution now, then add files through the same review flow.")
+                Text(
+                    "Set its identity and attribution now, then add Unicode emoji "
+                        + "or replace its contents from a reviewed ZIP."
+                )
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -43,7 +46,7 @@ struct LibraryNewPackView: View {
 
             HStack {
                 Label(
-                    "After creation, open Pack Details and choose Add Files.",
+                    "After creation, select the pack to add Unicode emoji or review a ZIP.",
                     systemImage: "checkmark.shield"
                 )
                 .font(.caption)
@@ -574,12 +577,8 @@ struct LibraryItemDetailView: View {
 struct LibraryPackDetailView: View {
     @ObservedObject var viewModel: LibraryViewModel
     let packID: UUID
-    let githubImportsAllowed: Bool
 
     @Environment(\.dismiss) private var dismiss
-    @State private var showsGitHubUpdateConfirmation = false
-    @State private var showsGitHubCheckConfirmation = false
-    @State private var allowRemoteSlackAssets = false
 
     var body: some View {
         if let pack = viewModel.library.packs.first(where: { $0.id == packID }) {
@@ -666,63 +665,12 @@ struct LibraryPackDetailView: View {
                         Button("Reveal Managed Files in Finder") {
                             reveal(pack)
                         }
-                        Button("Add Files…") {
-                            addFiles(to: pack)
+                        Button("Replace Contents from ZIP…") {
+                            chooseReplacementZIP(for: pack)
                         }
-                        .help("Review and append individual image files to this pack.")
-
-                        if pack.source.kind == .github {
-                            githubRevisionStatus(for: pack)
-
-                            Button("Check GitHub Revision…") {
-                                showsGitHubCheckConfirmation = true
-                            }
-                            .disabled(
-                                !githubImportsAllowed
-                                    || viewModel.githubRevisionState(
-                                        for: pack.id
-                                    ) == .checking
-                            )
-                            .help(
-                                githubImportsAllowed
-                                    ? "Contact only GitHub’s commit API and compare source revisions."
-                                    : "Enable public GitHub imports in Settings → General first."
-                            )
-
-                            if case .updateAvailable =
-                                viewModel.githubRevisionState(for: pack.id) {
-                                Button("Review Available Update…") {
-                                    showsGitHubUpdateConfirmation = true
-                                }
-                                .buttonStyle(.borderedProminent)
-                            }
-                        } else {
-                            Button("Replace Contents from Local Source…") {
-                                chooseReplacementSource(for: pack)
-                            }
-                            .help("Review a new folder, archive, Slack manifest, or set of files before replacing this pack.")
-                        }
-
-                        if pack.source.kind == .github,
-                           !githubImportsAllowed {
-                            Label(
-                                "GitHub imports are disabled in Settings.",
-                                systemImage: "network.slash"
-                            )
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        }
-
-                        if pack.source.kind == .slackManifest
-                            || pack.source.kind == .folder {
-                            Toggle(
-                                "Allow remote Slack assets during re-import",
-                                isOn: $allowRemoteSlackAssets
-                            )
-                            Text("Network access applies only to the next reviewed import.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                        .help(
+                            "Review one ZIP archive before replacing this pack."
+                        )
                     }
                 }
                 .formStyle(.grouped)
@@ -755,41 +703,6 @@ struct LibraryPackDetailView: View {
                 .padding(18)
             }
             .frame(width: 660, height: 680)
-            .confirmationDialog(
-                "Contact GitHub to compare revisions?",
-                isPresented: $showsGitHubCheckConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("Allow This Revision Check") {
-                    Task {
-                        await viewModel.checkGitHubRevision(
-                            for: pack.id,
-                            networkAccessGranted: true
-                        )
-                    }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text(
-                    "MojiPond will send the configured public repository and ref to GitHub’s commit API. It will not download pack files during this check."
-                )
-            }
-            .confirmationDialog(
-                "Contact GitHub for this update?",
-                isPresented: $showsGitHubUpdateConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("Allow GitHub and Review Update") {
-                    viewModel.prepareGitHubUpdate(
-                        for: pack.id,
-                        networkAccessGranted: true
-                    )
-                    dismiss()
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("MojiPond will contact only github.com and GitHub’s archive host, download this pack’s configured ref, then show every change before installing.")
-            }
         } else {
             ContentUnavailableView(
                 "Pack removed",
@@ -798,44 +711,6 @@ struct LibraryPackDetailView: View {
             )
             .frame(width: 520, height: 360)
         }
-    }
-
-    @ViewBuilder
-    private func githubRevisionStatus(for pack: EmojiPack) -> some View {
-        switch viewModel.githubRevisionState(for: pack.id) {
-        case .none:
-            if let checkedAt = pack.updateMetadata.lastCheckedAt {
-                LabeledContent(
-                    "Last revision check",
-                    value: checkedAt.formatted(
-                        date: .abbreviated,
-                        time: .shortened
-                    )
-                )
-            }
-        case .checking:
-            Label("Checking GitHub revision…", systemImage: "arrow.triangle.2.circlepath")
-                .foregroundStyle(.secondary)
-        case let .current(revision):
-            Label(
-                "Up to date at \(shortRevision(revision))",
-                systemImage: "checkmark.circle.fill"
-            )
-            .foregroundStyle(PondDesign.lily)
-        case let .updateAvailable(installed, latest):
-            Label(
-                "Update available: \(shortRevision(installed)) → \(shortRevision(latest))",
-                systemImage: "arrow.down.circle.fill"
-            )
-            .foregroundStyle(PondDesign.pond)
-        case let .failed(message):
-            Label(message, systemImage: "exclamationmark.triangle")
-                .foregroundStyle(PondDesign.warningForeground)
-        }
-    }
-
-    private func shortRevision(_ revision: String?) -> String {
-        revision.map { String($0.prefix(10)) } ?? "unknown"
     }
 
     private func export(_ pack: EmojiPack) {
@@ -861,41 +736,23 @@ struct LibraryPackDetailView: View {
         }
     }
 
-    private func addFiles(to pack: EmojiPack) {
+    private func chooseReplacementZIP(for pack: EmojiPack) {
         let panel = NSOpenPanel()
-        panel.title = "Add emoji to \(pack.name)"
+        panel.title = "Choose replacement ZIP for \(pack.name)"
         panel.prompt = "Review"
         panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = true
-        panel.allowedContentTypes = supportedImportTypes
-        guard panel.runModal() == .OK, !panel.urls.isEmpty else {
-            return
-        }
-        viewModel.prepareAddFiles(panel.urls, to: pack.id)
-        dismiss()
-    }
-
-    private func chooseReplacementSource(for pack: EmojiPack) {
-        let panel = NSOpenPanel()
-        panel.title = "Choose replacement source for \(pack.name)"
-        panel.prompt = "Review"
-        panel.canChooseDirectories = true
         panel.canChooseFiles = true
-        panel.allowsMultipleSelection = true
-        panel.allowedContentTypes = supportedImportTypes + [.zip, .json]
-        guard panel.runModal() == .OK, !panel.urls.isEmpty else {
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.zip]
+        guard panel.runModal() == .OK, let url = panel.url else {
             return
         }
         viewModel.prepareReplacement(
-            from: panel.urls,
+            from: [url],
             for: pack.id,
-            allowRemoteSlackAssets: allowRemoteSlackAssets
+            allowRemoteSlackAssets: false
         )
         dismiss()
-    }
-
-    private var supportedImportTypes: [UTType] {
-        [.png, .jpeg, .gif] + [UTType(filenameExtension: "webp")].compactMap { $0 }
     }
 
     private func safeFilename(_ value: String) -> String {

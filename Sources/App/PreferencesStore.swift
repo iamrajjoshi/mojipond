@@ -9,6 +9,8 @@ protocol PreferencesPersisting {
 /// single Codable source of truth for the runtime and every settings surface.
 struct UserDefaultsPreferencesStore: PreferencesPersisting {
     static let storageKey = "preferences.document"
+    static let legacyCredentialCleanupKey =
+        "migration.legacy-provider-credential-removed"
 
     private enum LegacyKey {
         static let isEnabled = "app.isEnabled"
@@ -18,16 +20,25 @@ struct UserDefaultsPreferencesStore: PreferencesPersisting {
         static let exactReplacement = "shortcuts.exactReplacement"
         static let doubleTriggerBrowser = "shortcuts.doubleTriggerBrowser"
         static let stickersEnabled = "media.stickersEnabled"
-        static let giphyEnabled = "media.giphyEnabled"
     }
 
     let defaults: UserDefaults
+    private let legacyCredentialCleaner:
+        any LegacyProviderCredentialCleaning
 
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = .standard,
+        legacyCredentialCleaner:
+            any LegacyProviderCredentialCleaning =
+                KeychainLegacyProviderCredentialCleaner()
+    ) {
         self.defaults = defaults
+        self.legacyCredentialCleaner = legacyCredentialCleaner
     }
 
     func load() -> MojiPondPreferences {
+        removeLegacyProviderCredentialIfNeeded()
+
         if let data = defaults.data(forKey: Self.storageKey) {
             guard var decoded = try? JSONDecoder().decode(
                 MojiPondPreferences.self,
@@ -51,6 +62,24 @@ struct UserDefaultsPreferencesStore: PreferencesPersisting {
             return
         }
         defaults.set(data, forKey: Self.storageKey)
+    }
+
+    private func removeLegacyProviderCredentialIfNeeded() {
+        guard !defaults.bool(
+            forKey: Self.legacyCredentialCleanupKey
+        ) else {
+            return
+        }
+        do {
+            try legacyCredentialCleaner.removeLegacyCredential()
+            defaults.set(
+                true,
+                forKey: Self.legacyCredentialCleanupKey
+            )
+        } catch {
+            // Keychain can be transiently unavailable. Leave the marker unset
+            // so the next launch retries without blocking preference loading.
+        }
     }
 
     private func migrateLegacyValues() -> MojiPondPreferences {
@@ -90,12 +119,6 @@ struct UserDefaultsPreferencesStore: PreferencesPersisting {
                 forKey: LegacyKey.stickersEnabled
             )
         }
-        if defaults.object(forKey: LegacyKey.giphyEnabled) != nil {
-            preferences.network.allowsGIFSearch = defaults.bool(
-                forKey: LegacyKey.giphyEnabled
-            )
-        }
-
         return preferences
     }
 }

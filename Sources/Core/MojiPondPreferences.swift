@@ -53,20 +53,14 @@ enum GlobalActivationMode: String, Codable, Equatable, Sendable {
 }
 
 struct NetworkPreferences: Codable, Equatable, Sendable {
-    var allowsGitHubImports: Bool
     var allowsStickerSearch: Bool
-    var allowsGIFSearch: Bool
     var allowsUpdateChecks: Bool
 
     init(
-        allowsGitHubImports: Bool = false,
         allowsStickerSearch: Bool = false,
-        allowsGIFSearch: Bool = false,
         allowsUpdateChecks: Bool = false
     ) {
-        self.allowsGitHubImports = allowsGitHubImports
         self.allowsStickerSearch = allowsStickerSearch
-        self.allowsGIFSearch = allowsGIFSearch
         self.allowsUpdateChecks = allowsUpdateChecks
     }
 }
@@ -207,7 +201,7 @@ struct ExclusionPreferences: Codable, Equatable, Sendable {
 }
 
 struct MojiPondPreferences: Codable, Equatable, Sendable {
-    static let currentSchemaVersion = 1
+    static let currentSchemaVersion = 2
 
     var schemaVersion: Int
     var activationMode: GlobalActivationMode

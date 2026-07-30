@@ -5,6 +5,11 @@ A portable pack is a folder containing a UTF-8 JSON manifest named
 image-backed entries, Unicode-backed entries, or both in one pack. The format
 is data-only: there are no scripts, hooks, commands, or executable extensions.
 
+The current MojiPond UI imports one local ZIP archive at a time. Put the pack
+folder described below inside a ZIP before choosing it or dropping it into the
+Library. Direct file, folder, Slack-manifest, and GitHub import entry points are
+not exposed.
+
 ## Complete example
 
 ```text
@@ -130,11 +135,11 @@ Every frame is decoded as a small thumbnail during validation so a file with
 plausible metadata but truncated frame data is rejected. Assets are hashed
 with SHA-256 and copied into MojiPond’s managed Application Support directory.
 
-## Filename-derived folders
+## Filename-derived folders inside a ZIP
 
-A folder without `mojipond.json` is treated as a simple pack. Supported image
-files are discovered recursively and ordered by path. The filename without its
-extension is normalized into a shortcode:
+A folder inside the selected ZIP without `mojipond.json` is treated as a simple
+pack. Supported image files are discovered recursively and ordered by path. The
+filename without its extension is normalized into a shortcode:
 
 ```text
 Party Frog.gif  →  party_frog
@@ -150,9 +155,10 @@ If a folder contains `mojipond.json`, the portable manifest takes precedence.
 If it has no portable manifest but contains `emoji.json`, the orchestrator
 treats it as a Slack-style pack.
 
-## Slack-style `emoji.json`
+## Slack-style `emoji.json` inside a ZIP
 
-MojiPond accepts the common name-to-location map:
+MojiPond accepts the common name-to-location map when it is packaged inside the
+selected ZIP:
 
 ```json
 {
@@ -182,17 +188,19 @@ Asset keys in array entries may be `url`, `image_url`, `imageUrl`, `path`, or
 `file`. Alias keys may be `alias_for`, `aliasFor`, or `alias`. Aliases can chain
 but must resolve to an asset; missing targets and cycles are rejected.
 
-Local asset paths use the same traversal protections as portable packs. Remote
-assets must use HTTPS and are downloaded only when that import explicitly
-allows remote Slack assets. Remote URLs and every redirect reject embedded
-credentials, custom ports, localhost and `.local` names, and non-public IPv4
-or IPv6 literals or DNS answers. Remote responses are capped at 25 MiB each
-and 250 MiB total by default.
+Local asset paths use the same traversal protections as portable packs. The
+current public UI does not grant network access during ZIP preparation, so
+remote asset URLs in a Slack-style manifest are not downloaded. The retained
+import engine can validate explicitly authorized HTTPS assets in tests and
+internal integrations; that path rejects embedded credentials, custom ports,
+localhost and `.local` names, and non-public IPv4 or IPv6 literals or DNS
+answers on the initial request and every redirect. Remote responses are capped
+at 25 MiB each and 250 MiB total by default.
 
 ## ZIP archives
 
-A ZIP can contain a portable pack, a Slack-style pack, or a simple folder. A
-single top-level directory is unwrapped automatically.
+A ZIP can contain a portable pack, a Slack-style pack with local assets, or a
+simple folder. A single top-level directory is unwrapped automatically.
 
 The extractor rejects absolute paths, `..`, backslashes, control characters,
 symlinks, special files, duplicate output paths, excessive entry counts,
@@ -201,9 +209,11 @@ ratios. A selected archive is copied into a fresh app-private `0700` staging
 directory, validated and extracted only from that read-only snapshot, and
 deleted after preparation.
 
-## Public GitHub sources
+## Retained GitHub engine
 
-The import engine accepts:
+The source tree retains a public-GitHub import engine for compatibility tests,
+but the current application UI does not expose it or grant it network access.
+The engine accepts:
 
 ```text
 https://github.com/OWNER/REPOSITORY
@@ -213,19 +223,21 @@ https://github.com/OWNER/REPOSITORY/tree/REF/OPTIONAL/SUBDIRECTORY
 Only public HTTPS GitHub URLs are accepted by the default anonymous client.
 MojiPond resolves the ref through `api.github.com`, records the exact commit
 SHA, downloads a bounded ZIP from `codeload.github.com`, and applies the same
-archive and folder validation. GitHub imports are a separate network opt-in.
+archive and folder validation when an internal caller explicitly authorizes the
+network operation.
 
 Repository contents remain subject to their own license. MojiPond importing a
 pack does not grant permission to redistribute its artwork.
 
-[`knobiknows/all-the-bufo`](https://github.com/knobiknows/all-the-bufo) is a
-public import-compatibility target, not bundled content. The audit performed on
-2026-07-28 recorded 1,715 repository-tree entries: 1,403 PNG, 295 GIF, and 10
-JPG files. `README` was the only license-like path found. No `LICENSE` file,
-repository license metadata, or other redistribution grant was detected.
-MojiPond therefore does not bundle or redistribute this artwork. A personal
-import does not create redistribution rights; obtain permission from the
-rights holder before redistributing it.
+[`knobiknows/all-the-bufo`](https://github.com/knobiknows/all-the-bufo) is an
+engine-level import-compatibility fixture, not a source exposed by the current
+UI or bundled content. The audit performed on 2026-07-28 recorded 1,715
+repository-tree entries: 1,403 PNG, 295 GIF, and 10 JPG files. `README` was the
+only license-like path found. No `LICENSE` file, repository license metadata,
+or other redistribution grant was detected. MojiPond therefore does not bundle
+or redistribute this artwork. Importing it outside the public UI does not
+create redistribution rights; obtain permission from the rights holder before
+redistributing it.
 
 ## Collisions and duplicate content
 

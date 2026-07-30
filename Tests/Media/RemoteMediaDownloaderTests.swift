@@ -29,13 +29,12 @@ final class RemoteMediaDownloaderTests: XCTestCase {
 
         let item = RemoteMediaItem(
             id: "gif",
-            provider: .giphy,
+            provider: .notoAnimatedEmoji,
             title: "GIF",
-            previewURL: URL(string: "https://media.giphy.com/preview.gif")!,
-            originalURL: URL(string: "https://media.giphy.com/original.gif")!,
+            previewURL: URL(string: "https://fonts.gstatic.com/preview.gif")!,
+            originalURL: URL(string: "https://fonts.gstatic.com/original.gif")!,
             dimensions: nil,
-            attribution: "Powered by GIPHY",
-            analytics: nil
+            attribution: "Noto Animated Emoji by Google"
         )
         let downloader = RemoteMediaDownloader(session: URLProtocolStub.session())
         let result = try await downloader.download(item)
@@ -61,17 +60,16 @@ final class RemoteMediaDownloaderTests: XCTestCase {
         }
         let item = RemoteMediaItem(
             id: "gif",
-            provider: .giphy,
+            provider: .notoAnimatedEmoji,
             title: "GIF",
             previewURL: URL(
-                string: "https://media.giphy.com/preview.gif"
+                string: "https://fonts.gstatic.com/preview.gif"
             )!,
             originalURL: URL(
-                string: "https://media.giphy.com/original.gif"
+                string: "https://fonts.gstatic.com/original.gif"
             )!,
             dimensions: nil,
-            attribution: "Powered by GIPHY",
-            analytics: nil
+            attribution: "Noto Animated Emoji by Google"
         )
 
         do {
@@ -106,8 +104,7 @@ final class RemoteMediaDownloaderTests: XCTestCase {
             previewURL: URL(string: "https://fonts.gstatic.com/image.png")!,
             originalURL: URL(string: "https://fonts.gstatic.com/image.png")!,
             dimensions: nil,
-            attribution: "Noto Animated Emoji by Google",
-            analytics: nil
+            attribution: "Noto Animated Emoji by Google"
         )
         let downloader = RemoteMediaDownloader(
             session: URLProtocolStub.session(),
@@ -127,13 +124,12 @@ final class RemoteMediaDownloaderTests: XCTestCase {
     func testDownloaderRejectsProviderHostSubstitutionBeforeNetwork() async {
         let item = RemoteMediaItem(
             id: "hostile",
-            provider: .giphy,
+            provider: .notoAnimatedEmoji,
             title: "Hostile",
             previewURL: URL(string: "https://127.0.0.1/preview.gif")!,
             originalURL: URL(string: "https://127.0.0.1/original.gif")!,
             dimensions: nil,
-            attribution: "Powered by GIPHY",
-            analytics: nil
+            attribution: "Noto Animated Emoji by Google"
         )
         let downloader = RemoteMediaDownloader(
             session: URLProtocolStub.session()
