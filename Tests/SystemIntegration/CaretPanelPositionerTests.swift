@@ -20,6 +20,41 @@ final class CaretPanelPositionerTests: XCTestCase {
         )
     }
 
+    func testDegenerateQuartzCaretIsRejected() {
+        let display = DisplayGeometry(
+            appKitFrame: CGRect(x: 0, y: 0, width: 1_920, height: 1_080),
+            quartzFrame: CGRect(x: 0, y: 0, width: 1_920, height: 1_080),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1_920, height: 1_040)
+        )
+
+        let result = CaretPanelPositioner.appKitCaretRect(
+            fromQuartz: CGRect(x: 0, y: 1_080, width: 0, height: 0),
+            displays: [display]
+        )
+
+        XCTAssertNil(result)
+    }
+
+    func testOffscreenQuartzCaretIsRejectedInsteadOfClampedToCorner() {
+        let display = DisplayGeometry(
+            appKitFrame: CGRect(x: 0, y: 0, width: 1_920, height: 1_080),
+            quartzFrame: CGRect(x: 0, y: 0, width: 1_920, height: 1_080),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1_920, height: 1_040)
+        )
+
+        let result = CaretPanelPositioner.appKitCaretRect(
+            fromQuartz: CGRect(
+                x: -10_000,
+                y: 10_000,
+                width: 1,
+                height: 18
+            ),
+            displays: [display]
+        )
+
+        XCTAssertNil(result)
+    }
+
     func testPlacementPrefersBelowAndClampsToVisibleFrame() {
         let result = CaretPanelPositioner.placement(
             panelSize: CGSize(width: 300, height: 180),

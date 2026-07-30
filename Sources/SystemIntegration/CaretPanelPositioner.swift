@@ -44,19 +44,26 @@ enum CaretPanelPositioner {
         fromQuartz rectangle: CGRect,
         displays: [DisplayGeometry]
     ) -> CGRect? {
-        guard !displays.isEmpty else {
+        guard
+            !displays.isEmpty,
+            rectangle.origin.x.isFinite,
+            rectangle.origin.y.isFinite,
+            rectangle.width.isFinite,
+            rectangle.height.isFinite,
+            rectangle.width >= 0,
+            rectangle.height > 0
+        else {
             return nil
         }
         let probe = CGPoint(
             x: rectangle.midX,
-            y: rectangle.height > 0 ? rectangle.midY : rectangle.minY
+            y: rectangle.midY
         )
-        let display = displays.first(where: { $0.quartzFrame.contains(probe) })
-            ?? displays.min(by: {
-                squaredDistance(from: probe, to: $0.quartzFrame)
-                    < squaredDistance(from: probe, to: $1.quartzFrame)
+        guard
+            let display = displays.first(where: {
+                $0.quartzFrame.contains(probe)
             })
-        guard let display else {
+        else {
             return nil
         }
 
@@ -147,21 +154,6 @@ enum CaretPanelPositioner {
         )
         panel.setFrame(result.frame, display: false)
         return result
-    }
-
-    private static func squaredDistance(
-        from point: CGPoint,
-        to rectangle: CGRect
-    ) -> CGFloat {
-        let dx = max(
-            max(rectangle.minX - point.x, 0),
-            point.x - rectangle.maxX
-        )
-        let dy = max(
-            max(rectangle.minY - point.y, 0),
-            point.y - rectangle.maxY
-        )
-        return dx * dx + dy * dy
     }
 }
 

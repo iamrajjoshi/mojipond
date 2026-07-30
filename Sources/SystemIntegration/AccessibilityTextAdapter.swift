@@ -62,6 +62,9 @@ protocol AccessibilityTextSystem: AnyObject {
         for range: NSRange,
         in element: AccessibilityElementReference
     ) throws -> CGRect?
+    func textMarkerBoundsBeforeSelection(
+        in element: AccessibilityElementReference
+    ) throws -> CGRect?
     func subrole(of element: AccessibilityElementReference) throws -> String?
     func isAttributeSettable(
         _ attribute: String,
@@ -75,6 +78,15 @@ protocol AccessibilityTextSystem: AnyObject {
         _ text: String,
         in element: AccessibilityElementReference
     ) throws
+}
+
+extension AccessibilityTextSystem {
+    func textMarkerBoundsBeforeSelection(
+        in element: AccessibilityElementReference
+    ) throws -> CGRect? {
+        _ = element
+        return nil
+    }
 }
 
 final class MacAccessibilityTextSystem: AccessibilityTextSystem {
@@ -266,6 +278,112 @@ final class MacAccessibilityTextSystem: AccessibilityTextSystem {
         return rectangle
     }
 
+    func textMarkerBoundsBeforeSelection(
+        in element: AccessibilityElementReference
+    ) throws -> CGRect? {
+        let selectedMarkerRangeValue: CFTypeRef
+        do {
+            selectedMarkerRangeValue = try copyAttribute(
+                kAXSelectedTextMarkerRangeAttribute,
+                from: element,
+                operation: "read selected text marker range"
+            )
+        } catch AccessibilityTextError.unsupportedAttribute {
+            return nil
+        } catch AccessibilityTextError.axFailure(_, let code)
+            where code == AXError.noValue.rawValue {
+            return nil
+        }
+        guard
+            CFGetTypeID(selectedMarkerRangeValue)
+                == AXTextMarkerRangeGetTypeID()
+        else {
+            throw AccessibilityTextError.invalidAttributeValue(
+                kAXSelectedTextMarkerRangeAttribute
+            )
+        }
+
+        let selectedMarkerRange =
+            selectedMarkerRangeValue as! AXTextMarkerRange
+        let selectionEndMarker = AXTextMarkerRangeCopyEndMarker(
+            selectedMarkerRange
+        )
+
+        var previousMarkerValue: CFTypeRef?
+        let previousMarkerError =
+            AXUIElementCopyParameterizedAttributeValue(
+                axElement(element),
+                kAXPreviousTextMarkerForTextMarkerParameterizedAttribute
+                    as CFString,
+                selectionEndMarker,
+                &previousMarkerValue
+            )
+        if previousMarkerError == .parameterizedAttributeUnsupported
+            || previousMarkerError == .attributeUnsupported
+            || previousMarkerError == .noValue
+            || previousMarkerError == .notEnoughPrecision
+        {
+            return nil
+        }
+        try check(
+            previousMarkerError,
+            operation: "read text marker before selection"
+        )
+        guard
+            let previousMarkerValue,
+            CFGetTypeID(previousMarkerValue) == AXTextMarkerGetTypeID()
+        else {
+            throw AccessibilityTextError.invalidAttributeValue(
+                kAXPreviousTextMarkerForTextMarkerParameterizedAttribute
+            )
+        }
+
+        let previousMarker = previousMarkerValue as! AXTextMarker
+        let characterMarkerRange = AXTextMarkerRangeCreate(
+            nil,
+            previousMarker,
+            selectionEndMarker
+        )
+
+        var value: CFTypeRef?
+        let error = AXUIElementCopyParameterizedAttributeValue(
+            axElement(element),
+            kAXBoundsForTextMarkerRangeParameterizedAttribute as CFString,
+            characterMarkerRange,
+            &value
+        )
+        if error == .parameterizedAttributeUnsupported
+            || error == .attributeUnsupported
+            || error == .noValue
+            || error == .notEnoughPrecision
+        {
+            return nil
+        }
+        try check(error, operation: "read text marker bounds before selection")
+        guard
+            let value,
+            CFGetTypeID(value) == AXValueGetTypeID()
+        else {
+            throw AccessibilityTextError.invalidAttributeValue(
+                kAXBoundsForTextMarkerRangeParameterizedAttribute
+            )
+        }
+
+        let axValue = value as! AXValue
+        guard AXValueGetType(axValue) == .cgRect else {
+            throw AccessibilityTextError.invalidAttributeValue(
+                kAXBoundsForTextMarkerRangeParameterizedAttribute
+            )
+        }
+        var rectangle = CGRect.zero
+        guard AXValueGetValue(axValue, .cgRect, &rectangle) else {
+            throw AccessibilityTextError.invalidAttributeValue(
+                kAXBoundsForTextMarkerRangeParameterizedAttribute
+            )
+        }
+        return rectangle
+    }
+
     func subrole(of element: AccessibilityElementReference) throws -> String? {
         do {
             let value = try copyAttribute(
@@ -383,6 +501,7 @@ protocol DirectUnicodeReplacing: AnyObject {
 final class AccessibilityTextAdapter: DirectUnicodeReplacing {
     static let defaultMaximumFallbackDocumentLength = 4_096
     static let maximumShortcodeContextLength = 66
+    private static let maximumApproximateCaretHeight: CGFloat = 256
 
     private let system: AccessibilityTextSystem
     private let maximumFallbackDocumentLength: Int
@@ -741,32 +860,37 @@ final class AccessibilityTextAdapter: DirectUnicodeReplacing {
         if let bounds = try optionalBounds(
             for: collapsedRange,
             in: element
-        ) {
+        ), Self.isUsableCaretGeometry(bounds) {
             return bounds
         }
 
         guard selection.length == 0, selection.location > 0 else {
             return nil
         }
+
         let previousCharacterRange = NSRange(
             location: selection.location - 1,
             length: 1
         )
-        guard
+        if
             let previousBounds = try optionalBounds(
                 for: previousCharacterRange,
                 in: element
             ),
-            Self.canDeriveCaret(from: previousBounds)
+            Self.isUsableCaretGeometry(previousBounds)
+        {
+            return Self.caretAfter(previousBounds)
+        }
+
+        guard
+            let markerBounds = try system.textMarkerBoundsBeforeSelection(
+                in: element
+            ),
+            let markerCaret = Self.caretFromTextMarkerBounds(markerBounds)
         else {
             return nil
         }
-        return CGRect(
-            x: previousBounds.maxX,
-            y: previousBounds.minY,
-            width: 0,
-            height: previousBounds.height
-        )
+        return markerCaret
     }
 
     private func optionalBounds(
@@ -782,12 +906,46 @@ final class AccessibilityTextAdapter: DirectUnicodeReplacing {
         }
     }
 
-    private static func canDeriveCaret(from bounds: CGRect) -> Bool {
+    private static func isUsableCaretGeometry(_ bounds: CGRect) -> Bool {
         bounds.origin.x.isFinite
             && bounds.origin.y.isFinite
             && bounds.width.isFinite
             && bounds.height.isFinite
+            && bounds.width >= 0
             && bounds.height > 0
+    }
+
+    private static func caretFromTextMarkerBounds(
+        _ bounds: CGRect
+    ) -> CGRect? {
+        guard
+            isUsableCaretGeometry(bounds),
+            bounds.height <= maximumApproximateCaretHeight
+        else {
+            return nil
+        }
+        if bounds.width <= max(1, bounds.height * 2) {
+            return caretAfter(bounds)
+        }
+
+        // Chromium can return the entire editable composer for a one-character
+        // marker range. Its leading edge is a stable approximate anchor and is
+        // preferable to suppressing autocomplete or clamping it to the screen.
+        return CGRect(
+            x: bounds.minX,
+            y: bounds.minY,
+            width: 0,
+            height: bounds.height
+        )
+    }
+
+    private static func caretAfter(_ bounds: CGRect) -> CGRect {
+        CGRect(
+            x: bounds.maxX,
+            y: bounds.minY,
+            width: 0,
+            height: bounds.height
+        )
     }
 
     private func validateCurrentElement(

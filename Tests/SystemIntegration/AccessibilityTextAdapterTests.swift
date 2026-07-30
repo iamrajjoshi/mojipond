@@ -225,6 +225,137 @@ final class AccessibilityTextAdapterTests: XCTestCase {
         }
     }
 
+    func testContextFallsBackWhenCollapsedCaretGeometryIsDegenerate()
+        throws
+    {
+        let system = FakeAccessibilityTextSystem()
+        system.text = "Say :w"
+        system.selection = NSRange(location: 6, length: 0)
+        let collapsedRange = NSRange(location: 6, length: 0)
+        let previousCharacterRange = NSRange(location: 5, length: 1)
+        system.boundsByRange[collapsedRange] = CGRect(
+            x: 0,
+            y: 1_080,
+            width: 0,
+            height: 0
+        )
+        system.boundsByRange[previousCharacterRange] = CGRect(
+            x: 314,
+            y: 220,
+            width: 8,
+            height: 18
+        )
+        let adapter = AccessibilityTextAdapter(system: system)
+
+        let context = try adapter.context(for: adapter.focusedTarget())
+
+        XCTAssertEqual(
+            context.caretBounds,
+            CGRect(x: 322, y: 220, width: 0, height: 18)
+        )
+        XCTAssertEqual(
+            system.boundsReads,
+            [collapsedRange, previousCharacterRange]
+        )
+    }
+
+    func testContextUsesTextMarkerBoundsWhenRangeGeometryIsDegenerate()
+        throws
+    {
+        let system = FakeAccessibilityTextSystem()
+        system.text = "Try :w"
+        system.selection = NSRange(location: 6, length: 0)
+        let collapsedRange = NSRange(location: 6, length: 0)
+        let previousCharacterRange = NSRange(location: 5, length: 1)
+        let degenerateBounds = CGRect(
+            x: 0,
+            y: 1_329,
+            width: 0,
+            height: 0
+        )
+        system.boundsByRange[collapsedRange] = degenerateBounds
+        system.boundsByRange[previousCharacterRange] = degenerateBounds
+        system.textMarkerBounds = CGRect(
+            x: 1_086,
+            y: 1_229,
+            width: 8,
+            height: 20
+        )
+        let adapter = AccessibilityTextAdapter(system: system)
+
+        let context = try adapter.context(for: adapter.focusedTarget())
+
+        XCTAssertEqual(
+            context.caretBounds,
+            CGRect(x: 1_094, y: 1_229, width: 0, height: 20)
+        )
+        XCTAssertEqual(
+            system.boundsReads,
+            [collapsedRange, previousCharacterRange]
+        )
+    }
+
+    func testContextUsesLeadingEdgeForEditorWideTextMarkerBounds() throws {
+        let system = FakeAccessibilityTextSystem()
+        system.text = "Try :w"
+        system.selection = NSRange(location: 6, length: 0)
+        let degenerateBounds = CGRect(
+            x: 0,
+            y: 1_329,
+            width: 0,
+            height: 0
+        )
+        system.boundsByRange[
+            NSRange(location: 6, length: 0)
+        ] = degenerateBounds
+        system.boundsByRange[
+            NSRange(location: 5, length: 1)
+        ] = degenerateBounds
+        system.textMarkerBounds = CGRect(
+            x: 393,
+            y: 1_229,
+            width: 709,
+            height: 20
+        )
+        let adapter = AccessibilityTextAdapter(system: system)
+
+        let context = try adapter.context(for: adapter.focusedTarget())
+
+        XCTAssertEqual(
+            context.caretBounds,
+            CGRect(x: 393, y: 1_229, width: 0, height: 20)
+        )
+    }
+
+    func testContextRejectsImplausiblyTallTextMarkerBounds() throws {
+        let system = FakeAccessibilityTextSystem()
+        system.text = "Try :w"
+        system.selection = NSRange(location: 6, length: 0)
+        let degenerateBounds = CGRect(
+            x: 0,
+            y: 1_329,
+            width: 0,
+            height: 0
+        )
+        system.boundsByRange[
+            NSRange(location: 6, length: 0)
+        ] = degenerateBounds
+        system.boundsByRange[
+            NSRange(location: 5, length: 1)
+        ] = degenerateBounds
+        system.textMarkerBounds = CGRect(
+            x: 0,
+            y: 39,
+            width: 2_056,
+            height: 1_290
+        )
+        let adapter = AccessibilityTextAdapter(system: system)
+
+        let context = try adapter.context(for: adapter.focusedTarget())
+
+        XCTAssertNil(context.caretBounds)
+    }
+
     func testContextFallsBackToBoundedValueWhenRangedStringHasNoValue() throws {
         let system = FakeAccessibilityTextSystem()
         system.text = "Say :w"
