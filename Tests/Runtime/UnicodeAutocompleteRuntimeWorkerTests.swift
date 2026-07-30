@@ -76,7 +76,9 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         XCTAssertTrue(selectedInserted)
     }
 
-    func testSuggestionRefreshKeepsVisiblePanelUntilUpdated() async throws {
+    func testSuggestionRefreshKeepsVisiblePanelAndInterceptionUntilUpdated()
+        async throws
+    {
         let harness = try makeHarness(
             items: [emoji(shortcode: "frog", value: "🐸")],
             targetText: ":fr",
@@ -93,12 +95,18 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         harness.worker.enqueue(
             keySnapshot(keyCode: 15, characters: "r")
         )
-        let interceptionSuspended = await eventually(
+        let presentationRetained = await eventually(
             timeout: .milliseconds(50)
         ) {
-            harness.gate.mode == .hidden
+            harness.presenter.updates.dropFirst(updateStart).contains {
+                guard case .retain = $0 else {
+                    return false
+                }
+                return true
+            }
         }
-        XCTAssertTrue(interceptionSuspended)
+        XCTAssertTrue(presentationRetained)
+        XCTAssertEqual(harness.gate.mode, .suggestions)
         XCTAssertFalse(
             harness.presenter.updates.dropFirst(updateStart).contains {
                 guard case .hide = $0 else {
@@ -128,6 +136,22 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
             }
         )
         XCTAssertEqual(harness.gate.mode, .suggestions)
+    }
+
+    func testImmediateTabDuringSuggestionRefreshAcceptsSelection()
+        async throws
+    {
+        try await assertImmediateAcceptanceDuringSuggestionRefresh(
+            keyCode: RuntimeKeyboardKeyCode.tab
+        )
+    }
+
+    func testImmediateReturnDuringSuggestionRefreshAcceptsSelection()
+        async throws
+    {
+        try await assertImmediateAcceptanceDuringSuggestionRefresh(
+            keyCode: RuntimeKeyboardKeyCode.returnKey
+        )
     }
 
     func testDelayedStaleRefreshCannotRepaintAfterNewerCharacter()
@@ -739,6 +763,48 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
                 )
             )
         }
+    }
+
+    private func assertImmediateAcceptanceDuringSuggestionRefresh(
+        keyCode: CGKeyCode
+    ) async throws {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":fr",
+            settleDelayMilliseconds: 80
+        )
+        harness.worker.setCaptureEnabled(true)
+        type(":f", into: harness.worker)
+        let initialShown = await eventually {
+            harness.gate.mode == .suggestions
+        }
+        XCTAssertTrue(initialShown)
+
+        let updateStart = harness.presenter.updates.count
+        harness.worker.enqueue(
+            keySnapshot(keyCode: 15, characters: "r")
+        )
+        let refreshStarted = await eventually(
+            timeout: .milliseconds(50)
+        ) {
+            harness.presenter.updates.dropFirst(updateStart).contains {
+                guard case .retain = $0 else {
+                    return false
+                }
+                return true
+            }
+        }
+        XCTAssertTrue(refreshStarted)
+
+        let acceptance = keySnapshot(keyCode: keyCode)
+        let outcome = harness.gate.outcome(for: acceptance)
+        XCTAssertEqual(outcome, .intercepting(.suggestions))
+        harness.worker.enqueue(acceptance.delivered(with: outcome))
+
+        let inserted = await eventually {
+            harness.system.text == "🐸"
+        }
+        XCTAssertTrue(inserted)
     }
 
     private func keySnapshot(
