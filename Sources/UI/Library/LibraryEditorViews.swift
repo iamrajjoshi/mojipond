@@ -25,6 +25,7 @@ struct LibraryNewPackView: View {
             Form {
                 TextField("Name", text: $draft.name)
                     .focused($nameFocused)
+                    .accessibilityIdentifier("newPack.name")
                 TextField("Author", text: $draft.author)
                 TextField("Version", text: $draft.version)
                 TextField("License", text: $draft.license)

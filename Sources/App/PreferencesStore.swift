@@ -11,6 +11,8 @@ struct UserDefaultsPreferencesStore: PreferencesPersisting {
     static let storageKey = "preferences.document"
     static let legacyCredentialCleanupKey =
         "migration.legacy-provider-credential-removed"
+    static let legacyGiphyDataCleanupKey =
+        "migration.legacy-giphy-data-removed-v2"
 
     private enum LegacyKey {
         static let isEnabled = "app.isEnabled"
@@ -20,6 +22,9 @@ struct UserDefaultsPreferencesStore: PreferencesPersisting {
         static let exactReplacement = "shortcuts.exactReplacement"
         static let doubleTriggerBrowser = "shortcuts.doubleTriggerBrowser"
         static let stickersEnabled = "media.stickersEnabled"
+        static let giphyCustomerIdentifier =
+            "com.rajjoshi.MojiPond.giphyCustomerIdentifier"
+        static let giphyEnabled = "media.giphyEnabled"
     }
 
     let defaults: UserDefaults
@@ -37,7 +42,7 @@ struct UserDefaultsPreferencesStore: PreferencesPersisting {
     }
 
     func load() -> MojiPondPreferences {
-        removeLegacyProviderCredentialIfNeeded()
+        removeLegacyGiphyDataIfNeeded()
 
         if let data = defaults.data(forKey: Self.storageKey) {
             guard var decoded = try? JSONDecoder().decode(
@@ -64,17 +69,23 @@ struct UserDefaultsPreferencesStore: PreferencesPersisting {
         defaults.set(data, forKey: Self.storageKey)
     }
 
-    private func removeLegacyProviderCredentialIfNeeded() {
+    private func removeLegacyGiphyDataIfNeeded() {
         guard !defaults.bool(
-            forKey: Self.legacyCredentialCleanupKey
+            forKey: Self.legacyGiphyDataCleanupKey
         ) else {
             return
         }
+
+        defaults.removeObject(
+            forKey: LegacyKey.giphyCustomerIdentifier
+        )
+        defaults.removeObject(forKey: LegacyKey.giphyEnabled)
+
         do {
             try legacyCredentialCleaner.removeLegacyCredential()
             defaults.set(
                 true,
-                forKey: Self.legacyCredentialCleanupKey
+                forKey: Self.legacyGiphyDataCleanupKey
             )
         } catch {
             // Keychain can be transiently unavailable. Leave the marker unset

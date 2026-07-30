@@ -49,9 +49,12 @@ actor MediaCommandCoordinator {
         networkOptions: MediaCommandNetworkOptions,
         limit: Int = 24
     ) async -> MediaCommandSearchState {
-        activeTask?.cancel()
-
         let request = nextRequest(command: command)
+        guard !Task.isCancelled else {
+            return .cancelled(request)
+        }
+
+        activeTask?.cancel()
         guard bundleIdentifier == MediaCommandParser.messagesBundleIdentifier else {
             activeRequest = nil
             let cancelled = MediaCommandSearchState.cancelled(request)

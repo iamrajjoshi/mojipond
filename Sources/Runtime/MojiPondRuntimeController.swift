@@ -31,6 +31,7 @@ enum MojiPondRuntimeDiagnostic: Equatable, Sendable {
     case permissionUnavailable
     case unsupportedTarget
     case clipboardRestoreFailed
+    case sendAfterInsertionUnavailable
     case sessionDenied(RuntimeSessionDenial)
     case sessionAllowed
     case catalogLoadFailed(String)
@@ -112,6 +113,7 @@ final class MojiPondRuntimeController: ObservableObject {
         ((RuntimeMediaCopyFallbackDiagnostic) -> Void)?
 
     private let permissionChecker: any RuntimePermissionChecking
+    private let cachedPermissions: CachedRuntimePermissionChecker
     private let usageStore: (any EmojiUsageStore)?
     private let interceptionGate: RuntimeInterceptionGate
     private let worker: UnicodeAutocompleteRuntimeWorker
@@ -123,7 +125,7 @@ final class MojiPondRuntimeController: ObservableObject {
     private var configuration: UnicodeAutocompleteRuntimeConfiguration
     private var wantsToRun = false
     private var userEnabled = true
-    private var permissionTimer: Timer?
+    private var contextRecoveryTimer: Timer?
     private var observingWorkspace = false
     private var sessionIsActive = true
 
@@ -196,13 +198,14 @@ final class MojiPondRuntimeController: ObservableObject {
             ?? RuntimeSuggestionPanelController()
         let resolvedInsertionEngine = insertionEngine
             ?? InsertionEngine(accessibility: accessibility)
+        let cachedPermissions = CachedRuntimePermissionChecker()
         let bridge = RuntimeMainActorBridge(
             presenter: resolvedPresenter,
             insertionEngine: resolvedInsertionEngine
         )
         let contextProvider = RuntimeAccessibilityTextContextProvider(
             accessibility: accessibility,
-            permissionChecker: permissionChecker,
+            permissionChecker: cachedPermissions,
             secureInputChecker: secureInputChecker,
             applicationIdentity: applicationIdentity,
             exclusions: preferences.exclusions
@@ -229,6 +232,8 @@ final class MojiPondRuntimeController: ObservableObject {
                     diagnostics.emit(.unsupportedTarget)
                 case .clipboardRestoreFailed:
                     diagnostics.emit(.clipboardRestoreFailed)
+                case .sendAfterInsertionUnavailable:
+                    diagnostics.emit(.sendAfterInsertionUnavailable)
                 case let .sessionDenied(denial):
                     diagnostics.emit(.sessionDenied(denial))
                 case .sessionAllowed:
@@ -240,6 +245,7 @@ final class MojiPondRuntimeController: ObservableObject {
         )
 
         self.permissionChecker = permissionChecker
+        self.cachedPermissions = cachedPermissions
         self.usageStore = usageStore
         interceptionGate = gate
         self.worker = worker
@@ -313,12 +319,12 @@ final class MojiPondRuntimeController: ObservableObject {
         }
         wantsToRun = true
         registerWorkspaceObservers()
-        permissionTimer = Timer.scheduledTimer(
+        contextRecoveryTimer = Timer.scheduledTimer(
             withTimeInterval: 1,
             repeats: true
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.reconcileRuntime()
+                self?.refreshSuspendedContext()
             }
         }
         loadUsageSnapshot()
@@ -327,8 +333,8 @@ final class MojiPondRuntimeController: ObservableObject {
 
     func stop() {
         wantsToRun = false
-        permissionTimer?.invalidate()
-        permissionTimer = nil
+        contextRecoveryTimer?.invalidate()
+        contextRecoveryTimer = nil
         unregisterWorkspaceObservers()
         eventTap.stop()
         worker.setCaptureEnabled(false)
@@ -398,6 +404,10 @@ final class MojiPondRuntimeController: ObservableObject {
         }
 
         let permissions = permissionChecker.currentPermissions()
+        cachedPermissions.update(permissions)
+        interceptionGate.setCanReplayCommitSend(
+            permissions.eventPostingGranted
+        )
         guard permissions.canMonitorTyping else {
             eventTap.stop()
             worker.setCaptureEnabled(false)
@@ -432,6 +442,18 @@ final class MojiPondRuntimeController: ObservableObject {
         if didStartMonitor {
             worker.refreshContextState()
         }
+    }
+
+    private func refreshSuspendedContext() {
+        guard
+            wantsToRun,
+            userEnabled,
+            sessionIsActive,
+            case .contextSuspended = state
+        else {
+            return
+        }
+        worker.refreshContextState()
     }
 
     private func loadUsageSnapshot() {

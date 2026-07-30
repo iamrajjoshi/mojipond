@@ -96,7 +96,9 @@ final class IntegrationFixtureUITests: XCTestCase {
             "-AppleInterfaceStyle",
             "Light",
             "-AppleInterfaceStyleSwitchesAutomatically",
-            "false"
+            "false",
+            "-ApplePersistenceIgnoreState",
+            "YES"
         ]
         application.launch()
         return application

@@ -99,24 +99,36 @@ final class PreferencesStoreTests: XCTestCase {
         XCTAssertFalse(persistedText.contains("allowsGIFSearch"))
     }
 
-    func testLegacyCredentialCleanupRunsOnlyOnceAfterSuccess() {
+    func testLegacyGiphyDataCleanupRemovesDefaultsAndCredential() {
         let cleaner = LegacyProviderCredentialCleanerSpy()
         let store = makeStore(legacyCredentialCleaner: cleaner)
+        defaults.set(
+            "legacy-customer",
+            forKey:
+                "com.rajjoshi.MojiPond.giphyCustomerIdentifier"
+        )
+        defaults.set(true, forKey: "media.giphyEnabled")
 
-        _ = store.load()
         _ = store.load()
 
         XCTAssertEqual(cleaner.removeCallCount, 1)
+        XCTAssertNil(
+            defaults.object(
+                forKey:
+                    "com.rajjoshi.MojiPond.giphyCustomerIdentifier"
+            )
+        )
+        XCTAssertNil(defaults.object(forKey: "media.giphyEnabled"))
         XCTAssertTrue(
             defaults.bool(
                 forKey:
                     UserDefaultsPreferencesStore
-                        .legacyCredentialCleanupKey
+                        .legacyGiphyDataCleanupKey
             )
         )
     }
 
-    func testLegacyCredentialCleanupRetriesAfterFailure() {
+    func testLegacyGiphyDataCleanupRemovesDefaultsAndRetriesCredentialAfterFailure() {
         let cleaner = LegacyProviderCredentialCleanerSpy(
             error:
                 LegacyProviderCredentialCleanupError(
@@ -124,15 +136,28 @@ final class PreferencesStoreTests: XCTestCase {
                 )
         )
         let store = makeStore(legacyCredentialCleaner: cleaner)
+        defaults.set(
+            "legacy-customer",
+            forKey:
+                "com.rajjoshi.MojiPond.giphyCustomerIdentifier"
+        )
+        defaults.set(true, forKey: "media.giphyEnabled")
 
         _ = store.load()
 
         XCTAssertEqual(cleaner.removeCallCount, 1)
+        XCTAssertNil(
+            defaults.object(
+                forKey:
+                    "com.rajjoshi.MojiPond.giphyCustomerIdentifier"
+            )
+        )
+        XCTAssertNil(defaults.object(forKey: "media.giphyEnabled"))
         XCTAssertFalse(
             defaults.bool(
                 forKey:
                     UserDefaultsPreferencesStore
-                        .legacyCredentialCleanupKey
+                        .legacyGiphyDataCleanupKey
             )
         )
 
@@ -144,7 +169,59 @@ final class PreferencesStoreTests: XCTestCase {
             defaults.bool(
                 forKey:
                     UserDefaultsPreferencesStore
-                        .legacyCredentialCleanupKey
+                        .legacyGiphyDataCleanupKey
+            )
+        )
+    }
+
+    func testLegacyGiphyDataCleanupRunsWhenOldCredentialMarkerExists() {
+        let cleaner = LegacyProviderCredentialCleanerSpy()
+        let store = makeStore(legacyCredentialCleaner: cleaner)
+        defaults.set(
+            true,
+            forKey:
+                UserDefaultsPreferencesStore
+                    .legacyCredentialCleanupKey
+        )
+        defaults.set(
+            "legacy-customer",
+            forKey:
+                "com.rajjoshi.MojiPond.giphyCustomerIdentifier"
+        )
+        defaults.set(true, forKey: "media.giphyEnabled")
+
+        _ = store.load()
+
+        XCTAssertEqual(cleaner.removeCallCount, 1)
+        XCTAssertNil(
+            defaults.object(
+                forKey:
+                    "com.rajjoshi.MojiPond.giphyCustomerIdentifier"
+            )
+        )
+        XCTAssertNil(defaults.object(forKey: "media.giphyEnabled"))
+        XCTAssertTrue(
+            defaults.bool(
+                forKey:
+                    UserDefaultsPreferencesStore
+                        .legacyGiphyDataCleanupKey
+            )
+        )
+    }
+
+    func testLegacyGiphyDataCleanupIsIdempotentAfterSuccess() {
+        let cleaner = LegacyProviderCredentialCleanerSpy()
+        let store = makeStore(legacyCredentialCleaner: cleaner)
+
+        _ = store.load()
+        _ = store.load()
+
+        XCTAssertEqual(cleaner.removeCallCount, 1)
+        XCTAssertTrue(
+            defaults.bool(
+                forKey:
+                    UserDefaultsPreferencesStore
+                        .legacyGiphyDataCleanupKey
             )
         )
     }

@@ -15,6 +15,63 @@ enum SystemPermissionStatus: String, Equatable, Sendable {
     case denied
     case granted
     case revoked
+
+    var primaryAction: SystemPermissionAction? {
+        switch self {
+        case .notRequested:
+            .request
+        case .denied, .revoked:
+            .openSettings
+        case .granted:
+            nil
+        }
+    }
+}
+
+enum SystemPermissionAction: Equatable, Sendable {
+    case request
+    case openSettings
+}
+
+protocol SystemPermissionSettingsOpening {
+    @discardableResult
+    func openSettings(for permission: SystemPermission) -> Bool
+}
+
+struct MacSystemPermissionSettingsOpener: SystemPermissionSettingsOpening {
+    private let openURL: (URL) -> Bool
+
+    init(workspace: NSWorkspace = .shared) {
+        openURL = { workspace.open($0) }
+    }
+
+    init(openURL: @escaping (URL) -> Bool) {
+        self.openURL = openURL
+    }
+
+    @discardableResult
+    func openSettings(for permission: SystemPermission) -> Bool {
+        for url in Self.candidateURLs(for: permission) where openURL(url) {
+            return true
+        }
+        return false
+    }
+
+    static func candidateURLs(
+        for permission: SystemPermission
+    ) -> [URL] {
+        let anchor = switch permission {
+        case .inputMonitoring:
+            "Privacy_ListenEvent"
+        case .accessibility, .eventPosting:
+            "Privacy_Accessibility"
+        }
+        return [
+            "x-apple.systempreferences:com.apple.preference.security?\(anchor)",
+            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?\(anchor)",
+            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension"
+        ].compactMap(URL.init(string:))
+    }
 }
 
 struct SystemPermissionSnapshot: Equatable, Sendable {
@@ -118,15 +175,17 @@ final class SystemPermissionCenter: ObservableObject {
 
     private let provider: SystemPermissionProviding
     private let history: PermissionHistoryStoring
+    private let notificationCenter: NotificationCenter
     private var activationObserver: NSObjectProtocol?
-    private var pollingTimer: Timer?
 
     init(
         provider: SystemPermissionProviding = MacSystemPermissionProvider(),
-        history: PermissionHistoryStoring = UserDefaultsPermissionHistoryStore()
+        history: PermissionHistoryStoring = UserDefaultsPermissionHistoryStore(),
+        notificationCenter: NotificationCenter = .default
     ) {
         self.provider = provider
         self.history = history
+        self.notificationCenter = notificationCenter
         snapshot = Self.readSnapshot(provider: provider, history: history)
     }
 
@@ -134,25 +193,19 @@ final class SystemPermissionCenter: ObservableObject {
         snapshot = Self.readSnapshot(provider: provider, history: history)
     }
 
-    /// Starts preflight-only updates. This never displays a system consent prompt.
-    func startLiveUpdates(interval: TimeInterval = 1.0) {
-        guard activationObserver == nil, pollingTimer == nil else {
+    /// Refreshes preflight state when the app becomes active again.
+    ///
+    /// This never displays a consent prompt and deliberately avoids polling
+    /// macOS privacy services while the app is idle.
+    func startLiveUpdates() {
+        guard activationObserver == nil else {
             return
         }
 
-        activationObserver = NotificationCenter.default.addObserver(
+        activationObserver = notificationCenter.addObserver(
             forName: NSApplication.didBecomeActiveNotification,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.refresh()
-            }
-        }
-
-        pollingTimer = Timer.scheduledTimer(
-            withTimeInterval: max(0.25, interval),
-            repeats: true
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.refresh()
@@ -162,11 +215,9 @@ final class SystemPermissionCenter: ObservableObject {
 
     func stopLiveUpdates() {
         if let activationObserver {
-            NotificationCenter.default.removeObserver(activationObserver)
+            notificationCenter.removeObserver(activationObserver)
             self.activationObserver = nil
         }
-        pollingTimer?.invalidate()
-        pollingTimer = nil
     }
 
     /// This is the only path in this type that may ask macOS for consent.
@@ -200,24 +251,30 @@ final class SystemPermissionCenter: ObservableObject {
         provider: SystemPermissionProviding,
         history: PermissionHistoryStoring
     ) -> SystemPermissionSnapshot {
-        for permission in SystemPermission.allCases where provider.isGranted(permission) {
+        let grants = Dictionary(
+            uniqueKeysWithValues: SystemPermission.allCases.map {
+                ($0, provider.isGranted($0))
+            }
+        )
+        for permission in SystemPermission.allCases
+        where grants[permission] == true {
             history.setEverGranted(true, for: permission)
         }
 
         return SystemPermissionSnapshot(
             inputMonitoring: status(
                 for: .inputMonitoring,
-                provider: provider,
+                isGranted: grants[.inputMonitoring] == true,
                 history: history
             ),
             accessibility: status(
                 for: .accessibility,
-                provider: provider,
+                isGranted: grants[.accessibility] == true,
                 history: history
             ),
             eventPosting: status(
                 for: .eventPosting,
-                provider: provider,
+                isGranted: grants[.eventPosting] == true,
                 history: history
             )
         )
@@ -225,10 +282,10 @@ final class SystemPermissionCenter: ObservableObject {
 
     private static func status(
         for permission: SystemPermission,
-        provider: SystemPermissionProviding,
+        isGranted: Bool,
         history: PermissionHistoryStoring
     ) -> SystemPermissionStatus {
-        if provider.isGranted(permission) {
+        if isGranted {
             return .granted
         }
         if history.wasEverGranted(permission) {

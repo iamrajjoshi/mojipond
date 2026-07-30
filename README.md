@@ -161,7 +161,7 @@ only after you press an Allow button.
 | --- | --- | --- |
 | Input Monitoring | Receives keyboard events while another app is active | Global autocomplete |
 | Accessibility | Identifies the focused editable control, reads a bounded token near the caret, positions suggestions, and replaces the validated token | Global autocomplete |
-| Event Posting | Sends a tagged Command-V after a safe temporary pasteboard write | Image and GIF insertion |
+| Event Posting | Sends tagged Command-V and Return events after validating the target | Image insertion and send-after-insertion |
 
 Unicode insertion does not require Event Posting when the target supports
 direct Accessibility replacement. MojiPond does not request Screen Recording,
@@ -316,7 +316,7 @@ passed through.
 
 ### An image cannot be pasted
 
-Image and GIF insertion needs Event Posting access. When MojiPond cannot
+Image insertion needs Event Posting access. When MojiPond cannot
 snapshot the clipboard safely, validate the target, or post the paste command,
 the insertion engine leaves the token and clipboard unchanged and records a
 copy-fallback notice. If the selected original passed validation, open the

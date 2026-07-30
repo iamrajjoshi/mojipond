@@ -290,6 +290,5 @@ private extension EmojiUsageSnapshot {
     mutating func resetUsageRanking() {
         statisticsByItemID.removeAll()
         recents.removeAll()
-        preferredSkinToneByItemID.removeAll()
     }
 }

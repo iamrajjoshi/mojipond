@@ -362,7 +362,7 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
         for snapshot: RuntimeSuggestionPanelSnapshot
     ) -> CGSize {
         switch snapshot.mode {
-        case .hidden:
+        case .hidden, .committing:
             CGSize(width: 380, height: 1)
         case .suggestions:
             CGSize(width: 380, height: 282)

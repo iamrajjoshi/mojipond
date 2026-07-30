@@ -7,6 +7,17 @@ import Foundation
 struct RuntimePermissionPreflight: Equatable, Sendable {
     let inputMonitoringGranted: Bool
     let accessibilityGranted: Bool
+    let eventPostingGranted: Bool
+
+    init(
+        inputMonitoringGranted: Bool,
+        accessibilityGranted: Bool,
+        eventPostingGranted: Bool = false
+    ) {
+        self.inputMonitoringGranted = inputMonitoringGranted
+        self.accessibilityGranted = accessibilityGranted
+        self.eventPostingGranted = eventPostingGranted
+    }
 
     var canMonitorTyping: Bool {
         inputMonitoringGranted && accessibilityGranted
@@ -21,8 +32,41 @@ struct MacRuntimePermissionChecker: RuntimePermissionChecking {
     func currentPermissions() -> RuntimePermissionPreflight {
         RuntimePermissionPreflight(
             inputMonitoringGranted: CGPreflightListenEventAccess(),
-            accessibilityGranted: AXIsProcessTrusted()
+            accessibilityGranted: AXIsProcessTrusted(),
+            eventPostingGranted: CGPreflightPostEventAccess()
         )
+    }
+}
+
+/// Keeps permission state available to the runtime worker without repeatedly
+/// calling macOS privacy preflight APIs while the user is typing.
+final class CachedRuntimePermissionChecker:
+    RuntimePermissionChecking,
+    @unchecked Sendable
+{
+    private let lock = NSLock()
+    private var permissions: RuntimePermissionPreflight
+
+    init(
+        permissions: RuntimePermissionPreflight =
+            RuntimePermissionPreflight(
+                inputMonitoringGranted: false,
+                accessibilityGranted: false
+            )
+    ) {
+        self.permissions = permissions
+    }
+
+    func update(_ permissions: RuntimePermissionPreflight) {
+        lock.withLock {
+            self.permissions = permissions
+        }
+    }
+
+    func currentPermissions() -> RuntimePermissionPreflight {
+        lock.withLock {
+            permissions
+        }
     }
 }
 

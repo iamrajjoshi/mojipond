@@ -157,6 +157,7 @@ struct LibraryImportPreviewView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(reviewTitle(session))
                     .font(.title2.weight(.semibold))
+                    .accessibilityIdentifier("importPreview.title")
                 Text(summary(session))
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -487,7 +488,14 @@ struct LibraryImportPreviewView: View {
 
             Spacer()
 
-            if viewModel.unresolvedConflictCount > 0 {
+            if session.preview.items.isEmpty {
+                Label(
+                    "No emoji to install",
+                    systemImage: "xmark.circle"
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            } else if viewModel.unresolvedConflictCount > 0 {
                 Label(
                     "\(viewModel.unresolvedConflictCount) unresolved",
                     systemImage: "exclamationmark.circle"
@@ -512,9 +520,7 @@ struct LibraryImportPreviewView: View {
             .disabled(!viewModel.canInstallImport)
             .keyboardShortcut(.defaultAction)
             .accessibilityHint(
-                viewModel.canInstallImport
-                    ? "Copies the reviewed emoji into MojiPond"
-                    : "Resolve all shortcode conflicts first"
+                installAccessibilityHint(session)
             )
         }
         .padding(20)
@@ -545,6 +551,9 @@ struct LibraryImportPreviewView: View {
     }
 
     private func installButtonTitle(_ session: LibraryImportSession) -> String {
+        guard !session.preview.items.isEmpty else {
+            return "Nothing to Install"
+        }
         let count = session.preview.items.count.formatted()
         switch session.destination {
         case .newPack:
@@ -554,6 +563,18 @@ struct LibraryImportPreviewView: View {
         case .replace:
             return "Update with \(count) Emoji"
         }
+    }
+
+    private func installAccessibilityHint(
+        _ session: LibraryImportSession
+    ) -> String {
+        if viewModel.canInstallImport {
+            return "Copies the reviewed emoji into MojiPond"
+        }
+        if session.preview.items.isEmpty {
+            return "The ZIP has no accepted emoji"
+        }
+        return "Resolve all shortcode conflicts first"
     }
 
     private func duplicateSummary(_ group: ImportDuplicateContentGroup) -> String {

@@ -280,7 +280,7 @@ final class AppUpdateController: ObservableObject {
             return
         }
         cancelCheckOperation()
-        state = isConfigured ? .idle : .unconfigured
+        state = canCheckForUpdates ? .idle : .unconfigured
     }
 
     func checkManually(automaticChecksEnabled: Bool) {
@@ -293,7 +293,7 @@ final class AppUpdateController: ObservableObject {
     func stageAvailableUpdate() {
         guard
             case let .available(metadata) = state,
-            isConfigured
+            canCheckForUpdates
         else {
             return
         }
@@ -486,7 +486,7 @@ final class AppUpdateController: ObservableObject {
         if let lastAvailableMetadata {
             state = .available(lastAvailableMetadata)
         } else {
-            state = isConfigured ? .idle : .unconfigured
+            state = canCheckForUpdates ? .idle : .unconfigured
         }
     }
 
@@ -496,7 +496,7 @@ final class AppUpdateController: ObservableObject {
         cancelRevalidationOperation()
         discardStagedUpdateKeepingAvailability()
         installationStatusMessage = nil
-        state = isConfigured ? .idle : .unconfigured
+        state = canCheckForUpdates ? .idle : .unconfigured
     }
 
     /// Stops background work. Only a candidate process that was successfully
@@ -511,12 +511,12 @@ final class AppUpdateController: ObservableObject {
             if let lastAvailableMetadata {
                 state = .available(lastAvailableMetadata)
             } else {
-                state = isConfigured ? .idle : .unconfigured
+                state = canCheckForUpdates ? .idle : .unconfigured
             }
         }
     }
 
-    private var isConfigured: Bool {
+    var canCheckForUpdates: Bool {
         baseConfiguration.feedURL != nil
             && baseConfiguration.publicKey != nil
     }
@@ -676,7 +676,7 @@ final class AppUpdateController: ObservableObject {
                 guard self.activeCheckOperationID == operationID else {
                     return
                 }
-                state = isConfigured ? .idle : .unconfigured
+                state = canCheckForUpdates ? .idle : .unconfigured
             } catch {
                 guard self.activeCheckOperationID == operationID else {
                     return

@@ -535,6 +535,66 @@ final class AccessibilityTextAdapter: DirectUnicodeReplacing {
         )
     }
 
+    func isFocused(_ target: AccessibilityTextTarget) -> Bool {
+        guard
+            let currentElement = try? system.focusedElement(),
+            (try? system.processIdentifier(of: currentElement))
+                == target.processIdentifier
+        else {
+            return false
+        }
+        return system.elementsAreEqual(currentElement, target.element)
+    }
+
+    func insertionWasAcknowledged(
+        for request: AccessibilityReplacementRequest
+    ) -> Bool {
+        guard
+            let currentElement = try? system.focusedElement(),
+            (try? system.processIdentifier(of: currentElement))
+                == request.target.processIdentifier,
+            system.elementsAreEqual(
+                currentElement,
+                request.target.element
+            ),
+            let selection = try? system.selectedTextRange(
+                of: currentElement
+            )
+        else {
+            return false
+        }
+
+        let isZeroLengthInsertion =
+            request.tokenRange.length == 0
+                && request.expectedToken.isEmpty
+        if isZeroLengthInsertion {
+            return selection.length == 0
+                && selection.location > request.tokenRange.location
+        }
+
+        do {
+            if
+                let currentToken = try system.string(
+                    for: request.tokenRange,
+                    in: currentElement
+                )
+            {
+                return currentToken != request.expectedToken
+            }
+        } catch AccessibilityTextError.invalidUTF16Range {
+            return selection.length == 0
+        } catch {
+            // Some rich text fields do not expose ranged strings after a
+            // paste.
+        }
+
+        let nearbyUpperBound = request.expectedSelection.location + 2
+        return selection.length == 0
+            && selection != request.tokenRange
+            && selection.location >= request.tokenRange.location
+            && selection.location <= nearbyUpperBound
+    }
+
     func isSecure(_ target: AccessibilityTextTarget) -> Bool {
         (try? secureStatus(of: target)) == true
     }

@@ -36,21 +36,23 @@ struct LibraryShellView: View {
                     placement: .toolbar,
                     prompt: "Shortcode, name, tag, or pack"
                 )
-                .overlay {
-                    ZStack {
-                        LibraryDropOverlay(isTargeted: isDropTargeted)
-                        if viewModel.isPreparingImport {
-                            importProgressOverlay
-                        }
-                    }
+        }
+        .overlay {
+            ZStack {
+                LibraryDropOverlay(isTargeted: isDropTargeted)
+                if viewModel.isPreparingImport {
+                    importProgressOverlay
                 }
-                .dropDestination(for: URL.self) { urls, _ in
-                    viewModel.prepareDroppedURLs(urls)
-                } isTargeted: { targeted in
-                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) {
-                        isDropTargeted = targeted
-                    }
-                }
+            }
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            viewModel.prepareDroppedURLs(urls)
+        } isTargeted: { targeted in
+            withAnimation(
+                reduceMotion ? nil : .easeOut(duration: 0.16)
+            ) {
+                isDropTargeted = targeted
+            }
         }
         .frame(minWidth: 840, minHeight: 560)
         .environment(
@@ -68,11 +70,6 @@ struct LibraryShellView: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 76)
-            }
-
-            ToolbarItem(placement: .status) {
-                Label(appState.statusSummary, systemImage: statusIcon)
-                    .foregroundStyle(.secondary)
             }
         }
         .task {
@@ -128,13 +125,6 @@ struct LibraryShellView: View {
         } message: {
             Text(viewModel.pendingRemoval?.message ?? "")
         }
-    }
-
-    private var statusIcon: String {
-        if !appState.isEnabled {
-            return "pause.circle"
-        }
-        return appState.canMonitorTyping ? "checkmark.circle" : "exclamationmark.circle"
     }
 
     private var sidebar: some View {
@@ -222,14 +212,7 @@ struct LibraryShellView: View {
             }
 
             Section {
-                Button {
-                    showsImportSource = true
-                } label: {
-                    Label("Import Pack…", systemImage: "square.and.arrow.down")
-                }
-                .buttonStyle(.plain)
-
-                Text("Drop one ZIP archive anywhere in this window.")
+                Text("Drop a ZIP anywhere in this window.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -276,7 +259,7 @@ struct LibraryShellView: View {
                     showsImportSource = true
                 } label: {
                     Label(
-                        "Import Pack",
+                        "Import ZIP",
                         systemImage: "square.and.arrow.down"
                     )
                 }
@@ -330,13 +313,13 @@ struct LibraryShellView: View {
                 }
                 .frame(maxWidth: 210)
 
-                Picker("Content type", selection: $viewModel.contentFilter) {
+                Picker("Content Type", selection: $viewModel.contentFilter) {
                     ForEach(LibraryContentFilter.allCases) { filter in
                         Text(filter.title)
                             .tag(filter)
                     }
                 }
-                .frame(maxWidth: 160)
+                .frame(width: 210, alignment: .leading)
 
                 Spacer()
 
@@ -382,10 +365,6 @@ struct LibraryShellView: View {
                                         id: pack.id,
                                         packName: pack.name
                                     )
-                            }
-                        } else {
-                            Button("Import a Pack") {
-                                showsImportSource = true
                             }
                         }
                     } else {

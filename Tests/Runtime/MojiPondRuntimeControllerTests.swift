@@ -130,6 +130,14 @@ final class MojiPondRuntimeControllerTests: XCTestCase {
         }
         XCTAssertTrue(suspended)
 
+        let permissionChecksAfterSuspension = permissions.checkCount
+        try? await Task.sleep(for: .seconds(1.1))
+        XCTAssertEqual(
+            permissions.checkCount,
+            permissionChecksAfterSuspension,
+            "Context recovery must use cached permission state"
+        )
+
         secureInput.isEnabled = false
         let recovered = await eventually(timeout: .seconds(2)) {
             controller.state == .running
@@ -210,6 +218,7 @@ private final class MutableRuntimePermissionChecker:
 {
     private let lock = NSLock()
     private var storedPermissions: RuntimePermissionPreflight
+    private var storedCheckCount = 0
 
     init(permissions: RuntimePermissionPreflight) {
         storedPermissions = permissions
@@ -228,8 +237,17 @@ private final class MutableRuntimePermissionChecker:
         }
     }
 
+    var checkCount: Int {
+        lock.withLock {
+            storedCheckCount
+        }
+    }
+
     func currentPermissions() -> RuntimePermissionPreflight {
-        permissions
+        lock.withLock {
+            storedCheckCount += 1
+            return storedPermissions
+        }
     }
 }
 

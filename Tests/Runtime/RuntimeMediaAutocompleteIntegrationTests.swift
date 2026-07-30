@@ -87,6 +87,7 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
                 switch $0 {
                 case .unsupportedTarget,
                      .clipboardRestoreFailed,
+                     .sendAfterInsertionUnavailable,
                      .sessionDenied,
                      .mediaCopyFallbackAvailable:
                     true
@@ -1272,6 +1273,63 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
         )
     }
 
+    func testMouseInvalidationDuringCaptureCannotArmStaleMedia()
+        async throws
+    {
+        let coordinator = RuntimeMediaCoordinatorStub(
+            response: .results(
+                commandResults(ids: ["frog"])
+            ),
+            download: MediaCommandDownload(
+                data: validGIFData,
+                contentType: "image/gif",
+                suggestedFilename: "frog.gif"
+            )
+        )
+        let harness = try makeHarness(
+            targetText: "/sticker f",
+            bundleIdentifier: messages,
+            mediaCoordinator: coordinator,
+            captureDelayMilliseconds: 100
+        )
+        harness.worker.setCaptureEnabled(true)
+        harness.gate.setCaptureEnabled(true)
+
+        for character in "/sticker f" {
+            let snapshot = keySnapshot(
+                keyCode: 0,
+                characters: String(character)
+            )
+            let outcome = harness.gate.outcome(for: snapshot)
+            harness.worker.enqueue(snapshot.delivered(with: outcome))
+        }
+        let captureStarted = await eventually {
+            harness.captureProvider.captureCount >= 1
+        }
+        XCTAssertTrue(captureStarted)
+
+        let mouseDown = eventSnapshot(type: .leftMouseDown)
+        let mouseOutcome = harness.gate.outcome(for: mouseDown)
+        XCTAssertEqual(mouseOutcome.decision, .passThrough)
+        XCTAssertEqual(harness.gate.mode, .hidden)
+
+        try? await Task.sleep(for: .milliseconds(180))
+        XCTAssertNil(harness.presenter.latestMedia)
+        XCTAssertEqual(harness.gate.mode, .hidden)
+        XCTAssertEqual(
+            harness.gate.decision(
+                for: keySnapshot(
+                    keyCode: RuntimeKeyboardKeyCode.returnKey
+                )
+            ),
+            .passThrough
+        )
+
+        harness.worker.enqueue(
+            mouseDown.delivered(with: mouseOutcome)
+        )
+    }
+
     func testPassThroughReturnBeforeMediaIsVisibleNeverActivatesResult()
         async throws {
         let coordinator = RuntimeMediaCoordinatorStub(
@@ -1352,7 +1410,67 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
         }
         XCTAssertTrue(didShowFreshResults)
         let cancelCount = await coordinator.cancelCount()
-        XCTAssertGreaterThanOrEqual(cancelCount, 1)
+        XCTAssertEqual(cancelCount, 0)
+    }
+
+    func testTerminalCancellationFinishesBeforeReplacementSearchStarts()
+        async throws
+    {
+        let coordinator = RuntimeMediaCoordinatorStub(
+            response: .results(
+                commandResults(ids: ["result"])
+            ),
+            download: MediaCommandDownload(
+                data: validGIFData,
+                contentType: "image/gif",
+                suggestedFilename: "result.gif"
+            ),
+            cancelDelay: .milliseconds(120)
+        )
+        let harness = try makeHarness(
+            targetText: "/sticker first",
+            bundleIdentifier: messages,
+            mediaCoordinator: coordinator
+        )
+        harness.worker.setCaptureEnabled(true)
+        harness.gate.setCaptureEnabled(true)
+        type("/sticker first", into: harness.worker)
+        let firstSearchShown = await eventually {
+            await coordinator.searchCount() == 1
+                && harness.gate.mode == .media
+        }
+        XCTAssertTrue(firstSearchShown)
+
+        let escape = keySnapshot(
+            keyCode: RuntimeKeyboardKeyCode.escape
+        )
+        let escapeOutcome = harness.gate.outcome(for: escape)
+        XCTAssertEqual(escapeOutcome, .intercepting(.media))
+        harness.worker.enqueue(escape.delivered(with: escapeOutcome))
+        let cancellationStarted = await eventually {
+            await coordinator.cancelCount() == 1
+        }
+        XCTAssertTrue(cancellationStarted)
+
+        harness.system.text = "/sticker fresh"
+        harness.system.selection = NSRange(
+            location: harness.system.text.utf16.count,
+            length: 0
+        )
+        type("/sticker fresh", into: harness.worker)
+
+        let replacementStarted = await eventually(timeout: .seconds(2)) {
+            await coordinator.searchCount() == 2
+        }
+        XCTAssertTrue(replacementStarted)
+        let events = await coordinator.eventLog()
+        let cancelEnd = try XCTUnwrap(
+            events.firstIndex(of: "cancel-end")
+        )
+        let freshSearch = try XCTUnwrap(
+            events.firstIndex(of: "search:fresh")
+        )
+        XCTAssertLessThan(cancelEnd, freshSearch)
     }
 
     func testEscapeDuringResolveCannotPasteCancelledMedia() async throws {
@@ -1501,7 +1619,8 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
         networkOptions: MediaCommandNetworkOptions = .offlineOnly,
         failClipboardRestore: Bool = false,
         mediaInactivityTimeoutMilliseconds: Int = 8_000,
-        presentationDelayMilliseconds: Int = 0
+        presentationDelayMilliseconds: Int = 0,
+        captureDelayMilliseconds: Int = 0
     ) throws -> RuntimeMediaHarness {
         let system = FakeAccessibilityTextSystem()
         system.text = targetText
@@ -1513,7 +1632,8 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
         let target = try accessibility.focusedTarget()
         let captureProvider = RuntimeMediaCaptureProvider(
             target: target,
-            bundleIdentifier: bundleIdentifier
+            bundleIdentifier: bundleIdentifier,
+            delayMilliseconds: captureDelayMilliseconds
         )
         let presenter = RuntimeMediaRecordingPresenter()
         let gate = RuntimeInterceptionGate()
@@ -1574,6 +1694,7 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
             gate: gate,
             presenter: presenter,
             system: system,
+            captureProvider: captureProvider,
             pasteboard: pasteboard,
             poster: poster,
             diagnostics: diagnostics
@@ -1606,6 +1727,18 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
             timestamp: DispatchTime.now().uptimeNanoseconds,
             characters: characters,
             interceptionOutcome: interceptionOutcome
+        )
+    }
+
+    private func eventSnapshot(
+        type: CGEventType
+    ) -> KeyboardEventSnapshot {
+        KeyboardEventSnapshot(
+            typeRawValue: type.rawValue,
+            keyCode: 0,
+            flagsRawValue: 0,
+            timestamp: 1,
+            characters: nil
         )
     }
 
@@ -1746,6 +1879,7 @@ private struct RuntimeMediaHarness {
     let gate: RuntimeInterceptionGate
     let presenter: RuntimeMediaRecordingPresenter
     let system: FakeAccessibilityTextSystem
+    let captureProvider: RuntimeMediaCaptureProvider
     let pasteboard: FakePasteboard
     let poster: FakeEventPoster
     let diagnostics: RuntimeMediaDiagnosticRecorder
@@ -1801,13 +1935,24 @@ private final class RuntimeMediaCaptureProvider:
 {
     private let target: AccessibilityTextTarget
     private let bundleIdentifier: String
+    private let delayMilliseconds: Int
+    private let lock = NSLock()
+    private var storedCaptureCount = 0
 
     init(
         target: AccessibilityTextTarget,
-        bundleIdentifier: String
+        bundleIdentifier: String,
+        delayMilliseconds: Int
     ) {
         self.target = target
         self.bundleIdentifier = bundleIdentifier
+        self.delayMilliseconds = max(0, delayMilliseconds)
+    }
+
+    var captureCount: Int {
+        lock.withLock {
+            storedCaptureCount
+        }
     }
 
     func capture(
@@ -1815,6 +1960,14 @@ private final class RuntimeMediaCaptureProvider:
         trigger: Character
     ) throws -> RuntimeTextCapture {
         _ = trigger
+        lock.withLock {
+            storedCaptureCount += 1
+        }
+        if delayMilliseconds > 0 {
+            Thread.sleep(
+                forTimeInterval: Double(delayMilliseconds) / 1_000
+            )
+        }
         let length = expectedToken.utf16.count
         return RuntimeTextCapture(
             target: target,
@@ -1914,10 +2067,12 @@ private actor RuntimeMediaCoordinatorStub:
     private let download: MediaCommandDownload
     private let firstSearchDelay: Duration?
     private let resolveDelay: Duration?
+    private let cancelDelay: Duration?
     private let ignoresResolveCancellation: Bool
     private var searches = 0
     private var cancellations = 0
     private var resolutions = 0
+    private var events: [String] = []
     private var resolvedID: String?
     private var networkOptions: MediaCommandNetworkOptions?
 
@@ -1926,12 +2081,14 @@ private actor RuntimeMediaCoordinatorStub:
         download: MediaCommandDownload,
         firstSearchDelay: Duration? = nil,
         resolveDelay: Duration? = nil,
+        cancelDelay: Duration? = nil,
         ignoresResolveCancellation: Bool = false
     ) {
         self.response = response
         self.download = download
         self.firstSearchDelay = firstSearchDelay
         self.resolveDelay = resolveDelay
+        self.cancelDelay = cancelDelay
         self.ignoresResolveCancellation = ignoresResolveCancellation
     }
 
@@ -1947,6 +2104,7 @@ private actor RuntimeMediaCoordinatorStub:
         _ = bundleIdentifier
         _ = limit
         searches += 1
+        events.append("search:\(query)")
         self.networkOptions = networkOptions
         if searches == 1, let firstSearchDelay {
             do {
@@ -1960,8 +2118,13 @@ private actor RuntimeMediaCoordinatorStub:
         return response
     }
 
-    func cancel() -> MediaCommandSearchState {
+    func cancel() async -> MediaCommandSearchState {
         cancellations += 1
+        events.append("cancel-start")
+        if let cancelDelay {
+            try? await Task.sleep(for: cancelDelay)
+        }
+        events.append("cancel-end")
         return .idle
     }
 
@@ -1998,6 +2161,10 @@ private actor RuntimeMediaCoordinatorStub:
 
     func lastNetworkOptions() -> MediaCommandNetworkOptions? {
         networkOptions
+    }
+
+    func eventLog() -> [String] {
+        events
     }
 
 }
