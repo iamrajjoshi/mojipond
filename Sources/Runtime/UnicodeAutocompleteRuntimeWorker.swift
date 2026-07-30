@@ -5,11 +5,17 @@ import UniformTypeIdentifiers
 enum UnicodeAutocompleteRuntimeDiagnostic: Equatable, Sendable {
     case unsupportedTarget
     case clipboardRestoreFailed
+    case sendAfterInsertionUnavailable
     case sessionDenied(RuntimeSessionDenial)
     case sessionAllowed
     case mediaCopyFallbackAvailable(
         RuntimeMediaCopyFallbackDiagnostic
     )
+}
+
+enum RuntimePresentationApplicationResult: Equatable, Sendable {
+    case rejected
+    case applied(isVisible: Bool)
 }
 
 struct UnicodeAutocompleteRuntimeConfiguration: Equatable, Sendable {
@@ -77,33 +83,58 @@ final class RuntimeMainActorBridge {
     }
 
     func applyReportingVisibility(
-        _ update: RuntimeSuggestionPanelUpdate
-    ) async -> Bool {
-        await waitForPresentationDelay()
-        return presenter.applyReportingVisibility(update)
+        _ update: RuntimeSuggestionPanelUpdate,
+        willApply: @escaping @MainActor @Sendable () -> Bool = { true }
+    ) async -> RuntimePresentationApplicationResult {
+        guard await waitForPresentationDelay() else {
+            return .rejected
+        }
+        guard willApply() else {
+            return .rejected
+        }
+        return .applied(
+            isVisible: presenter.applyReportingVisibility(update)
+        )
     }
 
     func applyMediaReportingVisibility(
-        _ update: RuntimeMediaPanelUpdate
-    ) async -> Bool {
-        await waitForPresentationDelay()
-        return presenter.applyMediaReportingVisibility(update)
+        _ update: RuntimeMediaPanelUpdate,
+        willApply: @escaping @MainActor @Sendable () -> Bool = { true }
+    ) async -> RuntimePresentationApplicationResult {
+        guard await waitForPresentationDelay() else {
+            return .rejected
+        }
+        guard willApply() else {
+            return .rejected
+        }
+        return .applied(
+            isVisible: presenter.applyMediaReportingVisibility(update)
+        )
     }
 
-    private func waitForPresentationDelay() async {
+    private func waitForPresentationDelay() async -> Bool {
         guard presentationDelayMilliseconds > 0 else {
-            return
+            return !Task.isCancelled
         }
-        try? await Task.sleep(
-            for: .milliseconds(presentationDelayMilliseconds)
-        )
+        do {
+            try await Task.sleep(
+                for: .milliseconds(presentationDelayMilliseconds)
+            )
+        } catch {
+            return false
+        }
+        return !Task.isCancelled
     }
 
     func insertUnicode(
         value: String,
-        replacing request: AccessibilityReplacementRequest
-    ) async -> InsertionResult {
-        await insertionEngine.insert(
+        replacing request: AccessibilityReplacementRequest,
+        authorization: @escaping @Sendable () -> Bool
+    ) async -> InsertionResult? {
+        guard authorization() else {
+            return nil
+        }
+        return await insertionEngine.insert(
             .unicode(value),
             replacing: request
         )
@@ -117,6 +148,34 @@ final class RuntimeMainActorBridge {
             .media(payload),
             replacing: request
         )
+    }
+
+    func insertDownloadedMediaIfAuthorized(
+        _ payload: PasteboardItemPayload,
+        replacing request: AccessibilityReplacementRequest,
+        authorization: @escaping @Sendable () -> Bool
+    ) async -> InsertionResult? {
+        guard authorization() else {
+            return nil
+        }
+        return await insertionEngine.insert(
+            .media(payload),
+            replacing: request
+        )
+    }
+
+    func sendReturnAfterConfirmedInsertion(
+        replacing request: AccessibilityReplacementRequest,
+        claimSend: @escaping @Sendable () -> Bool
+    ) async -> Bool {
+        await insertionEngine.sendReturnAfterConfirmedInsertion(
+            replacing: request,
+            claimSend: claimSend
+        )
+    }
+
+    var canSendSyntheticEvents: Bool {
+        insertionEngine.canPostEvents
     }
 }
 
@@ -137,6 +196,10 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
     }
 
     private struct ActiveTransaction: @unchecked Sendable {
+        struct CommitState: Sendable {
+            let gateGeneration: UInt64
+        }
+
         let transactionID: ParserTransactionID
         var sessionTarget: AccessibilityTextTarget?
         var expectedToken: String
@@ -149,6 +212,9 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         var captureGeneration: UInt64
         var activityRevision: UInt64
         var bundleIdentifier: String?
+        var commitState: CommitState?
+        let predictionGeneration: UInt64?
+        var presentationInteractionRevision: UInt64
     }
 
     private struct ActiveMediaTransaction: @unchecked Sendable {
@@ -164,6 +230,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         var captureGeneration: UInt64
         var activityRevision: UInt64
         var isVisible: Bool
+        var presentationInteractionRevision: UInt64
     }
 
     private let queue: DispatchQueue
@@ -193,11 +260,17 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
     private var activeTransaction: ActiveTransaction?
     private var activeMediaTransaction: ActiveMediaTransaction?
     private var mediaOperation: Task<Void, Never>?
+    private var mediaCoordinatorCancellation: Task<Void, Never>?
     private var mediaGeneration: UInt64 = 0
+    private var suggestionPresentationTask: Task<Void, Never>?
+    private var pendingSendTask: Task<Void, Never>?
+    private var pendingSendGeneration: UInt64 = 0
     private var managedMediaRoot: URL?
     private var mediaNetworkOptions: MediaCommandNetworkOptions
     private var captureEnabled = false
     private var uiRevision: UInt64 = 0
+    private var processingPredictionGeneration: UInt64?
+    private var processingInteractionRevision: UInt64?
 
     init(
         searchIndex: EmojiSearchIndex,
@@ -257,6 +330,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             label: "\(queueLabel).managed-media-resolution",
             qos: .userInitiated
         )
+        refreshExactCommitPredictionConfiguration()
     }
 
     func enqueue(_ snapshot: KeyboardEventSnapshot) {
@@ -295,6 +369,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             mediaNetworkOptions = MediaCommandNetworkOptions(
                 preferences: configuration.preferences.network
             )
+            refreshExactCommitPredictionConfiguration()
             cancelAllTransactions(reason: .externallyCancelled)
         }
     }
@@ -305,6 +380,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                 return
             }
             self.searchIndex = searchIndex
+            refreshExactCommitPredictionConfiguration()
             cancelAllTransactions(reason: .externallyCancelled)
         }
     }
@@ -335,7 +411,11 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
 
     func updateUsageSnapshot(_ usageSnapshot: EmojiUsageSnapshot) {
         queue.async { [weak self] in
-            self?.usageSnapshot = usageSnapshot
+            guard let self else {
+                return
+            }
+            self.usageSnapshot = usageSnapshot
+            refreshExactCommitPredictionConfiguration()
         }
     }
 
@@ -405,6 +485,21 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         let action = RuntimeKeyboardEventMapper.action(for: snapshot)
         let interceptionOutcome = snapshot.interceptionOutcome
             ?? interceptionGate.outcome(for: snapshot)
+        processingPredictionGeneration =
+            interceptionOutcome.predictionGeneration
+        processingInteractionRevision =
+            interceptionOutcome.interactionRevision
+        defer {
+            processingPredictionGeneration = nil
+            processingInteractionRevision = nil
+        }
+
+        if handleCommitAction(
+            action,
+            interceptionOutcome: interceptionOutcome
+        ) {
+            return
+        }
 
         if activeMediaTransaction?.isVisible == true {
             if interceptionOutcome.mode == .media {
@@ -485,6 +580,32 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         case .character, .backspace, .reset, .ignore:
             return false
         }
+    }
+
+    private func handleCommitAction(
+        _ action: RuntimeKeyboardAction,
+        interceptionOutcome: EventInterceptionOutcome
+    ) -> Bool {
+        guard activeTransaction?.commitState != nil else {
+            return false
+        }
+
+        if
+            action == .escape,
+            interceptionOutcome.decision == .intercept
+        {
+            cancelCurrentTransaction(reason: .escape)
+            return true
+        }
+
+        guard
+            case let .navigation(key, modifiers) = action,
+            key == .returnKey,
+            !modifiers.containsNavigationModifier
+        else {
+            return false
+        }
+        return true
     }
 
     private func isBrowserSurfaceAction(
@@ -700,8 +821,8 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         query: String,
         expectedToken: String
     ) {
-        cancelCurrentTransaction(reason: .externallyCancelled)
-        cancelMediaOperation()
+        cancelUnicodeTransactionForMedia()
+        cancelLocalMediaOperation()
         mediaGeneration &+= 1
         if mediaGeneration == 0 {
             mediaGeneration = 1
@@ -719,7 +840,10 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             attributions: [],
             captureGeneration: 0,
             activityRevision: 0,
-            isVisible: false
+            isVisible: false,
+            presentationInteractionRevision:
+                processingInteractionRevision
+                    ?? interceptionGate.interactionRevision
         )
         armMediaInactivityTimeout(for: &transaction)
         activeMediaTransaction = transaction
@@ -734,8 +858,8 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         command: MediaCommandKind,
         expectedToken: String
     ) {
-        cancelCurrentTransaction(reason: .externallyCancelled)
-        cancelMediaOperation()
+        cancelUnicodeTransactionForMedia()
+        cancelLocalMediaOperation()
         mediaGeneration &+= 1
         if mediaGeneration == 0 {
             mediaGeneration = 1
@@ -753,7 +877,10 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             attributions: [],
             captureGeneration: 0,
             activityRevision: 0,
-            isVisible: false
+            isVisible: false,
+            presentationInteractionRevision:
+                processingInteractionRevision
+                    ?? interceptionGate.interactionRevision
         )
         armMediaInactivityTimeout(for: &transaction)
         activeMediaTransaction = transaction
@@ -832,7 +959,10 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                 error.isTransient,
                 attempt < configuration.accessibilityRetryLimit
             {
-                queue.asyncAfter(deadline: .now() + .milliseconds(12)) {
+                let delay = Self.accessibilityRetryDelayMilliseconds(
+                    afterFailedAttempt: attempt
+                )
+                queue.asyncAfter(deadline: .now() + .milliseconds(delay)) {
                     [weak self] in
                     self?.performMediaCapture(
                         generation: generation,
@@ -942,7 +1072,12 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         let command = transaction.command
         let options = mediaNetworkOptions
         let limit = configuration.mediaResultLimit
+        let pendingCancellation = mediaCoordinatorCancellation
         mediaOperation = Task { [weak self] in
+            await pendingCancellation?.value
+            guard !Task.isCancelled else {
+                return
+            }
             let state = await mediaCommandCoordinator.search(
                 command: command,
                 query: query,
@@ -1008,12 +1143,11 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             snapshot.type == .keyDown,
             var transaction = activeMediaTransaction,
             transaction.isVisible,
-            snapshot.flags.intersection([
-                .maskControl,
-                .maskAlternate,
-                .maskCommand,
-                .maskSecondaryFn
-            ]).isEmpty
+            !RuntimeKeyboardEventMapper
+                .hasUnsupportedInterceptionModifiers(
+                    snapshot,
+                    allowsShiftedTab: true
+                )
         else {
             return false
         }
@@ -1268,20 +1402,36 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         )
         let revision = snapshot.revision
         let generation = transaction.generation
+        guard interceptionGate.expectPresentation(
+            revision: revision,
+            interactionRevision:
+                transaction.presentationInteractionRevision
+        ) else {
+            return
+        }
+        let gate = interceptionGate
         let bridge = mainActorBridge
         let queue = queue
         Task { @MainActor [weak self] in
-            let isVisible = await bridge.applyMediaReportingVisibility(
+            let result = await bridge.applyMediaReportingVisibility(
                 .show(
                     snapshot: snapshot,
                     quartzCaretBounds: caretBounds
-                )
+                ),
+                willApply: {
+                    gate.activatePresentation(
+                        revision: revision,
+                        mode: .media,
+                        acceptsTab: true,
+                        acceptsReturn: true
+                    )
+                }
             )
             queue.async { [weak self] in
                 self?.finishMediaPresentation(
                     revision: revision,
                     generation: generation,
-                    isVisible: isVisible
+                    result: result
                 )
             }
         }
@@ -1290,7 +1440,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
     private func finishMediaPresentation(
         revision: UInt64,
         generation: UInt64,
-        isVisible: Bool
+        result: RuntimePresentationApplicationResult
     ) {
         guard
             uiRevision == revision,
@@ -1298,26 +1448,25 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         else {
             return
         }
+        guard case let .applied(isVisible) = result else {
+            return
+        }
         guard isVisible else {
             cancelMediaTransaction(showCancelled: false)
             return
         }
-        interceptionGate.setMode(
-            .media,
-            acceptsTab: true,
-            acceptsReturn: true
-        )
     }
 
     private func hideMediaSurface() {
+        uiRevision &+= 1
+        let revision = uiRevision
+        interceptionGate.invalidatePresentation(revision: revision)
         interceptionGate.setMode(
             .hidden,
             acceptsTab: configuration.preferences.shortcode.acceptsTab,
             acceptsReturn:
                 configuration.preferences.shortcode.acceptsReturn
         )
-        uiRevision &+= 1
-        let revision = uiRevision
         let bridge = mainActorBridge
         Task { @MainActor in
             bridge.applyMedia(.hide(revision: revision))
@@ -1325,13 +1474,20 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
     }
 
     private func cancelMediaOperation() {
+        cancelLocalMediaOperation()
+        guard let mediaCommandCoordinator else {
+            return
+        }
+        let pendingCancellation = mediaCoordinatorCancellation
+        mediaCoordinatorCancellation = Task {
+            await pendingCancellation?.value
+            _ = await mediaCommandCoordinator.cancel()
+        }
+    }
+
+    private func cancelLocalMediaOperation() {
         mediaOperation?.cancel()
         mediaOperation = nil
-        if let mediaCommandCoordinator {
-            Task {
-                _ = await mediaCommandCoordinator.cancel()
-            }
-        }
     }
 
     private func cancelMediaTransaction(showCancelled: Bool) {
@@ -1362,6 +1518,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         )
         uiRevision &+= 1
         let revision = uiRevision
+        interceptionGate.invalidatePresentation(revision: revision)
         let snapshot = RuntimeMediaPanelSnapshot(
             revision: revision,
             command: transaction.command,
@@ -1473,7 +1630,12 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             browserQuery: "",
             captureGeneration: 0,
             activityRevision: 0,
-            bundleIdentifier: nil
+            bundleIdentifier: nil,
+            commitState: nil,
+            predictionGeneration: processingPredictionGeneration,
+            presentationInteractionRevision:
+                processingInteractionRevision
+                    ?? interceptionGate.interactionRevision
         )
         armShortcodeInactivityTimeout(for: &transaction)
         activeTransaction = transaction
@@ -1495,6 +1657,10 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         }
 
         transaction.expectedToken = token.rendered
+        if let processingInteractionRevision {
+            transaction.presentationInteractionRevision =
+                processingInteractionRevision
+        }
         setResults(
             Array(
                 searchIndex.search(
@@ -1529,7 +1695,6 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         guard activeTransaction?.transactionID == transactionID else {
             return
         }
-        hideSurface()
         guard
             let result = searchIndex.exactMatch(
                 for: shortcode,
@@ -1537,6 +1702,9 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             )
         else {
             clear(transactionID: transactionID)
+            return
+        }
+        guard beginCommit(transactionID: transactionID) else {
             return
         }
         scheduleCapture(
@@ -1565,6 +1733,10 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             return
         }
         transaction.expectedToken = expectedToken
+        if let processingInteractionRevision {
+            transaction.presentationInteractionRevision =
+                processingInteractionRevision
+        }
         transaction.browserQuery = ""
         setResults(
             Array(
@@ -1603,6 +1775,10 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             return
         }
         transaction.browserQuery = query
+        if let processingInteractionRevision {
+            transaction.presentationInteractionRevision =
+                processingInteractionRevision
+        }
         setResults(
             Array(
                 searchIndex.search(
@@ -1633,6 +1809,10 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         let count = transaction.results.count
         transaction.selectedIndex =
             (transaction.selectedIndex + delta + count) % count
+        if let processingInteractionRevision {
+            transaction.presentationInteractionRevision =
+                processingInteractionRevision
+        }
         armShortcodeInactivityTimeout(for: &transaction)
         activeTransaction = transaction
         present(transaction)
@@ -1680,12 +1860,42 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             activeTransaction = transaction
         }
         let item = transaction.results[transaction.selectedIndex].item
-        hideSurface()
+        guard beginCommit(transactionID: transactionID) else {
+            return
+        }
         scheduleCapture(
             transactionID: transactionID,
             expectedToken: transaction.expectedToken,
             purpose: .insert(item: item)
         )
+    }
+
+    @discardableResult
+    private func beginCommit(
+        transactionID: ParserTransactionID
+    ) -> Bool {
+        guard
+            var transaction = activeTransaction,
+            transaction.transactionID == transactionID
+        else {
+            return false
+        }
+        guard let gateGeneration = interceptionGate.activateCommit(
+            interactionRevision: processingInteractionRevision,
+            acceptsTab: configuration.preferences.shortcode.acceptsTab,
+            acceptsReturn: true
+        ) else {
+            cancelCurrentTransaction(reason: .externallyCancelled)
+            return false
+        }
+        transaction.visibleMode = .hidden
+        transaction.activityRevision &+= 1
+        transaction.commitState = ActiveTransaction.CommitState(
+            gateGeneration: gateGeneration
+        )
+        activeTransaction = transaction
+        hideSurface(preservingInterceptionMode: true)
+        return true
     }
 
     private func scheduleCapture(
@@ -1731,6 +1941,15 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         else {
             return
         }
+        if
+            let commitState = current.commitState,
+            !interceptionGate.isCommitActive(
+                generation: commitState.gateGeneration
+            )
+        {
+            clear(transactionID: transactionID)
+            return
+        }
 
         do {
             let capture = try contextProvider.capture(
@@ -1749,7 +1968,10 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                 error.isTransient,
                 attempt < configuration.accessibilityRetryLimit
             {
-                queue.asyncAfter(deadline: .now() + .milliseconds(12)) {
+                let delay = Self.accessibilityRetryDelayMilliseconds(
+                    afterFailedAttempt: attempt
+                )
+                queue.asyncAfter(deadline: .now() + .milliseconds(delay)) {
                     [weak self] in
                     self?.performCapture(
                         transactionID: transactionID,
@@ -1770,6 +1992,12 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         }
     }
 
+    private static func accessibilityRetryDelayMilliseconds(
+        afterFailedAttempt attempt: Int
+    ) -> Int {
+        min(60, 12 << min(max(0, attempt), 3))
+    }
+
     private func finishCapture(
         transactionID: ParserTransactionID,
         generation: UInt64,
@@ -1780,6 +2008,15 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         guard var transaction = activeTransaction,
               transaction.transactionID == transactionID,
               transaction.captureGeneration == generation else {
+            return
+        }
+        if
+            let commitState = transaction.commitState,
+            !interceptionGate.isCommitActive(
+                generation: commitState.gateGeneration
+            )
+        {
+            clear(transactionID: transactionID)
             return
         }
         if let target = transaction.sessionTarget {
@@ -1797,10 +2034,11 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
 
         switch purpose {
         case .establishSession:
-            break
+            verifyExactCommitPrediction(for: transaction)
         case .showSuggestions:
             transaction.visibleMode = .suggestions
             activeTransaction = transaction
+            verifyExactCommitPrediction(for: transaction)
             present(transaction)
             prepareSelectedAdaptiveGlyphIfUseful(in: transaction)
         case .showBrowser:
@@ -1826,6 +2064,32 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                 transactionID: transactionID
             )
         }
+    }
+
+    private func verifyExactCommitPrediction(
+        for transaction: ActiveTransaction
+    ) {
+        let trigger = configuration.preferences.shortcode.trigger
+        guard
+            transaction.expectedToken.first == trigger.character,
+            transaction.expectedToken.last != trigger.character
+                || transaction.expectedToken.count == 1
+        else {
+            return
+        }
+        interceptionGate.verifyExactCommitPrediction(
+            generation: transaction.predictionGeneration,
+            expectedToken: transaction.expectedToken
+        )
+    }
+
+    private func refreshExactCommitPredictionConfiguration() {
+        interceptionGate.configureExactCommitPrediction(
+            trigger: configuration.preferences.shortcode.trigger.character,
+            isEnabled: configuration.preferences.shortcode
+                .replacesOnExactClosingTrigger,
+            exactTokens: searchIndex.exactTokens(usage: usageSnapshot)
+        )
     }
 
     private func performInsertion(
@@ -1861,16 +2125,33 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         }
         let selectedTone = selectedSkinTone(for: item)
         let bridge = mainActorBridge
+        guard
+            let commitGeneration = activeTransaction?
+                .commitState?.gateGeneration
+        else {
+            clear(transactionID: transactionID)
+            return
+        }
+        let gate = interceptionGate
         Task { @MainActor [weak self] in
             let result = await bridge.insertUnicode(
                 value: value,
-                replacing: request
+                replacing: request,
+                authorization: { [gate] in
+                    gate.isCommitActive(
+                        generation: commitGeneration
+                    )
+                }
             )
             guard let self else {
                 return
             }
             queue.async { [weak self] in
                 guard let self else {
+                    return
+                }
+                guard let result else {
+                    clear(transactionID: transactionID)
                     return
                 }
                 if case .inserted = result, let usageStore {
@@ -1885,7 +2166,11 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                 if Self.clipboardRestoreFailed(in: result) {
                     diagnosticHandler?(.clipboardRestoreFailed)
                 }
-                clear(transactionID: transactionID)
+                completeTransactionAfterInsertion(
+                    result,
+                    request: request,
+                    transactionID: transactionID
+                )
             }
         }
     }
@@ -2194,16 +2479,32 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         activeTransaction = transaction
 
         let bridge = mainActorBridge
+        guard let commitGeneration =
+            transaction.commitState?.gateGeneration
+        else {
+            clear(transactionID: transactionID)
+            return
+        }
+        let gate = interceptionGate
         Task { @MainActor [weak self] in
-            let result = await bridge.insertDownloadedMedia(
+            let result = await bridge.insertDownloadedMediaIfAuthorized(
                 payload,
-                replacing: request
+                replacing: request,
+                authorization: { [gate] in
+                    gate.isCommitActive(
+                        generation: commitGeneration
+                    )
+                }
             )
             guard let self else {
                 return
             }
             queue.async { [weak self] in
                 guard let self else {
+                    return
+                }
+                guard let result else {
+                    clear(transactionID: transactionID)
                     return
                 }
                 switch result {
@@ -2233,7 +2534,104 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                         )
                     )
                 }
+                completeTransactionAfterInsertion(
+                    result,
+                    request: request,
+                    transactionID: transactionID
+                )
+            }
+        }
+    }
+
+    private func completeTransactionAfterInsertion(
+        _ result: InsertionResult,
+        request: AccessibilityReplacementRequest,
+        transactionID: ParserTransactionID
+    ) {
+        guard
+            case .inserted = result,
+            let transaction = activeTransaction,
+            transaction.transactionID == transactionID,
+            let commitState = transaction.commitState,
+            interceptionGate.finishCommit(
+                generation: commitState.gateGeneration,
+                retainingPendingSend: true
+            )
+        else {
+            clear(transactionID: transactionID)
+            return
+        }
+
+        let bridge = mainActorBridge
+        let queue = queue
+        let gate = interceptionGate
+        pendingSendTask?.cancel()
+        pendingSendGeneration &+= 1
+        let sendGeneration = pendingSendGeneration
+        pendingSendTask = Task { @MainActor [weak self] in
+            guard
+                let self,
+                await confirmPendingSend(
+                    transactionID: transactionID,
+                    generation: sendGeneration,
+                    gateGeneration: commitState.gateGeneration
+                )
+            else {
+                return
+            }
+            let couldPostBeforeSend = bridge.canSendSyntheticEvents
+            let sent = await bridge.sendReturnAfterConfirmedInsertion(
+                replacing: request,
+                claimSend: { [gate] in
+                    gate.claimPendingCommitSend(
+                        generation: commitState.gateGeneration
+                    )
+                }
+            )
+            let sendPermissionUnavailable =
+                !sent
+                && (
+                    !couldPostBeforeSend
+                        || !bridge.canSendSyntheticEvents
+                )
+            queue.async { [weak self] in
+                guard
+                    let self,
+                    pendingSendGeneration == sendGeneration
+                else {
+                    return
+                }
+                if sendPermissionUnavailable {
+                    diagnosticHandler?(.sendAfterInsertionUnavailable)
+                }
+                pendingSendTask = nil
                 clear(transactionID: transactionID)
+            }
+        }
+    }
+
+    private func confirmPendingSend(
+        transactionID: ParserTransactionID,
+        generation: UInt64,
+        gateGeneration: UInt64
+    ) async -> Bool {
+        await withCheckedContinuation { continuation in
+            queue.async { [weak self] in
+                guard
+                    let self,
+                    pendingSendGeneration == generation,
+                    let transaction = activeTransaction,
+                    transaction.transactionID == transactionID,
+                    transaction.commitState?.gateGeneration
+                        == gateGeneration,
+                    interceptionGate.hasPendingCommitSend(
+                        generation: gateGeneration
+                    )
+                else {
+                    continuation.resume(returning: false)
+                    return
+                }
+                continuation.resume(returning: true)
             }
         }
     }
@@ -2284,7 +2682,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                 .lowercased()
         case .browser:
             query = transaction.browserQuery.lowercased()
-        case .hidden, .media:
+        case .hidden, .media, .committing:
             return
         }
         guard query.utf8.count >= 3 else {
@@ -2441,14 +2839,41 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         )
         let bridge = mainActorBridge
         let queue = queue
-        Task { @MainActor [weak self] in
-            let isVisible = await bridge.applyReportingVisibility(update)
+        guard interceptionGate.expectPresentation(
+            revision: revision,
+            interactionRevision:
+                transaction.presentationInteractionRevision
+        ) else {
+            return
+        }
+        let gate = interceptionGate
+        let acceptsTab = configuration.preferences.shortcode.acceptsTab
+        let acceptsReturn = configuration.preferences.shortcode.acceptsReturn
+        suggestionPresentationTask?.cancel()
+        suggestionPresentationTask = Task { @MainActor [weak self] in
+            guard !Task.isCancelled else {
+                return
+            }
+            let result = await bridge.applyReportingVisibility(
+                update,
+                willApply: {
+                    gate.activatePresentation(
+                        revision: revision,
+                        mode: mode,
+                        acceptsTab: acceptsTab,
+                        acceptsReturn: acceptsReturn
+                    )
+                }
+            )
+            guard !Task.isCancelled else {
+                return
+            }
             queue.async { [weak self] in
                 self?.finishSuggestionPresentation(
                     revision: revision,
                     transactionID: transactionID,
                     mode: mode,
-                    isVisible: isVisible
+                    result: result
                 )
             }
         }
@@ -2458,7 +2883,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         revision: UInt64,
         transactionID: ParserTransactionID,
         mode: RuntimeInterceptionMode,
-        isVisible: Bool
+        result: RuntimePresentationApplicationResult
     ) {
         guard
             uiRevision == revision,
@@ -2467,28 +2892,38 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         else {
             return
         }
+        suggestionPresentationTask = nil
+        guard case let .applied(isVisible) = result else {
+            return
+        }
         guard isVisible else {
             cancelCurrentTransaction(reason: .externallyCancelled)
             return
         }
-        interceptionGate.setMode(
-            mode,
-            acceptsTab: configuration.preferences.shortcode.acceptsTab,
-            acceptsReturn: configuration.preferences.shortcode.acceptsReturn
-        )
     }
 
-    private func hideSurface() {
+    private func hideSurface(
+        preservingInterceptionMode: Bool = false
+    ) {
+        suggestionPresentationTask?.cancel()
+        suggestionPresentationTask = nil
+        if !preservingInterceptionMode {
+            interceptionGate.disarmExactCommit()
+        }
         if var transaction = activeTransaction {
             transaction.visibleMode = .hidden
             activeTransaction = transaction
         }
-        interceptionGate.setMode(
-            .hidden,
-            acceptsTab: configuration.preferences.shortcode.acceptsTab,
-            acceptsReturn: configuration.preferences.shortcode.acceptsReturn
-        )
         uiRevision &+= 1
+        interceptionGate.invalidatePresentation(revision: uiRevision)
+        if !preservingInterceptionMode {
+            interceptionGate.setMode(
+                .hidden,
+                acceptsTab: configuration.preferences.shortcode.acceptsTab,
+                acceptsReturn:
+                    configuration.preferences.shortcode.acceptsReturn
+            )
+        }
         let update = RuntimeSuggestionPanelUpdate.hide(revision: uiRevision)
         let bridge = mainActorBridge
         Task { @MainActor in
@@ -2497,6 +2932,8 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
     }
 
     private func retainSurfacePresentationDuringRefresh() {
+        suggestionPresentationTask?.cancel()
+        suggestionPresentationTask = nil
         // Preserve an already-armed suggestions gate so immediate acceptance
         // remains responsive. Initial presentation is still fail-closed
         // because the gate begins hidden and is armed only after visibility is
@@ -2504,6 +2941,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         // Invalidate any in-flight presentation completion without ordering
         // the current panel out. The next verified capture updates it in place.
         uiRevision &+= 1
+        interceptionGate.invalidatePresentation(revision: uiRevision)
         let update = RuntimeSuggestionPanelUpdate.retain(
             revision: uiRevision
         )
@@ -2517,6 +2955,13 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         guard activeTransaction?.transactionID == transactionID else {
             return
         }
+        if let commitState = activeTransaction?.commitState {
+            _ = interceptionGate.finishCommit(
+                generation: commitState.gateGeneration,
+                retainingPendingSend: false
+            )
+        }
+        cancelPendingSend()
         activeTransaction = nil
         hideSurface()
     }
@@ -2525,8 +2970,31 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         if parser.state.session != nil {
             _ = parser.handle(.reset(reason))
         }
+        if let commitState = activeTransaction?.commitState {
+            _ = interceptionGate.finishCommit(
+                generation: commitState.gateGeneration,
+                retainingPendingSend: false
+            )
+        }
+        cancelPendingSend()
         activeTransaction = nil
         hideSurface()
+    }
+
+    private func cancelUnicodeTransactionForMedia() {
+        guard
+            activeTransaction != nil
+                || parser.state.session != nil
+        else {
+            return
+        }
+        cancelCurrentTransaction(reason: .externallyCancelled)
+    }
+
+    private func cancelPendingSend() {
+        pendingSendGeneration &+= 1
+        pendingSendTask?.cancel()
+        pendingSendTask = nil
     }
 
     private func cancelAllTransactions(reason: ParserResetReason) {

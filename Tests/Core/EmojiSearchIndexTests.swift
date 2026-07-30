@@ -147,16 +147,24 @@ final class EmojiSearchIndexTests: XCTestCase {
     }
 
     func testCustomAliasesParticipateAsExactAliases() {
-        let item = CoreTestFixtures.item(id: "party", shortcode: "tada")
+        let item = CoreTestFixtures.item(
+            id: "party",
+            shortcode: "tada",
+            aliases: ["party_parrot"]
+        )
         let usage = EmojiUsageSnapshot(
             customAliasesByItemID: ["party": ["celebrate"]]
         )
+        let index = EmojiSearchIndex(items: [item])
 
-        let result = EmojiSearchIndex(items: [item])
-            .exactMatch(for: "celebrate", usage: usage)
+        let result = index.exactMatch(for: "celebrate", usage: usage)
 
         XCTAssertEqual(result?.item.id, "party")
         XCTAssertEqual(result?.matchKind, .exactAlias)
+        XCTAssertEqual(
+            index.exactTokens(usage: usage),
+            ["tada", "party_parrot", "celebrate"]
+        )
     }
 
     func testBrowseFiltersDisabledPacksAndHonorsLimit() {

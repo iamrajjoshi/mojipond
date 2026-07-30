@@ -104,6 +104,17 @@ final class AppStateTests: XCTestCase {
         XCTAssertTrue(state.preferences.launchAtLogin)
         XCTAssertNil(state.launchAtLoginError)
     }
+
+    func testUsageResetWithoutConfiguredStoreReportsFailure() {
+        let delegate = AppDelegate()
+
+        delegate.resetUsageRanking()
+
+        XCTAssertEqual(
+            delegate.appState.runtimeNotice,
+            UsageRankingResetNotice.failure
+        )
+    }
 }
 
 private struct SuspendingAppStateUpdateChecker: SignedUpdateChecking {

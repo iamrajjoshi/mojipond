@@ -39,7 +39,10 @@ final class EmojiUsageStoreTests: XCTestCase {
 
         XCTAssertTrue(snapshot.statisticsByItemID.isEmpty)
         XCTAssertTrue(snapshot.recents.isEmpty)
-        XCTAssertTrue(snapshot.preferredSkinToneByItemID.isEmpty)
+        XCTAssertEqual(
+            snapshot.preferredSkinToneByItemID["wave"],
+            .medium
+        )
         XCTAssertTrue(snapshot.isFavorite("wave"))
         XCTAssertEqual(snapshot.customAliasesByItemID["wave"], ["hello"])
     }

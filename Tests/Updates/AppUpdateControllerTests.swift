@@ -44,6 +44,41 @@ final class AppUpdateControllerTests: XCTestCase {
         XCTAssertNil(malformed.publicKey)
     }
 
+    func testUpdateChecksRequireBothFeedAndVerificationKey() {
+        let feedURL = URL(
+            string: "https://updates.example.com/feed.json"
+        )
+        let publicKey = UpdateVerificationKey.ed25519(
+            rawRepresentation: Data([1])
+        )
+
+        XCTAssertFalse(
+            AppUpdateController(
+                configuration: SignedUpdateConfiguration()
+            ).canCheckForUpdates
+        )
+        XCTAssertFalse(
+            AppUpdateController(
+                configuration: SignedUpdateConfiguration(feedURL: feedURL)
+            ).canCheckForUpdates
+        )
+        XCTAssertFalse(
+            AppUpdateController(
+                configuration: SignedUpdateConfiguration(
+                    publicKey: publicKey
+                )
+            ).canCheckForUpdates
+        )
+        XCTAssertTrue(
+            AppUpdateController(
+                configuration: SignedUpdateConfiguration(
+                    feedURL: feedURL,
+                    publicKey: publicKey
+                )
+            ).canCheckForUpdates
+        )
+    }
+
     func testManualCheckReportsMissingSignedConfigurationWithoutFetching()
         async
     {

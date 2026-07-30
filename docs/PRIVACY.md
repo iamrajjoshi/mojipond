@@ -39,7 +39,7 @@ without ranged access are left untouched.
 | --- | --- |
 | Input Monitoring | Global key events for shortcode parsing and suggestion navigation |
 | Accessibility | Focused-control safety checks, bounded text context, caret placement, exact replacement, and configured browser exclusions |
-| Event Posting | A tagged Command-V for media or rich-editor paste fallback |
+| Event Posting | Tagged Command-V for image insertion and Return after a confirmed shortcode replacement |
 
 Permission checks are preflight-only during normal startup. A system prompt is
 requested only after an explicit Allow action in onboarding or settings.
@@ -76,11 +76,12 @@ Usage records contain emoji identity, use count, and recency—not the surroundi
 message. There is no account or background cloud synchronization.
 
 Current builds do not create or use media-provider API keys. On first launch
-after an older GIPHY-capable development build, MojiPond deletes only the
-legacy generic-password item for service `com.rajjoshi.MojiPond` and account
-`giphy-api-key`. The value is never read or transmitted. A successful deletion
-or an already-missing item records a local completion marker; a transient
-Keychain failure leaves the marker unset so cleanup retries on the next launch.
+after an older GIPHY-capable development build, MojiPond removes the local GIPHY
+customer identifier and enablement preference, then deletes the legacy
+generic-password item for service `com.rajjoshi.MojiPond` and account
+`giphy-api-key`. None of these values are read or transmitted. Local preferences
+are removed even if Keychain is temporarily unavailable; the completion marker
+stays unset so Keychain cleanup retries on the next launch.
 
 Deleting the application does not automatically delete its Application Support
 data, cache, or preferences. When upgrading from an older development build,
@@ -93,7 +94,7 @@ state.
 Unicode normally uses direct Accessibility replacement and does not touch the
 clipboard.
 
-For image, GIF, or rich-editor paste insertion, MojiPond first captures every
+For image or rich-editor paste insertion, MojiPond first captures every
 pasteboard item and each advertised representation, up to a 32 MiB memory cap.
 It temporarily writes the payload, revalidates the exact token, posts
 Command-V to the validated target process, and restores the complete snapshot
@@ -101,6 +102,10 @@ after a short delay. If another
 process changes the clipboard during the transaction, MojiPond does not
 overwrite that newer content. If the initial snapshot cannot be captured
 completely, the temporary paste is not attempted.
+
+When Return was intercepted while a shortcode replacement was still
+completing, MojiPond revalidates the same target and posts one tagged Return
+after insertion. Escape revokes that pending send.
 
 The insertion engine exposes a non-mutating copy-fallback result. When it
 includes an already-validated media payload, MojiPond shows **Copy Media

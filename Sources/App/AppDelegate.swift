@@ -77,6 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
             }
             configureUITestServices()
+            observeApplicationState()
             configureStatusItem()
             switch launchConfiguration.initialScreen {
             case .library:
@@ -545,6 +546,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func addUpdateItems(to menu: NSMenu) {
+        guard appState.updates.canCheckForUpdates else {
+            return
+        }
         switch appState.updates.state {
         case let .available(metadata):
             menu.addItem(
@@ -624,8 +628,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 action: nil,
                 keyEquivalent: ""
             ).isEnabled = false
-        case .unconfigured,
-             .idle,
+        case .unconfigured:
+            break
+        case .idle,
              .current,
              .incompatible,
              .disabled,
@@ -754,6 +759,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         do {
             let builtInPack = try BuiltInRuntimeCatalogLoader().loadPack()
+            let usage = try FileEmojiUsageStore(fileURL: paths.usageFile)
             let library = LibraryStore(
                 rootURL: paths.libraryRoot,
                 reservedShortcodes:
@@ -761,6 +767,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         in: builtInPack
                     )
             )
+            usageStore = usage
             libraryStore = library
             let viewModel = LibraryViewModel(
                 store: library,
@@ -771,7 +778,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         workspaceRootURL: paths.importStagingRoot
                     )
                     : nil,
-                builtInLoader: { builtInPack }
+                builtInLoader: { builtInPack },
+                usageStore: usage
             )
             libraryViewModel = viewModel
             if launchConfiguration.initialScreen == .importPreview {
@@ -846,28 +854,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             for: .mojiPondResetUsageRanking
         )
         .sink { [weak self] _ in
-            guard let self, let usageStore = self.usageStore else {
-                return
-            }
-            Task {
-                do {
-                    try await usageStore.resetUsageRanking()
-                    await MainActor.run {
-                        self.runtimeController?.reloadUsageSnapshot()
-                        self.appState.setRuntimeNotice(
-                            "Recents and usage ranking were reset."
-                        )
-                    }
-                } catch {
-                    await MainActor.run {
-                        self.appState.setRuntimeNotice(
-                            "Usage ranking could not be reset."
-                        )
-                    }
+            self?.resetUsageRanking()
+        }
+        .store(in: &cancellables)
+    }
+
+    func resetUsageRanking() {
+        guard let usageStore else {
+            appState.setRuntimeNotice(UsageRankingResetNotice.failure)
+            return
+        }
+        Task {
+            do {
+                try await usageStore.resetUsageRanking()
+                await MainActor.run {
+                    self.runtimeController?.reloadUsageSnapshot()
+                    self.appState.setRuntimeNotice(
+                        UsageRankingResetNotice.success
+                    )
+                }
+            } catch {
+                await MainActor.run {
+                    self.appState.setRuntimeNotice(
+                        UsageRankingResetNotice.failure
+                    )
                 }
             }
         }
-        .store(in: &cancellables)
     }
 
     private func reloadRuntimeCatalog() async {
@@ -921,6 +934,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .clipboardRestoreFailed:
             appState.setRuntimeNotice(
                 "The emoji was inserted, but macOS could not restore the previous clipboard."
+            )
+        case .sendAfterInsertionUnavailable:
+            appState.setRuntimeNotice(
+                "Emoji inserted, but macOS blocked Return. Allow Send & Media Pasting to send immediately."
             )
         case let .sessionDenied(denial):
             let notice = runtimeNotice(for: denial)

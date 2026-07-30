@@ -33,6 +33,24 @@ struct EmojiSearchIndex: Sendable {
         entries.count
     }
 
+    func exactTokens(
+        usage: EmojiUsageSnapshot = EmojiUsageSnapshot()
+    ) -> Set<String> {
+        var tokens = Set<String>()
+        for entry in entries {
+            tokens.insert(entry.shortcode.normalized)
+            tokens.formUnion(entry.aliases.map(\.normalized))
+            let customAliases =
+                usage.customAliasesByItemID[entry.item.id, default: []]
+            tokens.formUnion(
+                customAliases
+                    .filter(EmojiAliasSyntax.isValidToken)
+                    .map(EmojiAliasSyntax.normalizedToken)
+            )
+        }
+        return tokens
+    }
+
     init(items: [EmojiItem]) {
         entries = items
             .map(IndexedEntry.init)

@@ -138,6 +138,93 @@ final class InsertionEngineTests: XCTestCase {
         XCTAssertEqual(pasteboard.items, originalClipboard)
     }
 
+    func testMediaRestoresClipboardOnlyAfterPasteIsAcknowledged() async throws {
+        let system = FakeAccessibilityTextSystem()
+        system.text = "Look :bufo:"
+        system.selection = NSRange(location: 11, length: 0)
+        let adapter = AccessibilityTextAdapter(system: system)
+        let request = AccessibilityReplacementRequest(
+            target: try adapter.focusedTarget(),
+            tokenRange: NSRange(location: 5, length: 6),
+            expectedToken: ":bufo:",
+            expectedSelection: system.selection
+        )
+        let originalClipboard = [PasteboardItemPayload.text("original")]
+        let pasteboard = FakePasteboard(items: originalClipboard)
+        let poster = FakeEventPoster()
+        let acknowledgement = expectation(
+            description: "Messages acknowledges the paste"
+        )
+        poster.onPaste = {
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(30))
+                XCTAssertNotEqual(pasteboard.items, originalClipboard)
+                system.text = "Look "
+                system.selection = NSRange(location: 5, length: 0)
+                acknowledgement.fulfill()
+            }
+        }
+        let engine = InsertionEngine(
+            accessibility: adapter,
+            pasteboard: PasteboardTransactionCoordinator(
+                pasteboard: pasteboard
+            ),
+            eventPoster: poster,
+            restorationDelay: .milliseconds(240)
+        )
+
+        let clock = ContinuousClock()
+        let startedAt = clock.now
+        let result = await engine.insert(
+            .media(.text("asset")),
+            replacing: request
+        )
+        let elapsed = startedAt.duration(to: clock.now)
+
+        await fulfillment(of: [acknowledgement], timeout: 1)
+        XCTAssertEqual(
+            result,
+            .inserted(.temporaryPasteboard(.restored))
+        )
+        XCTAssertLessThan(elapsed, .milliseconds(160))
+        XCTAssertEqual(pasteboard.items, originalClipboard)
+    }
+
+    func testMediaWithoutPasteAcknowledgementReturnsFallback() async throws {
+        let system = FakeAccessibilityTextSystem()
+        system.text = "Look :bufo:"
+        system.selection = NSRange(location: 11, length: 0)
+        let adapter = AccessibilityTextAdapter(system: system)
+        let request = AccessibilityReplacementRequest(
+            target: try adapter.focusedTarget(),
+            tokenRange: NSRange(location: 5, length: 6),
+            expectedToken: ":bufo:",
+            expectedSelection: system.selection
+        )
+        let originalClipboard = [PasteboardItemPayload.text("original")]
+        let pasteboard = FakePasteboard(items: originalClipboard)
+        let engine = InsertionEngine(
+            accessibility: adapter,
+            pasteboard: PasteboardTransactionCoordinator(
+                pasteboard: pasteboard
+            ),
+            eventPoster: FakeEventPoster(),
+            restorationDelay: .milliseconds(60)
+        )
+
+        let result = await engine.insert(
+            .media(.text("asset")),
+            replacing: request
+        )
+
+        XCTAssertEqual(result, .copyFallbackAvailable(.unknown))
+        XCTAssertEqual(pasteboard.items, originalClipboard)
+        XCTAssertEqual(
+            system.selectedRangesSet,
+            [NSRange(location: 5, length: 6)]
+        )
+    }
+
     func testUnsafeClipboardSnapshotLeavesTokenAndClipboardUnchanged() async throws {
         let system = FakeAccessibilityTextSystem()
         system.text = ":bufo:"
@@ -208,5 +295,78 @@ final class InsertionEngineTests: XCTestCase {
         )
         XCTAssertEqual(system.text, ":bufo:")
         XCTAssertEqual(pasteboard.items, originalClipboard)
+    }
+
+    func testRevokedReturnAuthorizationPreventsSyntheticPost() async throws {
+        let system = FakeAccessibilityTextSystem()
+        system.text = "🐸"
+        system.selection = NSRange(location: 2, length: 0)
+        let adapter = AccessibilityTextAdapter(system: system)
+        let request = AccessibilityReplacementRequest(
+            target: try adapter.focusedTarget(),
+            tokenRange: NSRange(location: 0, length: 6),
+            expectedToken: ":frog:",
+            expectedSelection: NSRange(location: 6, length: 0)
+        )
+        let poster = FakeEventPoster()
+        let engine = InsertionEngine(
+            accessibility: adapter,
+            pasteboard: PasteboardTransactionCoordinator(
+                pasteboard: FakePasteboard()
+            ),
+            eventPoster: poster,
+            restorationDelay: .zero,
+            returnSettleDelay: .zero
+        )
+
+        let sent = await engine.sendReturnAfterConfirmedInsertion(
+            replacing: request,
+            claimSend: { false }
+        )
+
+        XCTAssertFalse(sent)
+        XCTAssertEqual(poster.returnCount, 0)
+    }
+
+    func testBrowserInsertionAcknowledgesCollapsedCaretMovementBeforeSend()
+        async throws
+    {
+        let system = FakeAccessibilityTextSystem()
+        system.text = "Hello "
+        system.selection = NSRange(location: 6, length: 0)
+        let adapter = AccessibilityTextAdapter(system: system)
+        let request = AccessibilityReplacementRequest(
+            target: try adapter.focusedTarget(),
+            tokenRange: system.selection,
+            expectedToken: "",
+            expectedSelection: system.selection
+        )
+        let family = "👨‍👩‍👧‍👦"
+        try adapter.replaceUnicode(family, request: request)
+        let poster = FakeEventPoster()
+        let engine = InsertionEngine(
+            accessibility: adapter,
+            pasteboard: PasteboardTransactionCoordinator(
+                pasteboard: FakePasteboard()
+            ),
+            eventPoster: poster,
+            restorationDelay: .zero,
+            returnSettleDelay: .zero
+        )
+
+        let sent = await engine.sendReturnAfterConfirmedInsertion(
+            replacing: request
+        )
+
+        XCTAssertTrue(sent)
+        XCTAssertEqual(system.text, "Hello \(family)")
+        XCTAssertEqual(
+            system.selection,
+            NSRange(
+                location: 6 + family.utf16.count,
+                length: 0
+            )
+        )
+        XCTAssertEqual(poster.returnCount, 1)
     }
 }

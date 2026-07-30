@@ -12,42 +12,30 @@ final class MojiPondUITests: XCTestCase {
             application.terminate()
         }
 
-        let welcomeExists = application.staticTexts[
-            "Every emote, right where you type"
+        let setupExists = application.staticTexts[
+            "Type :wave: to insert 👋"
         ].waitForExistence(timeout: 5)
-        XCTAssertTrue(welcomeExists)
+        XCTAssertTrue(setupExists)
         XCTAssertTrue(
-            application.staticTexts[
-                "Import one reviewed ZIP at a time."
-            ].exists
+            application.staticTexts["Input Monitoring"].exists
+        )
+        XCTAssertTrue(application.staticTexts["Accessibility"].exists)
+        XCTAssertFalse(
+            application.staticTexts["Send & Media Pasting"].exists
         )
         let onboardingWindow = application.windows["Set Up MojiPond"]
         XCTAssertTrue(onboardingWindow.waitForExistence(timeout: 2))
         attachScreen(
-            named: "onboarding-welcome",
+            named: "onboarding-setup",
             element: onboardingWindow
         )
 
-        application.buttons["Continue"].click()
+        XCTAssertTrue(application.buttons["Use Library Only"].exists)
+        application.buttons["Try It"].click()
 
-        let permissionsExists = application.staticTexts[
-            "Permissions, used narrowly"
-        ].waitForExistence(timeout: 2)
-        XCTAssertTrue(permissionsExists)
-        let libraryModeExists = application.buttons[
-            "Continue in Library Mode"
-        ].exists
-        XCTAssertTrue(libraryModeExists)
-        attachScreen(
-            named: "onboarding-permission-explanation",
-            element: onboardingWindow
-        )
-
-        application.buttons["Continue in Library Mode"].click()
-
-        let practiceFieldExists = application.textFields[
-            "onboarding.practiceField"
-        ].waitForExistence(timeout: 2)
+        let practiceFieldExists = application.descendants(
+            matching: .any
+        )["onboarding.practiceField"].waitForExistence(timeout: 2)
         XCTAssertTrue(practiceFieldExists)
         let privacyWindowExists = application.windows.matching(
             NSPredicate(
@@ -59,6 +47,34 @@ final class MojiPondUITests: XCTestCase {
         attachScreen(
             named: "onboarding-practice",
             element: onboardingWindow
+        )
+
+        application.buttons["Open Library"].click()
+        XCTAssertTrue(
+            application.windows[
+                "MojiPond Library"
+            ].waitForExistence(timeout: 5)
+        )
+    }
+
+    func testOnboardingLibraryOnlyActionOpensLibrary() {
+        continueAfterFailure = false
+        let application = launch(
+            initialScreen: "onboarding",
+            appearance: .light
+        )
+        defer {
+            application.terminate()
+        }
+
+        let libraryOnly = application.buttons["Use Library Only"]
+        XCTAssertTrue(libraryOnly.waitForExistence(timeout: 5))
+        libraryOnly.click()
+
+        XCTAssertTrue(
+            application.windows[
+                "MojiPond Library"
+            ].waitForExistence(timeout: 5)
         )
     }
 
@@ -116,7 +132,9 @@ final class MojiPondUITests: XCTestCase {
                 "Create an empty pack"
             ].waitForExistence(timeout: 2)
         )
-        let nameField = application.textFields["Name"]
+        let nameField = application.descendants(
+            matching: .any
+        )["newPack.name"]
         XCTAssertTrue(nameField.waitForExistence(timeout: 2))
         nameField.click()
         nameField.typeText("ZIP Only Pack")
@@ -189,8 +207,7 @@ final class MojiPondUITests: XCTestCase {
             initialScreen: "import-preview",
             appearance: .light,
             windowTitle: "MojiPond Import Preview",
-            expectedText: "Review “Pond Favorites”",
-            expectsStaticText: true,
+            expectedText: "importPreview.title",
             screenshotName: "import-preview"
         )
         captureDocumentationSurface(
@@ -212,6 +229,80 @@ final class MojiPondUITests: XCTestCase {
         )
     }
 
+    func testSettingsHidesUnavailableUpdatesAndReportsUsageReset() {
+        continueAfterFailure = false
+        let application = launch(
+            initialScreen: "settings",
+            appearance: .light
+        )
+        defer {
+            application.terminate()
+        }
+
+        let settingsWindow = application.windows["MojiPond Settings"]
+        XCTAssertTrue(settingsWindow.waitForExistence(timeout: 5))
+        XCTAssertFalse(
+            application.switches["Check for signed updates"].exists
+        )
+
+        application.descendants(matching: .any)["Privacy"].click()
+        XCTAssertTrue(
+            application.staticTexts[
+                "Send & Media Pasting"
+            ].waitForExistence(timeout: 2)
+        )
+        XCTAssertTrue(
+            application.buttons["Allow Send & Media Pasting"].exists
+        )
+
+        application.descendants(matching: .any)["About"].click()
+        XCTAssertTrue(
+            application.staticTexts[
+                "Shortcodes and custom emoji for your Mac."
+            ].waitForExistence(timeout: 2)
+        )
+        XCTAssertFalse(application.buttons["Check for Updates…"].exists)
+        XCTAssertFalse(
+            application.staticTexts.matching(
+                NSPredicate(
+                    format: "label CONTAINS[c] %@",
+                    "local ad-hoc build"
+                )
+            ).firstMatch.exists
+        )
+
+        application.descendants(matching: .any)["Library"].click()
+        let resetButton = application.buttons[
+            "Reset recents and usage ranking"
+        ]
+        XCTAssertTrue(resetButton.waitForExistence(timeout: 2))
+        resetButton.click()
+        XCTAssertTrue(
+            application.staticTexts[
+                "Reset recents and usage ranking?"
+            ].waitForExistence(timeout: 2)
+        )
+        let resetConfirmation = settingsWindow.sheets.firstMatch
+        XCTAssertTrue(resetConfirmation.waitForExistence(timeout: 2))
+        resetConfirmation.buttons["Reset"].firstMatch.click()
+        let usageResetNotice = application.descendants(
+            matching: .any
+        )["settings.usageResetNotice"]
+        XCTAssertTrue(usageResetNotice.waitForExistence(timeout: 2))
+        XCTAssertTrue(
+            application.staticTexts[
+                "Recents and usage ranking were reset."
+            ].waitForExistence(timeout: 2)
+        )
+
+        application.buttons["Open MojiPond Library"].click()
+        XCTAssertTrue(
+            application.windows[
+                "MojiPond Library"
+            ].waitForExistence(timeout: 5)
+        )
+    }
+
     private func captureLibraryImportSurface(
         appearance: AppUITestAppearance,
         screenshotName: String
@@ -225,20 +316,20 @@ final class MojiPondUITests: XCTestCase {
         }
 
         assertLibraryIsReady(application)
-        let importPackButtons = application.buttons.matching(
-            NSPredicate(format: "label == %@", "Import Pack")
+        let importZIPButtons = application.buttons.matching(
+            NSPredicate(format: "label == %@", "Import ZIP")
         )
-        let importPackButton = importPackButtons.firstMatch
+        let importZIPButton = importZIPButtons.firstMatch
         XCTAssertTrue(
-            importPackButton.waitForExistence(timeout: 2),
-            "Expected Import Pack to be available"
+            importZIPButton.waitForExistence(timeout: 2),
+            "Expected Import ZIP to be available"
         )
         XCTAssertEqual(
-            importPackButtons.count,
+            importZIPButtons.count,
             1,
-            "Expected exactly one accessible Import Pack button"
+            "Expected exactly one accessible Import ZIP button"
         )
-        importPackButton.click()
+        importZIPButton.click()
         XCTAssertTrue(
             application.staticTexts[
                 "Import a ZIP pack"
@@ -311,16 +402,15 @@ final class MojiPondUITests: XCTestCase {
 
         XCTAssertTrue(
             application.staticTexts[
-                "Every emote, right where you type"
+                "Type :wave: to insert 👋"
             ].waitForExistence(timeout: 5)
         )
-        application.buttons["Continue"].click()
         let permissionStatus = application.descendants(
             matching: .any
         ).matching(
             NSPredicate(
                 format: "label == %@ AND value == %@",
-                "Permission status",
+                "Input Monitoring permission",
                 expectedStatus
             )
         ).firstMatch
@@ -328,6 +418,41 @@ final class MojiPondUITests: XCTestCase {
             permissionStatus.waitForExistence(timeout: 2),
             "Expected permission status \(expectedStatus)"
         )
+        switch scenario {
+        case .notRequested:
+            XCTAssertTrue(
+                application.buttons[
+                    "Allow Input Monitoring"
+                ].exists
+            )
+            XCTAssertFalse(
+                application.buttons[
+                    "Open Input Monitoring Settings"
+                ].exists
+            )
+        case .denied, .revoked:
+            XCTAssertFalse(
+                application.buttons[
+                    "Allow Input Monitoring"
+                ].exists
+            )
+            XCTAssertTrue(
+                application.buttons[
+                    "Open Input Monitoring Settings"
+                ].exists
+            )
+        case .granted:
+            XCTAssertFalse(
+                application.buttons[
+                    "Allow Input Monitoring"
+                ].exists
+            )
+            XCTAssertFalse(
+                application.buttons[
+                    "Open Input Monitoring Settings"
+                ].exists
+            )
+        }
         let window = application.windows["Set Up MojiPond"]
         XCTAssertTrue(window.waitForExistence(timeout: 2))
         attachScreen(named: screenshotName, element: window)
@@ -343,7 +468,7 @@ final class MojiPondUITests: XCTestCase {
         )
         XCTAssertTrue(
             application.buttons[
-                "Import Pack"
+                "Import ZIP"
             ].firstMatch.waitForExistence(timeout: 5)
         )
         XCTAssertTrue(
@@ -367,6 +492,8 @@ final class MojiPondUITests: XCTestCase {
     ) -> XCUIApplication {
         let application = XCUIApplication()
         application.launchArguments = [
+            "-ApplePersistenceIgnoreState",
+            "YES",
             AppUITestArgument.enabled,
             AppUITestArgument.screen,
             initialScreen,

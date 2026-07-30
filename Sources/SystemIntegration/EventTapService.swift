@@ -55,20 +55,59 @@ enum EventInterceptionDecision: Equatable, Sendable {
 struct EventInterceptionOutcome: Equatable, Sendable {
     let decision: EventInterceptionDecision
     let mode: RuntimeInterceptionMode?
+    /// Identifies the bounded shortcode prediction that observed this event.
+    /// The worker uses it only to verify that an Accessibility capture belongs
+    /// to the same event-tap session; it never affects public interception
+    /// semantics.
+    let predictionGeneration: UInt64?
+    /// Identifies the synchronous interaction state that decided this event.
+    /// The worker may activate a commit only while this revision is current,
+    /// preventing an older queued event from rearming a canceled surface.
+    let interactionRevision: UInt64?
 
     static let passThrough = Self(
         decision: .passThrough,
-        mode: nil
+        mode: nil,
+        predictionGeneration: nil,
+        interactionRevision: nil
     )
     static let intercept = Self(
         decision: .intercept,
-        mode: nil
+        mode: nil,
+        predictionGeneration: nil,
+        interactionRevision: nil
     )
 
     static func intercepting(
-        _ mode: RuntimeInterceptionMode
+        _ mode: RuntimeInterceptionMode,
+        predictionGeneration: UInt64? = nil,
+        interactionRevision: UInt64? = nil
     ) -> Self {
-        Self(decision: .intercept, mode: mode)
+        Self(
+            decision: .intercept,
+            mode: mode,
+            predictionGeneration: predictionGeneration,
+            interactionRevision: interactionRevision
+        )
+    }
+
+    static func passingThrough(
+        predictionGeneration: UInt64?,
+        interactionRevision: UInt64? = nil
+    ) -> Self {
+        Self(
+            decision: .passThrough,
+            mode: nil,
+            predictionGeneration: predictionGeneration,
+            interactionRevision: interactionRevision
+        )
+    }
+
+    static func == (
+        lhs: EventInterceptionOutcome,
+        rhs: EventInterceptionOutcome
+    ) -> Bool {
+        lhs.decision == rhs.decision && lhs.mode == rhs.mode
     }
 }
 

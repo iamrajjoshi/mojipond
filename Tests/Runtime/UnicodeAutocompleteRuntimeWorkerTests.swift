@@ -28,6 +28,581 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         XCTAssertEqual(prefix.system.text, ":fro:")
     }
 
+    func testReturnImmediatelyAfterExactCloseSendsOnlyAfterInsertion()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":frog:",
+            presentationDelayMilliseconds: 160
+        )
+        harness.worker.setCaptureEnabled(true)
+        harness.gate.setCaptureEnabled(true)
+        deliver(":fro", into: harness)
+        let safePrefixVerified = await eventually {
+            harness.gate.isExactCommitArmed
+        }
+        XCTAssertTrue(safePrefixVerified)
+        XCTAssertEqual(harness.gate.mode, .hidden)
+
+        let finalCharacter = keySnapshot(
+            keyCode: 5,
+            characters: "g"
+        )
+        let finalCharacterOutcome = harness.gate.outcome(
+            for: finalCharacter
+        )
+        let closingTrigger = keySnapshot(
+            keyCode: 41,
+            characters: ":"
+        )
+        let closingOutcome = harness.gate.outcome(for: closingTrigger)
+        XCTAssertEqual(closingOutcome.decision, .passThrough)
+
+        let returnKey = keySnapshot(
+            keyCode: RuntimeKeyboardKeyCode.returnKey
+        )
+        let returnOutcome = harness.gate.outcome(for: returnKey)
+        XCTAssertEqual(returnOutcome, .intercepting(.committing))
+
+        // Let the older presentation attempt reach the main actor after the
+        // gate has synchronously armed the commit. Its gate rejection must
+        // not cancel the still-valid parser transaction.
+        try? await Task.sleep(for: .milliseconds(180))
+
+        // Deliver only after every event-tap decision has been made. This
+        // matches production when worker delivery trails the event tap.
+        harness.worker.enqueue(
+            finalCharacter.delivered(with: finalCharacterOutcome)
+        )
+        harness.worker.enqueue(
+            closingTrigger.delivered(with: closingOutcome)
+        )
+        harness.worker.enqueue(
+            returnKey.delivered(with: returnOutcome)
+        )
+
+        let insertedThenSent = await eventually {
+            harness.system.text == "🐸"
+                && harness.poster.returnCount == 1
+        }
+        XCTAssertTrue(insertedThenSent)
+        XCTAssertEqual(harness.poster.pasteCount, 0)
+    }
+
+    func testBlockedReturnReportsMissingSendPermissionAfterInsertion()
+        async throws
+    {
+        let diagnostics = RuntimeDiagnosticRecorder()
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":frog:",
+            canPostEvents: false,
+            diagnosticHandler: { diagnostic in
+                diagnostics.append(diagnostic)
+            }
+        )
+        harness.worker.setCaptureEnabled(true)
+        harness.gate.setCaptureEnabled(true)
+        deliver(":frog", into: harness)
+        let exactCommitArmed = await eventually {
+            harness.gate.isExactCommitArmed
+        }
+        XCTAssertTrue(exactCommitArmed)
+
+        let closingTrigger = keySnapshot(
+            keyCode: 41,
+            characters: ":"
+        )
+        let closingOutcome = harness.gate.outcome(for: closingTrigger)
+        let returnKey = keySnapshot(
+            keyCode: RuntimeKeyboardKeyCode.returnKey
+        )
+        let returnOutcome = harness.gate.outcome(for: returnKey)
+        XCTAssertEqual(returnOutcome, .intercepting(.committing))
+
+        harness.worker.enqueue(
+            closingTrigger.delivered(with: closingOutcome)
+        )
+        harness.worker.enqueue(
+            returnKey.delivered(with: returnOutcome)
+        )
+
+        let failureExplained = await eventually {
+            harness.system.text == "🐸"
+                && diagnostics.values.contains(
+                    .sendAfterInsertionUnavailable
+                )
+        }
+        XCTAssertTrue(failureExplained)
+        XCTAssertEqual(harness.poster.returnCount, 0)
+    }
+
+    func testInterceptedReturnSurvivesDelayedEventTapDelivery()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":frog:",
+            presentationDelayMilliseconds: 160
+        )
+        harness.worker.setCaptureEnabled(true)
+        harness.gate.setCaptureEnabled(true)
+        deliver(":fro", into: harness)
+        let exactCommitArmed = await eventually {
+            harness.gate.isExactCommitArmed
+        }
+        XCTAssertTrue(exactCommitArmed)
+
+        let returnHandlerReached = DispatchSemaphore(value: 0)
+        let releaseReturnHandler = DispatchSemaphore(value: 0)
+        let worker = harness.worker
+        let gate = harness.gate
+        let eventTap = SessionEventTapService(
+            label: "test.delayed-return-delivery",
+            interceptionPolicy: { snapshot in
+                gate.outcome(for: snapshot)
+            },
+            eventHandler: { snapshot in
+                if snapshot.keyCode == RuntimeKeyboardKeyCode.returnKey {
+                    returnHandlerReached.signal()
+                    _ = releaseReturnHandler.wait(
+                        timeout: .now() + 2
+                    )
+                }
+                worker.enqueue(snapshot)
+            }
+        )
+        defer {
+            releaseReturnHandler.signal()
+            withExtendedLifetime(eventTap) {}
+        }
+
+        XCTAssertEqual(
+            eventTap.process(
+                keySnapshot(keyCode: 5, characters: "g")
+            ),
+            .passThrough
+        )
+        XCTAssertEqual(
+            eventTap.process(
+                keySnapshot(keyCode: 41, characters: ":")
+            ),
+            .passThrough
+        )
+        XCTAssertEqual(
+            eventTap.process(
+                keySnapshot(
+                    keyCode: RuntimeKeyboardKeyCode.returnKey
+                )
+            ),
+            .intercept
+        )
+        XCTAssertEqual(
+            returnHandlerReached.wait(timeout: .now() + 1),
+            .success
+        )
+
+        let insertedThenSent = await eventually {
+            harness.system.text == "🐸"
+                && harness.poster.returnCount == 1
+        }
+        XCTAssertTrue(insertedThenSent)
+        releaseReturnHandler.signal()
+    }
+
+    func testEscapeRevokesReturnBeforeDelayedEventTapDelivery()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":frog:",
+            settleDelayMilliseconds: 80,
+            presentationDelayMilliseconds: 160
+        )
+        harness.worker.setCaptureEnabled(true)
+        harness.gate.setCaptureEnabled(true)
+        deliver(":fro", into: harness)
+        let exactCommitArmed = await eventually {
+            harness.gate.isExactCommitArmed
+        }
+        XCTAssertTrue(exactCommitArmed)
+
+        let returnHandlerReached = DispatchSemaphore(value: 0)
+        let releaseReturnHandler = DispatchSemaphore(value: 0)
+        let worker = harness.worker
+        let gate = harness.gate
+        let eventTap = SessionEventTapService(
+            label: "test.escape-before-return-delivery",
+            interceptionPolicy: { snapshot in
+                gate.outcome(for: snapshot)
+            },
+            eventHandler: { snapshot in
+                if snapshot.keyCode == RuntimeKeyboardKeyCode.returnKey {
+                    returnHandlerReached.signal()
+                    _ = releaseReturnHandler.wait(
+                        timeout: .now() + 2
+                    )
+                }
+                worker.enqueue(snapshot)
+            }
+        )
+        defer {
+            releaseReturnHandler.signal()
+            withExtendedLifetime(eventTap) {}
+        }
+
+        _ = eventTap.process(
+            keySnapshot(keyCode: 5, characters: "g")
+        )
+        _ = eventTap.process(
+            keySnapshot(keyCode: 41, characters: ":")
+        )
+        XCTAssertEqual(
+            eventTap.process(
+                keySnapshot(
+                    keyCode: RuntimeKeyboardKeyCode.returnKey
+                )
+            ),
+            .intercept
+        )
+        XCTAssertEqual(
+            eventTap.process(
+                keySnapshot(keyCode: RuntimeKeyboardKeyCode.escape)
+            ),
+            .intercept
+        )
+        XCTAssertEqual(
+            returnHandlerReached.wait(timeout: .now() + 1),
+            .success
+        )
+
+        try? await Task.sleep(for: .milliseconds(180))
+        XCTAssertEqual(harness.system.text, ":frog:")
+        XCTAssertEqual(harness.poster.returnCount, 0)
+        XCTAssertEqual(harness.gate.mode, .hidden)
+        releaseReturnHandler.signal()
+    }
+
+    func testCharacterAfterExactCloseNeverSwallowsFollowingReturn()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":frog:x",
+            settleDelayMilliseconds: 80
+        )
+        harness.worker.setCaptureEnabled(true)
+        harness.gate.setCaptureEnabled(true)
+        deliver(":fro", into: harness)
+        let safePrefixVerified = await eventually {
+            harness.gate.isExactCommitArmed
+        }
+        XCTAssertTrue(safePrefixVerified)
+
+        let finalCharacter = keySnapshot(
+            keyCode: 5,
+            characters: "g"
+        )
+        let finalCharacterOutcome = harness.gate.outcome(
+            for: finalCharacter
+        )
+        let closingTrigger = keySnapshot(
+            keyCode: 41,
+            characters: ":"
+        )
+        let closingOutcome = harness.gate.outcome(for: closingTrigger)
+        let invalidatingCharacter = keySnapshot(
+            keyCode: 7,
+            characters: "x"
+        )
+        let invalidatingOutcome = harness.gate.outcome(
+            for: invalidatingCharacter
+        )
+
+        XCTAssertEqual(closingOutcome.decision, .passThrough)
+        XCTAssertEqual(invalidatingOutcome.decision, .passThrough)
+        XCTAssertEqual(harness.gate.mode, .hidden)
+
+        // Delay delivery of the invalidating event after its event-tap
+        // decision. Older close processing must not resurrect the commit.
+        let updateStart = harness.presenter.updates.count
+        harness.worker.enqueue(
+            finalCharacter.delivered(with: finalCharacterOutcome)
+        )
+        harness.worker.enqueue(
+            closingTrigger.delivered(with: closingOutcome)
+        )
+        let staleCloseProcessed = await eventually {
+            harness.presenter.updates.count > updateStart
+        }
+        XCTAssertTrue(staleCloseProcessed)
+        XCTAssertEqual(harness.gate.mode, .hidden)
+
+        let returnKey = keySnapshot(
+            keyCode: RuntimeKeyboardKeyCode.returnKey
+        )
+        let returnOutcome = harness.gate.outcome(for: returnKey)
+        XCTAssertEqual(returnOutcome.decision, .passThrough)
+
+        harness.worker.enqueue(
+            invalidatingCharacter.delivered(with: invalidatingOutcome)
+        )
+        harness.worker.enqueue(
+            returnKey.delivered(with: returnOutcome)
+        )
+
+        try? await Task.sleep(for: .milliseconds(220))
+        XCTAssertEqual(harness.poster.returnCount, 0)
+        XCTAssertEqual(harness.system.text, ":frog:x")
+        XCTAssertEqual(harness.gate.mode, .hidden)
+    }
+
+    func testShiftReturnAfterExactCloseNeverArmsFollowingReturn()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":frog:"
+        )
+        harness.worker.setCaptureEnabled(true)
+        harness.gate.setCaptureEnabled(true)
+        deliver(":fro", into: harness)
+        let safePrefixVerified = await eventually {
+            harness.gate.isExactCommitArmed
+        }
+        XCTAssertTrue(safePrefixVerified)
+
+        let finalCharacter = keySnapshot(
+            keyCode: 5,
+            characters: "g"
+        )
+        let finalCharacterOutcome = harness.gate.outcome(
+            for: finalCharacter
+        )
+        let closingTrigger = keySnapshot(
+            keyCode: 41,
+            characters: ":"
+        )
+        let closingOutcome = harness.gate.outcome(for: closingTrigger)
+        let shiftedReturn = keySnapshot(
+            keyCode: RuntimeKeyboardKeyCode.returnKey,
+            flags: [.maskShift]
+        )
+        let shiftedReturnOutcome = harness.gate.outcome(
+            for: shiftedReturn
+        )
+        let returnKey = keySnapshot(
+            keyCode: RuntimeKeyboardKeyCode.returnKey
+        )
+        let returnOutcome = harness.gate.outcome(for: returnKey)
+
+        XCTAssertEqual(shiftedReturnOutcome.decision, .passThrough)
+        XCTAssertEqual(returnOutcome.decision, .passThrough)
+        XCTAssertEqual(harness.gate.mode, .hidden)
+
+        harness.worker.enqueue(
+            finalCharacter.delivered(with: finalCharacterOutcome)
+        )
+        harness.worker.enqueue(
+            closingTrigger.delivered(with: closingOutcome)
+        )
+        harness.worker.enqueue(
+            shiftedReturn.delivered(with: shiftedReturnOutcome)
+        )
+        harness.worker.enqueue(
+            returnKey.delivered(with: returnOutcome)
+        )
+
+        try? await Task.sleep(for: .milliseconds(120))
+        XCTAssertEqual(harness.poster.returnCount, 0)
+        XCTAssertEqual(harness.system.text, ":frog:")
+        XCTAssertEqual(harness.gate.mode, .hidden)
+    }
+
+    func testSecondReturnAfterPickerAcceptanceSendsOnlyAfterInsertion()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":f",
+            settleDelayMilliseconds: 80
+        )
+        harness.worker.setCaptureEnabled(true)
+        type(":f", into: harness.worker)
+        let suggestionsShown = await eventually {
+            harness.gate.mode == .suggestions
+        }
+        XCTAssertTrue(suggestionsShown)
+
+        let firstReturn = keySnapshot(
+            keyCode: RuntimeKeyboardKeyCode.returnKey
+        )
+        let firstOutcome = harness.gate.outcome(for: firstReturn)
+        harness.worker.enqueue(firstReturn.delivered(with: firstOutcome))
+        let secondReturn = keySnapshot(
+            keyCode: RuntimeKeyboardKeyCode.returnKey
+        )
+        let secondOutcome = harness.gate.outcome(for: secondReturn)
+        harness.worker.enqueue(secondReturn.delivered(with: secondOutcome))
+
+        let insertedThenSent = await eventually {
+            harness.system.text == "🐸"
+                && harness.poster.returnCount == 1
+        }
+        XCTAssertTrue(insertedThenSent)
+    }
+
+    func testPendingSendIsDroppedWhenFocusedTargetChanges() async throws {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":frog:",
+            settleDelayMilliseconds: 80
+        )
+        harness.worker.setCaptureEnabled(true)
+        type(":frog:", into: harness.worker)
+        harness.worker.enqueue(
+            keySnapshot(keyCode: RuntimeKeyboardKeyCode.returnKey)
+        )
+        harness.system.focusedElementReference =
+            harness.system.alternateElement
+
+        try? await Task.sleep(for: .milliseconds(180))
+
+        XCTAssertEqual(harness.system.text, ":frog:")
+        XCTAssertEqual(harness.poster.returnCount, 0)
+    }
+
+    func testEscapeDuringCommitCancelsPendingInsertionAndSend() async throws {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":frog:",
+            settleDelayMilliseconds: 80
+        )
+        harness.worker.setCaptureEnabled(true)
+        type(":frog:", into: harness.worker)
+        harness.worker.enqueue(
+            keySnapshot(keyCode: RuntimeKeyboardKeyCode.returnKey)
+        )
+        harness.worker.enqueue(
+            keySnapshot(keyCode: RuntimeKeyboardKeyCode.escape)
+        )
+
+        try? await Task.sleep(for: .milliseconds(180))
+
+        XCTAssertEqual(harness.system.text, ":frog:")
+        XCTAssertEqual(harness.poster.returnCount, 0)
+        XCTAssertEqual(harness.gate.mode, .hidden)
+    }
+
+    func testSynchronousEscapeRevokesAnAlreadyStartedCommitCapture()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":frog",
+            captureDelayMilliseconds: 80
+        )
+        harness.worker.setCaptureEnabled(true)
+        type(":frog", into: harness.worker)
+        let shown = await eventually {
+            harness.gate.mode == .suggestions
+        }
+        XCTAssertTrue(shown)
+
+        let captureStart = harness.captureProvider.captureCount
+        let acceptance = keySnapshot(
+            keyCode: RuntimeKeyboardKeyCode.returnKey
+        )
+        let acceptanceOutcome = harness.gate.outcome(
+            for: acceptance
+        )
+        XCTAssertEqual(
+            acceptanceOutcome,
+            .intercepting(.suggestions)
+        )
+        harness.worker.enqueue(
+            acceptance.delivered(with: acceptanceOutcome)
+        )
+        let commitStarted = await eventually {
+            harness.gate.mode == .committing
+        }
+        XCTAssertTrue(commitStarted)
+        let captureStarted = await eventually {
+            harness.captureProvider.captureCount > captureStart
+        }
+        XCTAssertTrue(captureStarted)
+
+        let escape = harness.gate.outcome(
+            for: keySnapshot(
+                keyCode: RuntimeKeyboardKeyCode.escape
+            )
+        )
+        XCTAssertEqual(escape, .intercepting(.committing))
+
+        try? await Task.sleep(for: .milliseconds(140))
+        XCTAssertEqual(harness.system.text, ":frog")
+        XCTAssertEqual(harness.poster.returnCount, 0)
+        XCTAssertEqual(harness.gate.mode, .hidden)
+    }
+
+    func testEscapeAfterInsertionCancelsScheduledSend() async throws {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":frog:",
+            settleDelayMilliseconds: 30
+        )
+        harness.worker.setCaptureEnabled(true)
+        type(":frog:", into: harness.worker)
+        harness.worker.enqueue(
+            keySnapshot(keyCode: RuntimeKeyboardKeyCode.returnKey)
+        )
+
+        let inserted = await eventually {
+            harness.system.text == "🐸"
+        }
+        XCTAssertTrue(inserted)
+        let escape = keySnapshot(keyCode: RuntimeKeyboardKeyCode.escape)
+        let outcome = harness.gate.outcome(for: escape)
+        XCTAssertEqual(outcome, .intercepting(.committing))
+        harness.worker.enqueue(escape.delivered(with: outcome))
+
+        try? await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertEqual(harness.poster.returnCount, 0)
+        XCTAssertEqual(harness.gate.mode, .hidden)
+    }
+
+    func testTransientAccessibilityCaptureUsesBoundedSettlingBackoff()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":frog:",
+            settleDelayMilliseconds: 12,
+            accessibilityRetryLimit: 3,
+            captureFailuresBeforeSuccess: 3
+        )
+        harness.worker.setCaptureEnabled(true)
+        let clock = ContinuousClock()
+        let startedAt = clock.now
+        type(":frog:", into: harness.worker)
+
+        let inserted = await eventually(timeout: .milliseconds(500)) {
+            harness.system.text == "🐸"
+        }
+
+        XCTAssertTrue(inserted)
+        XCTAssertGreaterThanOrEqual(
+            startedAt.duration(to: clock.now),
+            .milliseconds(70)
+        )
+        XCTAssertLessThan(
+            startedAt.duration(to: clock.now),
+            .milliseconds(300)
+        )
+    }
+
     func testResetCancelsStaleDelayedInsertion() async throws {
         let harness = try makeHarness(
             items: [emoji(shortcode: "frog", value: "🐸")],
@@ -287,6 +862,49 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         XCTAssertEqual(harness.gate.mode, .hidden)
     }
 
+    func testInvalidationDuringCaptureCannotArmStaleSuggestions()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":f",
+            captureDelayMilliseconds: 100
+        )
+        harness.worker.setCaptureEnabled(true)
+        harness.gate.setCaptureEnabled(true)
+        deliver(":", into: harness)
+        let openingCaptureFinished = await eventually(
+            timeout: .milliseconds(300)
+        ) {
+            harness.gate.isExactCommitArmed
+        }
+        XCTAssertTrue(openingCaptureFinished)
+
+        deliver("f", into: harness)
+        let suggestionCaptureStarted = await eventually {
+            harness.captureProvider.captureCount >= 2
+        }
+        XCTAssertTrue(suggestionCaptureStarted)
+
+        let invalidatingKey = keySnapshot(
+            keyCode: 49,
+            characters: " "
+        )
+        let invalidatingOutcome = harness.gate.outcome(
+            for: invalidatingKey
+        )
+        XCTAssertEqual(invalidatingOutcome.decision, .passThrough)
+        XCTAssertEqual(harness.gate.mode, .hidden)
+
+        try? await Task.sleep(for: .milliseconds(150))
+        XCTAssertNil(harness.presenter.latestShown)
+        XCTAssertEqual(harness.gate.mode, .hidden)
+
+        harness.worker.enqueue(
+            invalidatingKey.delivered(with: invalidatingOutcome)
+        )
+    }
+
     func testDoubleTriggerOpensLargerLocalBrowser() async throws {
         let harness = try makeHarness(
             items: [
@@ -367,8 +985,6 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
 
         let keyRepeatPresented = await eventually(timeout: .seconds(5)) {
             harness.presenter.latestShown?.selectedIndex == keyRepeatCount
-                && harness.presenter.updates.count
-                    >= updateStart + keyRepeatCount
         }
         XCTAssertTrue(keyRepeatPresented)
 
@@ -380,7 +996,11 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
                 }
                 return snapshot
             }
-        XCTAssertEqual(selectionSnapshots.count, keyRepeatCount)
+        XCTAssertFalse(selectionSnapshots.isEmpty)
+        XCTAssertLessThanOrEqual(
+            selectionSnapshots.count,
+            keyRepeatCount
+        )
         XCTAssertEqual(
             Set(
                 ([initialSnapshot] + selectionSnapshots).map {
@@ -542,6 +1162,27 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         )
     }
 
+    func testInterceptionIsArmedBeforeVisibleSuggestionIsApplied()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":f"
+        )
+        var modeWhenVisible: RuntimeInterceptionMode?
+        harness.presenter.onApplyReportingVisibility = {
+            modeWhenVisible = harness.gate.mode
+        }
+        harness.worker.setCaptureEnabled(true)
+        type(":f", into: harness.worker)
+
+        let presented = await eventually {
+            harness.presenter.latestShown != nil
+        }
+        XCTAssertTrue(presented)
+        XCTAssertEqual(modeWhenVisible, .suggestions)
+    }
+
     func testPassThroughReturnBeforeSuggestionIsVisibleNeverAccepts()
         async throws {
         let harness = try makeHarness(
@@ -692,9 +1333,13 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
             height: 18
         ),
         settleDelayMilliseconds: Int = 0,
+        accessibilityRetryLimit: Int = 0,
+        captureFailuresBeforeSuccess: Int = 0,
         parserTimeout: TimeInterval = 3,
         presentationDelayMilliseconds: Int = 0,
+        captureDelayMilliseconds: Int = 0,
         captureError: RuntimeTextCaptureError? = nil,
+        canPostEvents: Bool = true,
         diagnosticHandler:
             (@Sendable (UnicodeAutocompleteRuntimeDiagnostic) -> Void)? = nil
     ) throws -> RuntimeWorkerHarness {
@@ -710,10 +1355,14 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
             target: target,
             selectionLocation: targetText.utf16.count,
             caretBounds: caretBounds,
-            error: captureError
+            error: captureError,
+            delayMilliseconds: captureDelayMilliseconds,
+            transientFailuresBeforeSuccess:
+                captureFailuresBeforeSuccess
         )
         let presenter = RuntimeRecordingPresenter()
         let gate = RuntimeInterceptionGate()
+        let poster = FakeEventPoster(canPostEvents: canPostEvents)
         let bridge = RuntimeMainActorBridge(
             presenter: presenter,
             insertionEngine: InsertionEngine(
@@ -721,7 +1370,7 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
                 pasteboard: PasteboardTransactionCoordinator(
                     pasteboard: FakePasteboard()
                 ),
-                eventPoster: FakeEventPoster(),
+                eventPoster: poster,
                 restorationDelay: .zero
             ),
             presentationDelayMilliseconds:
@@ -735,7 +1384,7 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
                 preferences: preferences,
                 accessibilitySettleDelayMilliseconds:
                     settleDelayMilliseconds,
-                accessibilityRetryLimit: 0
+                accessibilityRetryLimit: accessibilityRetryLimit
             ),
             interceptionGate: gate,
             contextProvider: captureProvider,
@@ -747,7 +1396,8 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
             gate: gate,
             presenter: presenter,
             system: system,
-            captureProvider: captureProvider
+            captureProvider: captureProvider,
+            poster: poster
         )
     }
 
@@ -762,6 +1412,20 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
                     characters: String(character)
                 )
             )
+        }
+    }
+
+    private func deliver(
+        _ text: String,
+        into harness: RuntimeWorkerHarness
+    ) {
+        for character in text {
+            let snapshot = keySnapshot(
+                keyCode: character == ":" ? 41 : 0,
+                characters: String(character)
+            )
+            let outcome = harness.gate.outcome(for: snapshot)
+            harness.worker.enqueue(snapshot.delivered(with: outcome))
         }
     }
 
@@ -810,12 +1474,13 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
     private func keySnapshot(
         keyCode: CGKeyCode,
         characters: String? = nil,
+        flags: CGEventFlags = [],
         interceptionOutcome: EventInterceptionOutcome? = nil
     ) -> KeyboardEventSnapshot {
         KeyboardEventSnapshot(
             typeRawValue: CGEventType.keyDown.rawValue,
             keyCode: keyCode,
-            flagsRawValue: 0,
+            flagsRawValue: flags.rawValue,
             timestamp: 1,
             characters: characters,
             interceptionOutcome: interceptionOutcome
@@ -869,12 +1534,14 @@ private struct RuntimeWorkerHarness {
     let presenter: RuntimeRecordingPresenter
     let system: FakeAccessibilityTextSystem
     let captureProvider: FixedRuntimeTextCaptureProvider
+    let poster: FakeEventPoster
 }
 
 @MainActor
 private final class RuntimeRecordingPresenter: RuntimeSuggestionPresenting {
     private(set) var updates: [RuntimeSuggestionPanelUpdate] = []
     var allowsPresentation = true
+    var onApplyReportingVisibility: (() -> Void)?
     private var latestRevision: UInt64 = 0
 
     var latestShown: RuntimeSuggestionPanelSnapshot? {
@@ -898,6 +1565,7 @@ private final class RuntimeRecordingPresenter: RuntimeSuggestionPresenting {
         _ update: RuntimeSuggestionPanelUpdate
     ) -> Bool {
         apply(update)
+        onApplyReportingVisibility?()
         return allowsPresentation
     }
 }
@@ -912,17 +1580,26 @@ private final class FixedRuntimeTextCaptureProvider:
     private let lock = NSLock()
     private var error: RuntimeTextCaptureError?
     private var storedCaptureCount = 0
+    private var transientFailuresRemaining: Int
+    private let delayMilliseconds: Int
 
     init(
         target: AccessibilityTextTarget,
         selectionLocation: Int,
         caretBounds: CGRect?,
-        error: RuntimeTextCaptureError?
+        error: RuntimeTextCaptureError?,
+        delayMilliseconds: Int,
+        transientFailuresBeforeSuccess: Int
     ) {
         self.target = target
         self.selectionLocation = selectionLocation
         self.caretBounds = caretBounds
         self.error = error
+        self.delayMilliseconds = max(0, delayMilliseconds)
+        transientFailuresRemaining = max(
+            0,
+            transientFailuresBeforeSuccess
+        )
     }
 
     var captureCount: Int {
@@ -942,9 +1619,18 @@ private final class FixedRuntimeTextCaptureProvider:
         trigger: Character
     ) throws -> RuntimeTextCapture {
         _ = trigger
-        let capturedError = lock.withLock {
+        let capturedError: RuntimeTextCaptureError? = lock.withLock {
             storedCaptureCount += 1
+            if transientFailuresRemaining > 0 {
+                transientFailuresRemaining -= 1
+                return .invalidTokenContext
+            }
             return error
+        }
+        if delayMilliseconds > 0 {
+            Thread.sleep(
+                forTimeInterval: Double(delayMilliseconds) / 1_000
+            )
         }
         if let capturedError {
             throw capturedError

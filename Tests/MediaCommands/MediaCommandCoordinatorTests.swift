@@ -205,6 +205,38 @@ final class MediaCommandCoordinatorTests: XCTestCase {
         XCTAssertEqual(currentState, cancelled)
     }
 
+    func testAlreadyCancelledSearchNeverStartsProviderWork() async throws {
+        let searcher = MediaSearchStub(
+            behaviors: [
+                .results([remoteItem(id: "unexpected")])
+            ]
+        )
+        let coordinator = try makeCoordinator(searcher: searcher)
+        let bundleIdentifier = messages
+        let options = network(noto: true)
+
+        let state = await Task {
+            withUnsafeCurrentTask { task in
+                task?.cancel()
+            }
+            return await coordinator.search(
+                command: .sticker,
+                query: "frog",
+                bundleIdentifier: bundleIdentifier,
+                networkOptions: options
+            )
+        }.value
+
+        XCTAssertEqual(
+            state,
+            .cancelled(MediaCommandRequest(id: 1, command: .sticker))
+        )
+        let callCount = await searcher.numberOfCalls()
+        XCTAssertEqual(callCount, 0)
+        let currentState = await coordinator.currentState()
+        XCTAssertEqual(currentState, .idle)
+    }
+
     func testOriginalRemoteGIFBytesAreNotReencoded() async throws {
         let originalBytes = Data([
             0x47, 0x49, 0x46, 0x38, 0x39, 0x61,

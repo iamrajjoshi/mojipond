@@ -2,6 +2,11 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+enum UsageRankingResetNotice {
+    static let success = "Recents and usage ranking were reset."
+    static let failure = "Usage ranking could not be reset."
+}
+
 struct SettingsRootView: View {
     @ObservedObject var appState: AppState
     @ObservedObject private var permissions: SystemPermissionCenter
@@ -9,13 +14,23 @@ struct SettingsRootView: View {
 
     @State private var domainDraft = ""
     @State private var exclusionError: String?
+    @State private var permissionNavigationError: String?
+    @State private var showsUsageResetConfirmation = false
     @State private var showsManualUpdateConfirmation = false
     @State private var showsNativeUpdateConfirmation = false
+    private let permissionSettingsOpener:
+        any SystemPermissionSettingsOpening
 
-    init(appState: AppState) {
+    init(
+        appState: AppState,
+        permissionSettingsOpener:
+            any SystemPermissionSettingsOpening =
+                MacSystemPermissionSettingsOpener()
+    ) {
         self.appState = appState
         permissions = appState.permissions
         updates = appState.updates
+        self.permissionSettingsOpener = permissionSettingsOpener
     }
 
     var body: some View {
@@ -38,6 +53,25 @@ struct SettingsRootView: View {
             minHeight: 500,
             idealHeight: 540
         )
+        .confirmationDialog(
+            "Reset recents and usage ranking?",
+            isPresented: $showsUsageResetConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Reset", role: .destructive) {
+                clearUsageResetNotice()
+                NotificationCenter.default.post(
+                    name: .mojiPondResetUsageRanking,
+                    object: nil
+                )
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(
+                "This removes recent emoji and learned ranking. "
+                    + "Favorites and preferred skin tones stay unchanged."
+            )
+        }
     }
 
     private var general: some View {
@@ -69,15 +103,16 @@ struct SettingsRootView: View {
                     "Allow /sticker downloads in Messages",
                     isOn: preference(\.network.allowsStickerSearch)
                 )
-                Toggle(
-                    "Check for signed updates",
-                    isOn: preference(\.network.allowsUpdateChecks)
-                )
+                if updates.canCheckForUpdates {
+                    Toggle(
+                        "Check for signed updates",
+                        isOn: preference(\.network.allowsUpdateChecks)
+                    )
+                }
                 Text(
-                    "Online features are independent and off by default. "
-                        + "Noto sticker queries stay local after a fixed "
-                        + "manifest download. Update traffic is described "
-                        + "in Privacy."
+                    updates.canCheckForUpdates
+                        ? "Sticker downloads and update checks are off by default."
+                        : "Sticker downloads are off by default."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -161,9 +196,27 @@ struct SettingsRootView: View {
                     )
                 }
                 Button("Reset recents and usage ranking", role: .destructive) {
-                    NotificationCenter.default.post(
-                        name: .mojiPondResetUsageRanking,
-                        object: nil
+                    showsUsageResetConfirmation = true
+                }
+                if let notice = appState.runtimeNotice,
+                   notice == UsageRankingResetNotice.success
+                    || notice == UsageRankingResetNotice.failure {
+                    Label(
+                        notice,
+                        systemImage:
+                            notice == UsageRankingResetNotice.success
+                                ? "checkmark.circle"
+                                : "exclamationmark.triangle"
+                    )
+                    .font(.caption)
+                    .accessibilityIdentifier(
+                        "settings.usageResetNotice"
+                    )
+                    .accessibilityLabel(notice)
+                    .foregroundStyle(
+                        notice == UsageRankingResetNotice.success
+                            ? AnyShapeStyle(.secondary)
+                            : AnyShapeStyle(PondDesign.errorForeground)
                     )
                 }
             }
@@ -184,22 +237,47 @@ struct SettingsRootView: View {
             Section("System permissions") {
                 PermissionSettingsRow(
                     title: "Input Monitoring",
-                    detail: "Recognizes a bounded shortcode while you type.",
+                    detail:
+                        "Observes global key events for one bounded shortcode. "
+                        + "Unrelated keys are discarded; typing is not saved.",
                     status: permissions.snapshot.inputMonitoring,
-                    request: { permissions.requestInputMonitoring() }
+                    request: { permissions.requestInputMonitoring() },
+                    openSettings: {
+                        openPermissionSettings(.inputMonitoring)
+                    }
                 )
                 PermissionSettingsRow(
                     title: "Accessibility",
-                    detail: "Validates the caret and replaces your selection.",
+                    detail:
+                        "Reads bounded text and caret position to show "
+                        + "suggestions and replace your shortcode. Message "
+                        + "text is not saved.",
                     status: permissions.snapshot.accessibility,
-                    request: { permissions.requestAccessibility() }
+                    request: { permissions.requestAccessibility() },
+                    openSettings: {
+                        openPermissionSettings(.accessibility)
+                    }
                 )
                 PermissionSettingsRow(
-                    title: "Event Posting",
-                    detail: "Needed only to paste media into another app.",
+                    title: "Send & Media Pasting",
+                    detail:
+                        "Optional. Pastes custom images in Messages and "
+                        + "preserves Return after insertion. macOS lists "
+                        + "this access under Accessibility.",
                     status: permissions.snapshot.eventPosting,
-                    request: { permissions.requestEventPosting() }
+                    request: { permissions.requestEventPosting() },
+                    openSettings: {
+                        openPermissionSettings(.eventPosting)
+                    }
                 )
+                if let permissionNavigationError {
+                    Label(
+                        permissionNavigationError,
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(PondDesign.warningForeground)
+                }
             }
 
             Section("Excluded apps") {
@@ -277,7 +355,7 @@ struct SettingsRootView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("MojiPond")
                         .font(.title2.weight(.semibold))
-                    Text("Your pond for every emote.")
+                    Text("Shortcodes and custom emoji for your Mac.")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -288,134 +366,118 @@ struct SettingsRootView: View {
                     forInfoDictionaryKey: "CFBundleShortVersionString"
                 ) as? String ?? "Development"
             )
-            LabeledContent("Updates", value: updates.statusSummary)
-            if case let .failed(message) = updates.state {
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(PondDesign.errorForeground)
-            }
-            if let metadata = updates.availableMetadata,
-               let releaseNotesURL = metadata.releaseNotesURL {
-                Link(
-                    "Read release notes for \(metadata.version)",
-                    destination: releaseNotesURL
-                )
-            }
-            if case let .available(metadata) = updates.state {
-                Button(
-                    "Download & Verify MojiPond \(metadata.version)…"
-                ) {
-                    updates.stageAvailableUpdate()
-                }
-                .buttonStyle(.borderedProminent)
-                .accessibilityHint(
-                    "Downloads the signed archive and verifies its digest, Developer ID signature, Team ID, hardened runtime, timestamp, and Gatekeeper status."
-                )
-            }
-            if case let .staging(metadata) = updates.state {
-                HStack {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text(
-                        "Downloading and verifying MojiPond \(metadata.version)…"
-                    )
-                }
-            }
-            if case let .revalidating(metadata) = updates.state {
-                HStack {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text(
-                        "Revalidating MojiPond \(metadata.version)…"
-                    )
-                }
-            }
-            if case let .launchingInstaller(metadata) = updates.state {
-                HStack {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text(
-                        "Starting the verified MojiPond \(metadata.version) installer…"
-                    )
-                }
-            }
-            if case let .staged(metadata, plan) = updates.state {
-                Label(
-                    "MojiPond \(metadata.version) passed every available verification.",
-                    systemImage: "checkmark.shield.fill"
-                )
-                .foregroundStyle(PondDesign.lily)
-                if let installationStatusMessage =
-                    updates.installationStatusMessage {
-                    Text(installationStatusMessage)
+            if updates.canCheckForUpdates {
+                LabeledContent("Updates", value: updates.statusSummary)
+                if case let .failed(message) = updates.state {
+                    Text(message)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(PondDesign.errorForeground)
                 }
-                HStack {
-                    switch updates.nativeInstallAvailability {
-                    case .available:
-                        Button("Install & Relaunch…") {
-                            showsNativeUpdateConfirmation = true
-                        }
-                        .buttonStyle(.borderedProminent)
-                    case let .manualInstallRequired(reason):
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(
-                                reason
-                                    + " Destination: "
-                                    + plan.destinationApplicationURL.path
-                            )
+                if let metadata = updates.availableMetadata,
+                   let releaseNotesURL = metadata.releaseNotesURL {
+                    Link(
+                        "Read release notes for \(metadata.version)",
+                        destination: releaseNotesURL
+                    )
+                }
+                if case let .available(metadata) = updates.state {
+                    Button(
+                        "Download & Verify MojiPond \(metadata.version)…"
+                    ) {
+                        updates.stageAvailableUpdate()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityHint(
+                        "Downloads and verifies the update before installation."
+                    )
+                }
+                if case let .staging(metadata) = updates.state {
+                    HStack {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text(
+                            "Downloading and verifying MojiPond \(metadata.version)…"
+                        )
+                    }
+                }
+                if case let .revalidating(metadata) = updates.state {
+                    HStack {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text(
+                            "Verifying MojiPond \(metadata.version)…"
+                        )
+                    }
+                }
+                if case let .launchingInstaller(metadata) = updates.state {
+                    HStack {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text(
+                            "Starting the MojiPond \(metadata.version) installer…"
+                        )
+                    }
+                }
+                if case let .staged(metadata, _) = updates.state {
+                    Label(
+                        "MojiPond \(metadata.version) is ready to install.",
+                        systemImage: "checkmark.shield.fill"
+                    )
+                    .foregroundStyle(PondDesign.lily)
+                    if let installationStatusMessage =
+                        updates.installationStatusMessage {
+                        Text(installationStatusMessage)
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                            Button("Show Verified App in Finder…") {
-                                showsManualUpdateConfirmation = true
+                    }
+                    HStack {
+                        switch updates.nativeInstallAvailability {
+                        case .available:
+                            Button("Install & Relaunch…") {
+                                showsNativeUpdateConfirmation = true
                             }
                             .buttonStyle(.borderedProminent)
+                        case let .manualInstallRequired(reason):
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(reason)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Button("Show in Finder…") {
+                                    showsManualUpdateConfirmation = true
+                                }
+                                .buttonStyle(.borderedProminent)
+                            }
+                        case let .unavailable(reason):
+                            Text(reason)
+                                .font(.caption)
+                                .foregroundStyle(PondDesign.errorForeground)
+                        case .none:
+                            EmptyView()
                         }
-                    case let .unavailable(reason):
-                        Text(reason)
-                            .font(.caption)
-                            .foregroundStyle(PondDesign.errorForeground)
-                    case .none:
-                        EmptyView()
-                    }
-                    Button("Discard Download", role: .destructive) {
-                        updates.discardStagedUpdate()
+                        Button("Discard Download", role: .destructive) {
+                            updates.discardStagedUpdate()
+                        }
                     }
                 }
+                Button(
+                    updates.isChecking ? "Checking…" : "Check for Updates…"
+                ) {
+                    updates.checkManually(
+                        automaticChecksEnabled:
+                        appState.preferences.network.allowsUpdateChecks
+                    )
+                }
+                .disabled(updates.isBusy)
             }
-            Button(
-                updates.isChecking ? "Checking…" : "Check for Updates…"
-            ) {
-                updates.checkManually(
-                    automaticChecksEnabled:
-                    appState.preferences.network.allowsUpdateChecks
-                )
-            }
-            .disabled(updates.isBusy)
             Text(
-                "Production updates require a trusted signed feed and must "
-                    + "be Developer ID signed, hardened, securely timestamped, "
-                    + "and accepted by Gatekeeper. This local ad-hoc build "
-                    + "intentionally cannot pass that policy."
-            )
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            Link(
-                "View private source repository",
-                destination: URL(
-                    string: "https://github.com/iamrajjoshi/mojipond"
-                )!
-            )
-            Text(
-                "No accounts, telemetry, message database access, "
-                    + "or background cloud storage."
+                "Shortcodes are processed on this Mac. MojiPond does not "
+                    + "save your messages or require an account."
             )
             .foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
         .confirmationDialog(
-            "Install the verified update and relaunch?",
+            "Install the update and relaunch?",
             isPresented: $showsNativeUpdateConfirmation,
             titleVisibility: .visible
         ) {
@@ -429,15 +491,16 @@ struct SettingsRootView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(
-                "MojiPond will revalidate the signed ZIP and both app identities, quit, perform a locked atomic replacement, verify the installed app, and relaunch it. If any post-replacement step fails, the previous app is restored."
+                "MojiPond will install the update and relaunch. If installation "
+                    + "fails, the current version is restored."
             )
         }
         .confirmationDialog(
-            "Prepare the verified app for manual installation?",
+            "Show the update in Finder?",
             isPresented: $showsManualUpdateConfirmation,
             titleVisibility: .visible
         ) {
-            Button("Revalidate and Show in Finder") {
+            Button("Show in Finder") {
                 Task {
                     guard let plan =
                         await updates.revalidateInstallation() else {
@@ -451,13 +514,23 @@ struct SettingsRootView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(
-                "MojiPond will verify the signed ZIP and both app identities again. Then quit MojiPond, replace the installed copy at its existing location, and relaunch it."
+                "MojiPond will check the update again, then show it in Finder."
             )
         }
     }
 
     private var triggerText: String {
         appState.preferences.shortcode.trigger.rawValue
+    }
+
+    private func clearUsageResetNotice() {
+        guard
+            appState.runtimeNotice == UsageRankingResetNotice.success
+                || appState.runtimeNotice == UsageRankingResetNotice.failure
+        else {
+            return
+        }
+        appState.setRuntimeNotice(nil)
     }
 
     private func preference<Value>(
@@ -509,6 +582,13 @@ struct SettingsRootView: View {
         }
     }
 
+    private func openPermissionSettings(_ permission: SystemPermission) {
+        permissionNavigationError =
+            permissionSettingsOpener.openSettings(for: permission)
+                ? nil
+                : "Could not open System Settings. Open Privacy & Security manually."
+    }
+
     private func addDomainExclusion() {
         guard let exclusion = DomainExclusion(domain: domainDraft) else {
             exclusionError = "Enter a hostname such as example.com."
@@ -538,6 +618,7 @@ private struct PermissionSettingsRow: View {
     let detail: String
     let status: SystemPermissionStatus
     let request: () -> Void
+    let openSettings: () -> Void
 
     var body: some View {
         HStack(alignment: .top) {
@@ -548,9 +629,16 @@ private struct PermissionSettingsRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            PermissionStatusView(status: status)
-            if status != .granted {
+            PermissionStatusView(permissionName: title, status: status)
+            switch status.primaryAction {
+            case .request:
                 Button("Allow", action: request)
+                    .accessibilityLabel("Allow \(title)")
+            case .openSettings:
+                Button("Open Settings", action: openSettings)
+                    .accessibilityLabel("Open \(title) Settings")
+            case nil:
+                EmptyView()
             }
         }
     }

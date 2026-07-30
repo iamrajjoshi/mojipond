@@ -90,9 +90,57 @@ final class RuntimeKeyboardTests: XCTestCase {
             ),
             .passThrough
         )
+        XCTAssertEqual(gate.mode, .hidden)
+        XCTAssertEqual(
+            gate.decision(
+                for: snapshot(keyCode: RuntimeKeyboardKeyCode.returnKey)
+            ),
+            .passThrough
+        )
         XCTAssertEqual(
             gate.decision(
                 for: snapshot(keyCode: 0, characters: "a")
+            ),
+            .passThrough
+        )
+    }
+
+    func testPhysicalArrowFlagsRemainUnmodifiedAcrossKeyboardSurfaces() {
+        let physicalArrowFlags: CGEventFlags = [
+            .maskSecondaryFn,
+            .maskNumericPad
+        ]
+        let down = snapshot(
+            keyCode: RuntimeKeyboardKeyCode.downArrow,
+            flags: physicalArrowFlags
+        )
+
+        XCTAssertEqual(
+            RuntimeKeyboardEventMapper.action(for: down),
+            .navigation(.arrowDown, modifiers: [])
+        )
+
+        let gate = RuntimeInterceptionGate()
+        gate.setCaptureEnabled(true)
+        for mode in [
+            RuntimeInterceptionMode.suggestions,
+            .browser,
+            .media
+        ] {
+            gate.setMode(mode, acceptsTab: true, acceptsReturn: true)
+            XCTAssertEqual(
+                gate.decision(for: down),
+                .intercept,
+                "Expected physical arrows to navigate \(mode)"
+            )
+        }
+
+        XCTAssertEqual(
+            gate.decision(
+                for: snapshot(
+                    keyCode: RuntimeKeyboardKeyCode.downArrow,
+                    flags: physicalArrowFlags.union(.maskCommand)
+                )
             ),
             .passThrough
         )
@@ -149,6 +197,42 @@ final class RuntimeKeyboardTests: XCTestCase {
         )
     }
 
+    func testBrowserAcceptsShiftedQueryCharactersButNotShiftedNavigation() {
+        let gate = RuntimeInterceptionGate()
+        gate.setCaptureEnabled(true)
+        gate.setMode(
+            .browser,
+            acceptsTab: true,
+            acceptsReturn: true
+        )
+
+        XCTAssertEqual(
+            gate.decision(
+                for: snapshot(
+                    keyCode: 27,
+                    flags: [.maskShift],
+                    characters: "_"
+                )
+            ),
+            .intercept
+        )
+        for keyCode in [
+            RuntimeKeyboardKeyCode.downArrow,
+            RuntimeKeyboardKeyCode.tab,
+            RuntimeKeyboardKeyCode.returnKey
+        ] {
+            XCTAssertEqual(
+                gate.decision(
+                    for: snapshot(
+                        keyCode: keyCode,
+                        flags: [.maskShift]
+                    )
+                ),
+                .passThrough
+            )
+        }
+    }
+
     func testMediaGridOwnsHorizontalAndVerticalNavigationOnlyWhileVisible() {
         let gate = RuntimeInterceptionGate()
         gate.setCaptureEnabled(true)
@@ -202,6 +286,902 @@ final class RuntimeKeyboardTests: XCTestCase {
         )
     }
 
+    func testMediaGridOwnsShiftTabButOtherShiftedNavigationPassesThrough() {
+        let gate = RuntimeInterceptionGate()
+        gate.setCaptureEnabled(true)
+        gate.setMode(
+            .media,
+            acceptsTab: true,
+            acceptsReturn: true
+        )
+
+        XCTAssertEqual(
+            gate.outcome(
+                for: snapshot(
+                    keyCode: RuntimeKeyboardKeyCode.tab,
+                    flags: [.maskShift]
+                )
+            ),
+            .intercepting(.media)
+        )
+        XCTAssertEqual(
+            gate.decision(
+                for: snapshot(
+                    keyCode: RuntimeKeyboardKeyCode.downArrow,
+                    flags: [.maskShift]
+                )
+            ),
+            .passThrough
+        )
+    }
+
+    func testVerifiedExactTokenArmsCommitBeforeWorkerHandlesClosingTrigger()
+        throws
+    {
+        let gate = RuntimeInterceptionGate()
+        gate.configureExactCommitPrediction(
+            trigger: ":",
+            isEnabled: true,
+            exactTokens: ["frog"]
+        )
+        gate.setCaptureEnabled(true)
+        let opening = gate.outcome(
+            for: snapshot(
+                keyCode: 41,
+                flags: [.maskShift],
+                characters: ":"
+            )
+        )
+        let generation = try XCTUnwrap(opening.predictionGeneration)
+        for character in "frog" {
+            _ = gate.outcome(
+                for: snapshot(
+                    keyCode: 0,
+                    characters: String(character)
+                )
+            )
+        }
+        XCTAssertTrue(
+            gate.verifyExactCommitPrediction(
+                generation: generation,
+                expectedToken: ":fro"
+            )
+        )
+
+        XCTAssertEqual(
+            gate.outcome(
+                for: snapshot(
+                    keyCode: 41,
+                    flags: [.maskShift],
+                    characters: ":"
+                )
+            ).decision,
+            .passThrough
+        )
+        XCTAssertEqual(gate.mode, .committing)
+        XCTAssertEqual(
+            gate.outcome(
+                for: snapshot(keyCode: RuntimeKeyboardKeyCode.returnKey)
+            ),
+            .intercepting(.committing)
+        )
+    }
+
+    func testReturnIntentCarriesIntoCommitAndCanOnlyBeClaimedOnce()
+        throws
+    {
+        let gate = RuntimeInterceptionGate()
+        gate.configureExactCommitPrediction(
+            trigger: ":",
+            isEnabled: true,
+            exactTokens: ["frog"]
+        )
+        gate.setCaptureEnabled(true)
+        let opening = gate.outcome(
+            for: snapshot(
+                keyCode: 41,
+                flags: [.maskShift],
+                characters: ":"
+            )
+        )
+        let predictionGeneration = try XCTUnwrap(
+            opening.predictionGeneration
+        )
+        for character in "frog" {
+            _ = gate.outcome(
+                for: snapshot(
+                    keyCode: 0,
+                    characters: String(character)
+                )
+            )
+        }
+        XCTAssertTrue(
+            gate.verifyExactCommitPrediction(
+                generation: predictionGeneration,
+                expectedToken: ":fro"
+            )
+        )
+        let close = gate.outcome(
+            for: snapshot(
+                keyCode: 41,
+                flags: [.maskShift],
+                characters: ":"
+            )
+        )
+        XCTAssertEqual(
+            gate.outcome(
+                for: snapshot(
+                    keyCode: RuntimeKeyboardKeyCode.returnKey
+                )
+            ),
+            .intercepting(.committing)
+        )
+
+        let commitGeneration = try XCTUnwrap(
+            gate.activateCommit(
+                interactionRevision: close.interactionRevision,
+                acceptsTab: true,
+                acceptsReturn: true
+            )
+        )
+        XCTAssertTrue(
+            gate.hasPendingCommitSend(
+                generation: commitGeneration
+            )
+        )
+        XCTAssertTrue(
+            gate.finishCommit(
+                generation: commitGeneration,
+                retainingPendingSend: true
+            )
+        )
+        XCTAssertTrue(
+            gate.claimPendingCommitSend(
+                generation: commitGeneration
+            )
+        )
+        XCTAssertFalse(
+            gate.claimPendingCommitSend(
+                generation: commitGeneration
+            )
+        )
+    }
+
+    func testCommitCompletionBeforeReturnReleasesItToTheTarget() throws {
+        let gate = RuntimeInterceptionGate()
+        gate.configureExactCommitPrediction(
+            trigger: ":",
+            isEnabled: true,
+            exactTokens: ["frog"]
+        )
+        gate.setCaptureEnabled(true)
+        gate.setMode(
+            .committing,
+            acceptsTab: true,
+            acceptsReturn: true
+        )
+        let commitGeneration = try XCTUnwrap(
+            gate.activateCommit(
+                interactionRevision: gate.interactionRevision,
+                acceptsTab: true,
+                acceptsReturn: true
+            )
+        )
+
+        XCTAssertFalse(
+            gate.finishCommit(
+                generation: commitGeneration,
+                retainingPendingSend: true
+            )
+        )
+        XCTAssertEqual(gate.mode, .hidden)
+        XCTAssertEqual(
+            gate.outcome(
+                for: snapshot(
+                    keyCode: RuntimeKeyboardKeyCode.returnKey
+                )
+            ).decision,
+            .passThrough
+        )
+    }
+
+    func testFailedCommitFinalizationAtomicallyReleasesLaterReturn()
+        throws
+    {
+        let gate = RuntimeInterceptionGate()
+        gate.configureExactCommitPrediction(
+            trigger: ":",
+            isEnabled: true,
+            exactTokens: ["frog"]
+        )
+        gate.setCaptureEnabled(true)
+        gate.setMode(
+            .committing,
+            acceptsTab: true,
+            acceptsReturn: true
+        )
+        let generation = try XCTUnwrap(
+            gate.activateCommit(
+                interactionRevision: gate.interactionRevision,
+                acceptsTab: true,
+                acceptsReturn: true
+            )
+        )
+        XCTAssertEqual(
+            gate.outcome(
+                for: snapshot(
+                    keyCode: RuntimeKeyboardKeyCode.returnKey
+                )
+            ).decision,
+            .intercept
+        )
+
+        XCTAssertFalse(
+            gate.finishCommit(
+                generation: generation,
+                retainingPendingSend: false
+            )
+        )
+        XCTAssertFalse(
+            gate.claimPendingCommitSend(generation: generation)
+        )
+        XCTAssertEqual(gate.mode, .hidden)
+        XCTAssertEqual(
+            gate.outcome(
+                for: snapshot(
+                    keyCode: RuntimeKeyboardKeyCode.returnKey
+                )
+            ).decision,
+            .passThrough
+        )
+    }
+
+    func testEscapeRevokesPendingCommitSendBeforeClaim() throws {
+        let gate = RuntimeInterceptionGate()
+        gate.configureExactCommitPrediction(
+            trigger: ":",
+            isEnabled: true,
+            exactTokens: ["frog"]
+        )
+        gate.setCaptureEnabled(true)
+        gate.setMode(
+            .committing,
+            acceptsTab: true,
+            acceptsReturn: true
+        )
+        let interactionRevision = gate.interactionRevision
+        let commitGeneration = try XCTUnwrap(
+            gate.activateCommit(
+                interactionRevision: interactionRevision,
+                acceptsTab: true,
+                acceptsReturn: true
+            )
+        )
+        XCTAssertEqual(
+            gate.outcome(
+                for: snapshot(
+                    keyCode: RuntimeKeyboardKeyCode.returnKey
+                )
+            ),
+            .intercepting(.committing)
+        )
+        XCTAssertEqual(
+            gate.outcome(
+                for: snapshot(
+                    keyCode: RuntimeKeyboardKeyCode.escape
+                )
+            ),
+            .intercepting(.committing)
+        )
+
+        XCTAssertFalse(
+            gate.claimPendingCommitSend(
+                generation: commitGeneration
+            )
+        )
+        XCTAssertEqual(gate.mode, .hidden)
+    }
+
+    func testCharacterAfterVerifiedExactCloseDisarmsCommitBeforeReturn()
+        throws
+    {
+        let gate = RuntimeInterceptionGate()
+        gate.configureExactCommitPrediction(
+            trigger: ":",
+            isEnabled: true,
+            exactTokens: ["frog"]
+        )
+        gate.setCaptureEnabled(true)
+        let opening = gate.outcome(
+            for: snapshot(
+                keyCode: 41,
+                flags: [.maskShift],
+                characters: ":"
+            )
+        )
+        let generation = try XCTUnwrap(opening.predictionGeneration)
+        for character in "frog" {
+            _ = gate.outcome(
+                for: snapshot(
+                    keyCode: 0,
+                    characters: String(character)
+                )
+            )
+        }
+        XCTAssertTrue(
+            gate.verifyExactCommitPrediction(
+                generation: generation,
+                expectedToken: ":fro"
+            )
+        )
+        _ = gate.outcome(
+            for: snapshot(
+                keyCode: 41,
+                flags: [.maskShift],
+                characters: ":"
+            )
+        )
+        XCTAssertEqual(gate.mode, .committing)
+
+        XCTAssertEqual(
+            gate.outcome(
+                for: snapshot(keyCode: 7, characters: "x")
+            ),
+            .passThrough
+        )
+        XCTAssertEqual(gate.mode, .hidden)
+        XCTAssertEqual(
+            gate.outcome(
+                for: snapshot(keyCode: RuntimeKeyboardKeyCode.returnKey)
+            ),
+            .passThrough
+        )
+    }
+
+    func testShiftReturnAfterVerifiedExactCloseDisarmsCommitBeforeReturn()
+        throws
+    {
+        let gate = RuntimeInterceptionGate()
+        gate.configureExactCommitPrediction(
+            trigger: ":",
+            isEnabled: true,
+            exactTokens: ["frog"]
+        )
+        gate.setCaptureEnabled(true)
+        let opening = gate.outcome(
+            for: snapshot(
+                keyCode: 41,
+                flags: [.maskShift],
+                characters: ":"
+            )
+        )
+        let generation = try XCTUnwrap(opening.predictionGeneration)
+        for character in "frog" {
+            _ = gate.outcome(
+                for: snapshot(
+                    keyCode: 0,
+                    characters: String(character)
+                )
+            )
+        }
+        XCTAssertTrue(
+            gate.verifyExactCommitPrediction(
+                generation: generation,
+                expectedToken: ":fro"
+            )
+        )
+        _ = gate.outcome(
+            for: snapshot(
+                keyCode: 41,
+                flags: [.maskShift],
+                characters: ":"
+            )
+        )
+        XCTAssertEqual(gate.mode, .committing)
+
+        XCTAssertEqual(
+            gate.outcome(
+                for: snapshot(
+                    keyCode: RuntimeKeyboardKeyCode.returnKey,
+                    flags: [.maskShift]
+                )
+            ),
+            .passThrough
+        )
+        XCTAssertEqual(gate.mode, .hidden)
+        XCTAssertEqual(
+            gate.outcome(
+                for: snapshot(keyCode: RuntimeKeyboardKeyCode.returnKey)
+            ),
+            .passThrough
+        )
+    }
+
+    func testPendingPresentationCannotReplaceVerifiedExactCommit()
+        throws
+    {
+        let gate = RuntimeInterceptionGate()
+        gate.configureExactCommitPrediction(
+            trigger: ":",
+            isEnabled: true,
+            exactTokens: ["frog"]
+        )
+        gate.setCaptureEnabled(true)
+        let opening = gate.outcome(
+            for: snapshot(
+                keyCode: 41,
+                flags: [.maskShift],
+                characters: ":"
+            )
+        )
+        let generation = try XCTUnwrap(opening.predictionGeneration)
+        for character in "frog" {
+            _ = gate.outcome(
+                for: snapshot(
+                    keyCode: 0,
+                    characters: String(character)
+                )
+            )
+        }
+        XCTAssertTrue(
+            gate.verifyExactCommitPrediction(
+                generation: generation,
+                expectedToken: ":fro"
+            )
+        )
+        XCTAssertTrue(
+            gate.expectPresentation(
+                revision: 1,
+                interactionRevision: gate.interactionRevision
+            )
+        )
+        _ = gate.outcome(
+            for: snapshot(
+                keyCode: 41,
+                flags: [.maskShift],
+                characters: ":"
+            )
+        )
+        XCTAssertEqual(gate.mode, .committing)
+
+        XCTAssertFalse(
+            gate.activatePresentation(
+                revision: 1,
+                mode: .suggestions,
+                acceptsTab: true,
+                acceptsReturn: true
+            )
+        )
+        XCTAssertEqual(gate.mode, .committing)
+        XCTAssertEqual(
+            gate.outcome(
+                for: snapshot(
+                    keyCode: RuntimeKeyboardKeyCode.returnKey,
+                    flags: [.maskShift]
+                )
+            ),
+            .passingThrough(
+                predictionGeneration: generation,
+                interactionRevision: 2
+            )
+        )
+        XCTAssertEqual(
+            gate.outcome(
+                for: snapshot(keyCode: RuntimeKeyboardKeyCode.returnKey)
+            ).decision,
+            .passThrough
+        )
+    }
+
+    func testInteractionInvalidationRejectsPendingPresentation() {
+        let gate = RuntimeInterceptionGate()
+        gate.configureExactCommitPrediction(
+            trigger: ":",
+            isEnabled: true,
+            exactTokens: ["frog"]
+        )
+        gate.setCaptureEnabled(true)
+        _ = gate.outcome(
+            for: snapshot(
+                keyCode: 41,
+                flags: [.maskShift],
+                characters: ":"
+            )
+        )
+        XCTAssertTrue(
+            gate.expectPresentation(
+                revision: 1,
+                interactionRevision: gate.interactionRevision
+            )
+        )
+
+        XCTAssertEqual(
+            gate.outcome(
+                for: snapshot(keyCode: 49, characters: " ")
+            ).decision,
+            .passThrough
+        )
+        XCTAssertFalse(
+            gate.activatePresentation(
+                revision: 1,
+                mode: .suggestions,
+                acceptsTab: true,
+                acceptsReturn: true
+            )
+        )
+        XCTAssertEqual(gate.mode, .hidden)
+        XCTAssertEqual(
+            gate.outcome(
+                for: snapshot(keyCode: RuntimeKeyboardKeyCode.returnKey)
+            ).decision,
+            .passThrough
+        )
+    }
+
+    func testStaleInteractionCannotRegisterANewPresentation() throws {
+        let gate = RuntimeInterceptionGate()
+        gate.configureExactCommitPrediction(
+            trigger: ":",
+            isEnabled: true,
+            exactTokens: ["frog"]
+        )
+        gate.setCaptureEnabled(true)
+        let opening = gate.outcome(
+            for: snapshot(
+                keyCode: 41,
+                flags: [.maskShift],
+                characters: ":"
+            )
+        )
+        let originatingRevision = try XCTUnwrap(
+            opening.interactionRevision
+        )
+
+        XCTAssertEqual(
+            gate.outcome(
+                for: snapshot(keyCode: 49, characters: " ")
+            ).decision,
+            .passThrough
+        )
+        XCTAssertFalse(
+            gate.expectPresentation(
+                revision: 1,
+                interactionRevision: originatingRevision
+            )
+        )
+        XCTAssertFalse(
+            gate.activatePresentation(
+                revision: 1,
+                mode: .suggestions,
+                acceptsTab: true,
+                acceptsReturn: true
+            )
+        )
+        XCTAssertEqual(gate.mode, .hidden)
+        XCTAssertEqual(
+            gate.outcome(
+                for: snapshot(keyCode: RuntimeKeyboardKeyCode.returnKey)
+            ).decision,
+            .passThrough
+        )
+    }
+
+    func testInvalidatedInteractionCannotReactivateCommit() {
+        let gate = RuntimeInterceptionGate()
+        gate.configureExactCommitPrediction(
+            trigger: ":",
+            isEnabled: true,
+            exactTokens: ["frog"]
+        )
+        gate.setCaptureEnabled(true)
+        gate.setMode(
+            .suggestions,
+            acceptsTab: true,
+            acceptsReturn: true
+        )
+        let acceptance = gate.outcome(
+            for: snapshot(keyCode: RuntimeKeyboardKeyCode.returnKey)
+        )
+        _ = gate.outcome(
+            for: snapshot(keyCode: 7, characters: "x")
+        )
+
+        XCTAssertNil(
+            gate.activateCommit(
+                interactionRevision: acceptance.interactionRevision,
+                acceptsTab: true,
+                acceptsReturn: true
+            )
+        )
+        XCTAssertEqual(gate.mode, .hidden)
+    }
+
+    func testEscapeInvalidatesQueuedSuggestionAcceptance() {
+        let gate = RuntimeInterceptionGate()
+        gate.configureExactCommitPrediction(
+            trigger: ":",
+            isEnabled: false,
+            exactTokens: []
+        )
+        gate.setCaptureEnabled(true)
+        gate.setMode(
+            .suggestions,
+            acceptsTab: true,
+            acceptsReturn: true
+        )
+        let acceptance = gate.outcome(
+            for: snapshot(keyCode: RuntimeKeyboardKeyCode.returnKey)
+        )
+
+        let escape = gate.outcome(
+            for: snapshot(keyCode: RuntimeKeyboardKeyCode.escape)
+        )
+        XCTAssertEqual(escape, .intercepting(.suggestions))
+        XCTAssertNotEqual(
+            escape.interactionRevision,
+            acceptance.interactionRevision
+        )
+        XCTAssertNil(
+            gate.activateCommit(
+                interactionRevision: acceptance.interactionRevision,
+                acceptsTab: true,
+                acceptsReturn: true
+            )
+        )
+        XCTAssertEqual(gate.mode, .hidden)
+        XCTAssertEqual(
+            gate.outcome(
+                for: snapshot(keyCode: RuntimeKeyboardKeyCode.returnKey)
+            ).decision,
+            .passThrough
+        )
+    }
+
+    func testCommitReturnPassesThroughWhenReplayIsUnavailable() throws {
+        let gate = RuntimeInterceptionGate()
+        gate.configureExactCommitPrediction(
+            trigger: ":",
+            isEnabled: true,
+            exactTokens: ["frog"]
+        )
+        gate.setCanReplayCommitSend(false)
+        gate.setCaptureEnabled(true)
+        gate.setMode(
+            .committing,
+            acceptsTab: true,
+            acceptsReturn: true
+        )
+        let commitGeneration = try XCTUnwrap(
+            gate.activateCommit(
+                interactionRevision: gate.interactionRevision,
+                acceptsTab: true,
+                acceptsReturn: true
+            )
+        )
+
+        XCTAssertEqual(
+            gate.outcome(
+                for: snapshot(
+                    keyCode: RuntimeKeyboardKeyCode.returnKey
+                )
+            ).decision,
+            .passThrough
+        )
+        XCTAssertFalse(
+            gate.hasPendingCommitSend(
+                generation: commitGeneration
+            )
+        )
+    }
+
+    func testSecondPickerReturnPassesThroughWithoutReplayCapability()
+        throws
+    {
+        let gate = RuntimeInterceptionGate()
+        gate.configureExactCommitPrediction(
+            trigger: ":",
+            isEnabled: false,
+            exactTokens: []
+        )
+        gate.setCanReplayCommitSend(false)
+        gate.setCaptureEnabled(true)
+        gate.setMode(
+            .suggestions,
+            acceptsTab: true,
+            acceptsReturn: true
+        )
+        let acceptance = gate.outcome(
+            for: snapshot(keyCode: RuntimeKeyboardKeyCode.returnKey)
+        )
+        let send = gate.outcome(
+            for: snapshot(keyCode: RuntimeKeyboardKeyCode.returnKey)
+        )
+
+        XCTAssertEqual(acceptance, .intercepting(.suggestions))
+        XCTAssertEqual(send.decision, .passThrough)
+        let generation = try XCTUnwrap(
+            gate.activateCommit(
+                interactionRevision: acceptance.interactionRevision,
+                acceptsTab: true,
+                acceptsReturn: true
+            )
+        )
+        XCTAssertFalse(
+            gate.hasPendingCommitSend(generation: generation)
+        )
+    }
+
+    func testEscapeSynchronouslyClosesMediaBeforeFollowingReturn() {
+        let gate = RuntimeInterceptionGate()
+        gate.setCaptureEnabled(true)
+        gate.setMode(
+            .media,
+            acceptsTab: true,
+            acceptsReturn: true
+        )
+
+        XCTAssertEqual(
+            gate.outcome(
+                for: snapshot(keyCode: RuntimeKeyboardKeyCode.escape)
+            ),
+            .intercepting(.media)
+        )
+        XCTAssertEqual(gate.mode, .hidden)
+        XCTAssertEqual(
+            gate.outcome(
+                for: snapshot(
+                    keyCode: RuntimeKeyboardKeyCode.returnKey
+                )
+            ).decision,
+            .passThrough
+        )
+    }
+
+    func testRapidSecondReturnQueuesSendBeforeSuggestionAcceptanceRuns()
+        throws
+    {
+        let gate = RuntimeInterceptionGate()
+        gate.configureExactCommitPrediction(
+            trigger: ":",
+            isEnabled: true,
+            exactTokens: ["frog"]
+        )
+        gate.setCaptureEnabled(true)
+        gate.setMode(
+            .suggestions,
+            acceptsTab: true,
+            acceptsReturn: true
+        )
+        let firstAcceptance = gate.outcome(
+            for: snapshot(keyCode: RuntimeKeyboardKeyCode.returnKey)
+        )
+        let queuedSend = gate.outcome(
+            for: snapshot(keyCode: RuntimeKeyboardKeyCode.returnKey)
+        )
+
+        XCTAssertEqual(firstAcceptance, .intercepting(.suggestions))
+        XCTAssertEqual(queuedSend, .intercepting(.suggestions))
+        let commitGeneration = try XCTUnwrap(
+            gate.activateCommit(
+                interactionRevision:
+                    firstAcceptance.interactionRevision,
+                acceptsTab: true,
+                acceptsReturn: true
+            )
+        )
+        XCTAssertTrue(
+            gate.hasPendingCommitSend(generation: commitGeneration)
+        )
+    }
+
+    func testDifferentKeyDisarmsPendingExactCommit() {
+        let gate = RuntimeInterceptionGate()
+        gate.configureExactCommitPrediction(
+            trigger: ":",
+            isEnabled: true,
+            exactTokens: ["frog"]
+        )
+        gate.setCaptureEnabled(true)
+        _ = gate.outcome(
+            for: snapshot(
+                keyCode: 41,
+                flags: [.maskShift],
+                characters: ":"
+            )
+        )
+
+        XCTAssertEqual(
+            gate.decision(
+                for: snapshot(keyCode: 7, characters: "x")
+            ),
+            .passThrough
+        )
+        XCTAssertFalse(gate.isExactCommitArmed)
+        XCTAssertEqual(
+            gate.decision(
+                for: snapshot(
+                    keyCode: 41,
+                    flags: [.maskShift],
+                    characters: ":"
+                )
+            ),
+            .passThrough
+        )
+        XCTAssertEqual(gate.mode, .hidden)
+    }
+
+    func testMouseDownInvalidatesExactCommitBeforeAnotherFieldCanSend()
+        throws
+    {
+        let gate = RuntimeInterceptionGate()
+        gate.configureExactCommitPrediction(
+            trigger: ":",
+            isEnabled: true,
+            exactTokens: ["frog"]
+        )
+        gate.setCaptureEnabled(true)
+
+        let opening = gate.outcome(
+            for: snapshot(
+                keyCode: 41,
+                flags: [.maskShift],
+                characters: ":"
+            )
+        )
+        let oldGeneration = try XCTUnwrap(
+            opening.predictionGeneration
+        )
+        for character in "frog" {
+            _ = gate.outcome(
+                for: snapshot(
+                    keyCode: 0,
+                    characters: String(character)
+                )
+            )
+        }
+        XCTAssertTrue(
+            gate.verifyExactCommitPrediction(
+                generation: oldGeneration,
+                expectedToken: ":fro"
+            )
+        )
+
+        XCTAssertEqual(
+            gate.decision(
+                for: eventSnapshot(type: .leftMouseDown)
+            ),
+            .passThrough
+        )
+        XCTAssertEqual(gate.mode, .hidden)
+        XCTAssertFalse(gate.isExactCommitArmed)
+
+        let newOpening = gate.outcome(
+            for: snapshot(
+                keyCode: 41,
+                flags: [.maskShift],
+                characters: ":"
+            )
+        )
+        XCTAssertNotEqual(
+            newOpening.predictionGeneration,
+            oldGeneration
+        )
+        XCTAssertFalse(
+            gate.verifyExactCommitPrediction(
+                generation: oldGeneration,
+                expectedToken: ":frog"
+            )
+        )
+        XCTAssertEqual(
+            gate.decision(
+                for: snapshot(
+                    keyCode: RuntimeKeyboardKeyCode.returnKey
+                )
+            ),
+            .passThrough
+        )
+    }
+
     private func snapshot(
         keyCode: CGKeyCode,
         flags: CGEventFlags = [],
@@ -213,6 +1193,18 @@ final class RuntimeKeyboardTests: XCTestCase {
             flagsRawValue: flags.rawValue,
             timestamp: 1,
             characters: characters
+        )
+    }
+
+    private func eventSnapshot(
+        type: CGEventType
+    ) -> KeyboardEventSnapshot {
+        KeyboardEventSnapshot(
+            typeRawValue: type.rawValue,
+            keyCode: 0,
+            flagsRawValue: 0,
+            timestamp: 1,
+            characters: nil
         )
     }
 }

@@ -53,10 +53,13 @@ struct OnboardingView: View {
     @State private var step = 0
     @State private var practiceText = ""
     @State private var practiceFeedback: String?
+    @State private var permissionNavigationError: String?
     @State private var practiceIndex: EmojiSearchIndex?
     @State private var practiceCatalogAvailability:
         OnboardingPracticeCatalogAvailability
     private let practiceCatalogLoader: () throws -> EmojiSearchIndex
+    private let permissionSettingsOpener:
+        any SystemPermissionSettingsOpening
 
     init(appState: AppState, onFinish: @escaping () -> Void) {
         self.init(
@@ -71,6 +74,9 @@ struct OnboardingView: View {
     init(
         appState: AppState,
         practiceCatalogLoader: @escaping () throws -> EmojiSearchIndex,
+        permissionSettingsOpener:
+            any SystemPermissionSettingsOpening =
+                MacSystemPermissionSettingsOpener(),
         onFinish: @escaping () -> Void
     ) {
         let practiceCatalog = OnboardingPracticeCatalog.load(
@@ -80,6 +86,7 @@ struct OnboardingView: View {
         permissions = appState.permissions
         self.onFinish = onFinish
         self.practiceCatalogLoader = practiceCatalogLoader
+        self.permissionSettingsOpener = permissionSettingsOpener
         _practiceIndex = State(initialValue: practiceCatalog.searchIndex)
         _practiceCatalogAvailability = State(
             initialValue: practiceCatalog.availability
@@ -94,9 +101,7 @@ struct OnboardingView: View {
             Group {
                 switch step {
                 case 0:
-                    welcomeStep
-                case 1:
-                    permissionStep
+                    setupStep
                 default:
                     practiceStep
                 }
@@ -120,69 +125,36 @@ struct OnboardingView: View {
             Label("MojiPond", systemImage: "water.waves")
                 .font(.headline)
             Spacer()
-            HStack(spacing: 7) {
-                ForEach(0..<3, id: \.self) { index in
-                    Circle()
-                        .fill(index <= step ? PondDesign.pond : Color.secondary.opacity(0.2))
-                        .frame(width: 8, height: 8)
-                        .accessibilityLabel("Step \(index + 1)")
-                        .accessibilityValue(index == step ? "Current" : index < step ? "Completed" : "Upcoming")
-                }
-            }
         }
         .padding(.horizontal, 24)
         .frame(height: 56)
     }
 
-    private var welcomeStep: some View {
-        ScrollView {
-            VStack(spacing: 22) {
-                PondMark(size: 88)
-
-                VStack(spacing: 8) {
-                    Text("Every emote, right where you type")
-                        .font(
-                            .system(
-                                size: 30,
-                                weight: .semibold,
-                                design: .rounded
-                            )
-                        )
-                    Text("Use familiar shortcodes in Messages and across your Mac, then add the custom packs that make conversations yours.")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 570)
-                }
-
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 12) {
-                        onboardingFeatureCards
-                    }
-                    VStack(spacing: 12) {
-                        onboardingFeatureCards
-                    }
-                }
-                .frame(maxWidth: 650)
-            }
-            .padding(34)
-            .frame(maxWidth: .infinity)
-        }
-    }
-
-    private var permissionStep: some View {
+    private var setupStep: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Permissions, used narrowly")
-                        .font(.title2.weight(.semibold))
-                    Text("macOS requires your approval. MojiPond cannot grant these permissions itself.")
+                HStack(spacing: 18) {
+                    PondMark(size: 64)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(
+                            "Type \(triggerText)wave\(triggerText) to insert 👋"
+                        )
+                            .font(.title2.weight(.semibold))
+                        Text(
+                            "MojiPond replaces shortcodes in Messages "
+                                + "and other Mac apps."
+                        )
                         .foregroundStyle(.secondary)
+                    }
                 }
 
                 if !appState.isInstalledInApplications {
                     Label {
-                        Text("Install MojiPond in Applications before granting access so macOS can recognize a stable app location.")
+                        Text(
+                            "Move MojiPond to Applications before granting "
+                                + "access. This keeps macOS permissions tied "
+                                + "to the same app."
+                        )
                     } icon: {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundStyle(PondDesign.warningForeground)
@@ -197,42 +169,44 @@ struct OnboardingView: View {
                 PermissionCard(
                     icon: "keyboard",
                     title: "Input Monitoring",
-                    detail: "Observes global key events so it can notice your trigger. Unrelated keys are discarded immediately; only a bounded token is buffered after the trigger. Typing is never saved or logged.",
+                    detail:
+                        "Observes global key events to recognize one bounded "
+                        + "shortcode. Unrelated keys are discarded; typing is "
+                        + "not saved.",
                     status: permissions.snapshot.inputMonitoring,
-                    buttonTitle: "Allow Input Monitoring",
                     request: { permissions.requestInputMonitoring() },
                     openSettings: {
-                        openPrivacySettings(anchor: "Privacy_ListenEvent")
+                        openPermissionSettings(.inputMonitoring)
                     }
                 )
 
                 PermissionCard(
                     icon: "accessibility",
                     title: "Accessibility",
-                    detail: "Finds the active text field, anchors suggestions at the caret, and replaces the shortcode you selected.",
+                    detail:
+                        "Reads bounded text and caret position to show "
+                        + "suggestions and replace your shortcode. Message "
+                        + "text is not saved.",
                     status: permissions.snapshot.accessibility,
-                    buttonTitle: "Allow Accessibility",
                     request: { permissions.requestAccessibility() },
                     openSettings: {
-                        openPrivacySettings(anchor: "Privacy_Accessibility")
+                        openPermissionSettings(.accessibility)
                     }
                 )
 
-                PermissionCard(
-                    icon: "doc.on.clipboard",
-                    title: "Event Posting",
-                    detail: "Lets MojiPond issue the paste command for an image or GIF. Unicode replacement does not need this permission.",
-                    status: permissions.snapshot.eventPosting,
-                    buttonTitle: "Allow Media Pasting",
-                    request: { permissions.requestEventPosting() },
-                    openSettings: {
-                        openPrivacySettings(anchor: "Privacy_Accessibility")
-                    }
-                )
+                if let permissionNavigationError {
+                    Label(
+                        permissionNavigationError,
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .font(.callout)
+                    .foregroundStyle(PondDesign.warningForeground)
+                }
 
                 Label(
-                    "MojiPond does not request Screen Recording, Full Disk Access, Contacts, or access to your Messages database.",
-                    systemImage: "checkmark.shield"
+                    "Shortcodes are processed on this Mac. "
+                        + "MojiPond does not save your messages.",
+                    systemImage: "lock.shield"
                 )
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -250,12 +224,17 @@ struct OnboardingView: View {
                     .accessibilityHidden(true)
 
                 VStack(spacing: 7) {
-                    Text(appState.canMonitorTyping ? "You’re ready to ripple" : "Library mode is ready")
+                    Text(
+                        appState.canMonitorTyping
+                            ? "Try a shortcode"
+                            : "Try a shortcode here"
+                    )
                         .font(.title2.weight(.semibold))
                     Text(
                         appState.canMonitorTyping
-                            ? "Try typing :wave: below. Suggestions should appear beside your caret."
-                            : "You can browse and copy emoji now, then grant typing permissions whenever you’re ready."
+                            ? "Type \(triggerText)wave\(triggerText) below."
+                            : "Type \(triggerText)wave\(triggerText) below. "
+                                + "This practice field works without system access."
                     )
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -270,37 +249,10 @@ struct OnboardingView: View {
                     }
                 }
                 .frame(maxWidth: 460)
-
-                Label(
-                    "MojiPond favors doing nothing when it is not certain, so ordinary Tab and Return behavior stays untouched.",
-                    systemImage: "hand.raised"
-                )
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: 520)
             }
             .padding(34)
             .frame(maxWidth: .infinity)
         }
-    }
-
-    @ViewBuilder
-    private var onboardingFeatureCards: some View {
-        FeatureCard(
-            icon: "keyboard",
-            title: "Stay in flow",
-            detail: "Type :wave: and keep going."
-        )
-        FeatureCard(
-            icon: "square.grid.2x2",
-            title: "Bring your packs",
-            detail: "Import one reviewed ZIP at a time."
-        )
-        FeatureCard(
-            icon: "lock.shield",
-            title: "Local by default",
-            detail: "Your messages never leave your Mac."
-        )
     }
 
     private var practiceEditor: some View {
@@ -405,18 +357,17 @@ struct OnboardingView: View {
 
             Spacer()
 
-            if step == 1 && !appState.canMonitorTyping {
-                Button("Continue in Library Mode") {
-                    step = 2
+            if step == 0 && !appState.canMonitorTyping {
+                Button("Use Library Only") {
+                    finish()
                 }
             }
 
-            Button(step == 2 ? "Open MojiPond" : "Continue") {
-                if step < 2 {
-                    step += 1
+            Button(step == 0 ? "Try It" : "Open Library") {
+                if step == 0 {
+                    step = 1
                 } else {
-                    appState.finishOnboarding()
-                    onFinish()
+                    finish()
                 }
             }
             .keyboardShortcut(.defaultAction)
@@ -425,16 +376,16 @@ struct OnboardingView: View {
         .frame(height: 64)
     }
 
-    private func openPrivacySettings(anchor: String) {
-        let candidates = [
-            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?\(anchor)",
-            "x-apple.systempreferences:com.apple.preference.security?\(anchor)"
-        ]
-        for candidate in candidates {
-            if let url = URL(string: candidate), NSWorkspace.shared.open(url) {
-                return
-            }
-        }
+    private func finish() {
+        appState.finishOnboarding()
+        onFinish()
+    }
+
+    private func openPermissionSettings(_ permission: SystemPermission) {
+        permissionNavigationError =
+            permissionSettingsOpener.openSettings(for: permission)
+                ? nil
+                : "Could not open System Settings. Open Privacy & Security manually."
     }
 
     private var triggerText: String {
@@ -504,7 +455,7 @@ struct OnboardingView: View {
             return
         }
         practiceText.replaceSubrange(opening..., with: value)
-        practiceFeedback = "Exact token replaced locally"
+        practiceFeedback = "Shortcode replaced"
     }
 
     private func acceptFirstPracticeSuggestion() {
@@ -522,7 +473,7 @@ struct OnboardingView: View {
             return
         }
         practiceText.replaceSubrange(opening..., with: value)
-        practiceFeedback = "Suggestion inserted locally"
+        practiceFeedback = "Emoji inserted"
     }
 
     private func unicodeValue(for item: EmojiItem) -> String? {
@@ -533,36 +484,11 @@ struct OnboardingView: View {
     }
 }
 
-private struct FeatureCard: View {
-    let icon: String
-    let title: String
-    let detail: String
-
-    var body: some View {
-        PondCard {
-            VStack(alignment: .leading, spacing: 9) {
-                Image(systemName: icon)
-                    .font(.title2)
-                    .foregroundStyle(PondDesign.pond)
-                    .accessibilityHidden(true)
-                Text(title)
-                    .font(.headline)
-                Text(detail)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-}
-
 private struct PermissionCard: View {
     let icon: String
     let title: String
     let detail: String
     let status: SystemPermissionStatus
-    let buttonTitle: String
     let request: () -> Void
     let openSettings: () -> Void
 
@@ -579,7 +505,10 @@ private struct PermissionCard: View {
                     HStack {
                         Text(title)
                             .font(.headline)
-                        PermissionStatusView(status: status)
+                        PermissionStatusView(
+                            permissionName: title,
+                            status: status
+                        )
                     }
                     Text(detail)
                         .font(.callout)
@@ -589,13 +518,17 @@ private struct PermissionCard: View {
 
                 Spacer(minLength: 14)
 
-                VStack(alignment: .trailing, spacing: 8) {
-                    if status != .granted {
-                        Button(buttonTitle, action: request)
-                            .buttonStyle(.borderedProminent)
-                        Button("Open System Settings", action: openSettings)
-                            .buttonStyle(.link)
-                    }
+                switch status.primaryAction {
+                case .request:
+                    Button("Allow", action: request)
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityLabel("Allow \(title)")
+                case .openSettings:
+                    Button("Open Settings", action: openSettings)
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityLabel("Open \(title) Settings")
+                case nil:
+                    EmptyView()
                 }
             }
         }
@@ -603,6 +536,7 @@ private struct PermissionCard: View {
 }
 
 struct PermissionStatusView: View {
+    let permissionName: String
     let status: SystemPermissionStatus
 
     var body: some View {
@@ -612,7 +546,7 @@ struct PermissionStatusView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(backgroundColor, in: Capsule())
-            .accessibilityLabel("Permission status")
+            .accessibilityLabel("\(permissionName) permission")
             .accessibilityValue(title)
     }
 

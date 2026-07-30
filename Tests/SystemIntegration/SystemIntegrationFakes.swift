@@ -9,9 +9,11 @@ final class FakePermissionProvider: SystemPermissionProviding {
         uniqueKeysWithValues: SystemPermission.allCases.map { ($0, false) }
     )
     private(set) var requests: [SystemPermission] = []
+    private(set) var preflights: [SystemPermission] = []
 
     func isGranted(_ permission: SystemPermission) -> Bool {
-        granted[permission, default: false]
+        preflights.append(permission)
+        return granted[permission, default: false]
     }
 
     func request(_ permission: SystemPermission) -> Bool {
@@ -19,6 +21,10 @@ final class FakePermissionProvider: SystemPermissionProviding {
         let result = requestResults[permission, default: false]
         granted[permission] = result
         return result
+    }
+
+    func resetPreflights() {
+        preflights.removeAll()
     }
 }
 
@@ -262,7 +268,9 @@ final class FakePasteboard: PasteboardAccessing {
 final class FakeEventPoster: SyntheticEventPosting, @unchecked Sendable {
     var canPostEvents: Bool
     var error: Error?
+    var onPaste: (() -> Void)?
     private(set) var pasteCount = 0
+    private(set) var returnCount = 0
     private(set) var targetProcessIdentifiers: [pid_t] = []
 
     init(canPostEvents: Bool = true) {
@@ -274,6 +282,15 @@ final class FakeEventPoster: SyntheticEventPosting, @unchecked Sendable {
             throw error
         }
         pasteCount += 1
+        targetProcessIdentifiers.append(processIdentifier)
+        onPaste?()
+    }
+
+    func postReturnKey(to processIdentifier: pid_t) throws {
+        if let error {
+            throw error
+        }
+        returnCount += 1
         targetProcessIdentifiers.append(processIdentifier)
     }
 }
