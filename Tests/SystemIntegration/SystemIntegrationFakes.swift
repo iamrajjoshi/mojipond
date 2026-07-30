@@ -66,6 +66,7 @@ final class FakeAccessibilityTextSystem: AccessibilityTextSystem {
     var text = ""
     var selection = NSRange(location: 0, length: 0)
     var caretBounds: CGRect? = CGRect(x: 20, y: 30, width: 1, height: 18)
+    var textMarkerBounds: CGRect?
     var boundsByRange: [NSRange: CGRect] = [:]
     var missingBoundsRanges: Set<NSRange> = []
     var boundsErrorsByRange: [NSRange: AccessibilityTextError] = [:]
@@ -160,6 +161,12 @@ final class FakeAccessibilityTextSystem: AccessibilityTextSystem {
             return bounds
         }
         return caretBounds
+    }
+
+    func textMarkerBoundsBeforeSelection(
+        in element: AccessibilityElementReference
+    ) throws -> CGRect? {
+        textMarkerBounds
     }
 
     func subrole(
