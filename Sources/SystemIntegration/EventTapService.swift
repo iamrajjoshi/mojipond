@@ -64,42 +64,52 @@ struct EventInterceptionOutcome: Equatable, Sendable {
     /// The worker may activate a commit only while this revision is current,
     /// preventing an older queued event from rearming a canceled surface.
     let interactionRevision: UInt64?
+    /// Orders event-tap observations independently from UI interaction state.
+    /// The worker uses this to keep older search work from hiding a surface
+    /// after a newer correction has already been observed.
+    let eventRevision: UInt64?
 
     static let passThrough = Self(
         decision: .passThrough,
         mode: nil,
         predictionGeneration: nil,
-        interactionRevision: nil
+        interactionRevision: nil,
+        eventRevision: nil
     )
     static let intercept = Self(
         decision: .intercept,
         mode: nil,
         predictionGeneration: nil,
-        interactionRevision: nil
+        interactionRevision: nil,
+        eventRevision: nil
     )
 
     static func intercepting(
         _ mode: RuntimeInterceptionMode,
         predictionGeneration: UInt64? = nil,
-        interactionRevision: UInt64? = nil
+        interactionRevision: UInt64? = nil,
+        eventRevision: UInt64? = nil
     ) -> Self {
         Self(
             decision: .intercept,
             mode: mode,
             predictionGeneration: predictionGeneration,
-            interactionRevision: interactionRevision
+            interactionRevision: interactionRevision,
+            eventRevision: eventRevision
         )
     }
 
     static func passingThrough(
         predictionGeneration: UInt64?,
-        interactionRevision: UInt64? = nil
+        interactionRevision: UInt64? = nil,
+        eventRevision: UInt64? = nil
     ) -> Self {
         Self(
             decision: .passThrough,
             mode: nil,
             predictionGeneration: predictionGeneration,
-            interactionRevision: interactionRevision
+            interactionRevision: interactionRevision,
+            eventRevision: eventRevision
         )
     }
 

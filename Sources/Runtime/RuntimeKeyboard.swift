@@ -176,6 +176,7 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
         let generation: UInt64
         let trigger: Character
         var token: String
+        var recoverableSuffixLength = 0
         var isVerified = false
         var isClosed = false
     }
@@ -192,6 +193,7 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
         var exactCommitTokens = Set<String>()
         var exactCommitPrediction: ExactCommitPrediction?
         var nextPredictionGeneration: UInt64 = 0
+        var eventRevision: UInt64 = 0
         var interactionRevision: UInt64 = 0
         var nextCommitGeneration: UInt64 = 0
         var activeCommitGeneration: UInt64?
@@ -277,6 +279,15 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
         }
     }
 
+    func isEventRevisionCurrent(_ revision: UInt64?) -> Bool {
+        lock.withLock {
+            guard let revision else {
+                return false
+            }
+            return state.eventRevision == revision
+        }
+    }
+
     @discardableResult
     func activatePresentation(
         revision: UInt64,
@@ -345,6 +356,7 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
                 let generation,
                 var prediction = state.exactCommitPrediction,
                 prediction.generation == generation,
+                prediction.recoverableSuffixLength == 0,
                 expectedToken.first == prediction.trigger,
                 expectedToken.last != prediction.trigger
                     || expectedToken.count == 1
@@ -477,6 +489,8 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
     var isExactCommitArmed: Bool {
         lock.withLock {
             state.exactCommitPrediction?.isVerified == true
+                && state.exactCommitPrediction?
+                    .recoverableSuffixLength == 0
         }
     }
 
@@ -569,13 +583,15 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
             return .intercepting(
                 previousMode,
                 predictionGeneration: predictionGeneration,
-                interactionRevision: current.interactionRevision
+                interactionRevision: current.interactionRevision,
+                eventRevision: current.eventRevision
             )
         }
         if passesUnreplayableReturn {
             return .passingThrough(
                 predictionGeneration: predictionGeneration,
-                interactionRevision: current.interactionRevision
+                interactionRevision: current.interactionRevision,
+                eventRevision: current.eventRevision
             )
         }
         guard
@@ -590,7 +606,8 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
         else {
             return .passingThrough(
                 predictionGeneration: predictionGeneration,
-                interactionRevision: current.interactionRevision
+                interactionRevision: current.interactionRevision,
+                eventRevision: current.eventRevision
             )
         }
 
@@ -607,11 +624,13 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
                 ? .intercepting(
                     .committing,
                     predictionGeneration: predictionGeneration,
-                    interactionRevision: current.interactionRevision
+                    interactionRevision: current.interactionRevision,
+                    eventRevision: current.eventRevision
                 )
                 : .passingThrough(
                     predictionGeneration: predictionGeneration,
-                    interactionRevision: current.interactionRevision
+                    interactionRevision: current.interactionRevision,
+                    eventRevision: current.eventRevision
                 )
         }
 
@@ -646,11 +665,13 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
             ? .intercepting(
                 current.mode,
                 predictionGeneration: predictionGeneration,
-                interactionRevision: current.interactionRevision
+                interactionRevision: current.interactionRevision,
+                eventRevision: current.eventRevision
             )
             : .passingThrough(
                 predictionGeneration: predictionGeneration,
-                interactionRevision: current.interactionRevision
+                interactionRevision: current.interactionRevision,
+                eventRevision: current.eventRevision
             )
     }
 
@@ -660,6 +681,7 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
     ) -> UInt64? {
         switch snapshot.type {
         case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+            state.eventRevision &+= 1
             state.exactCommitPrediction = nil
             state.mode = .hidden
             clearCommitIntent(state: &state)
@@ -667,6 +689,7 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
             state.interactionRevision &+= 1
             return nil
         case .keyDown:
+            state.eventRevision &+= 1
             break
         default:
             return state.exactCommitPrediction?.generation
@@ -720,9 +743,17 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
         if snapshot.keyCode == RuntimeKeyboardKeyCode.delete {
             guard
                 var prediction = state.exactCommitPrediction,
-                !prediction.isClosed,
-                !prediction.token.isEmpty
+                !prediction.isClosed
             else {
+                invalidatePassThroughContext(state: &state)
+                return nil
+            }
+            if prediction.recoverableSuffixLength > 0 {
+                prediction.recoverableSuffixLength -= 1
+                state.exactCommitPrediction = prediction
+                return prediction.generation
+            }
+            guard !prediction.token.isEmpty else {
                 invalidatePassThroughContext(state: &state)
                 return nil
             }
@@ -770,6 +801,36 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
             return nil
         }
 
+        if
+            var prediction = state.exactCommitPrediction,
+            !prediction.isClosed,
+            prediction.recoverableSuffixLength > 0
+        {
+            if character == state.exactCommitTrigger {
+                invalidatePassThroughContext(state: &state)
+                state.nextPredictionGeneration &+= 1
+                let replacement = ExactCommitPrediction(
+                    generation: state.nextPredictionGeneration,
+                    trigger: character,
+                    token: ""
+                )
+                state.exactCommitPrediction = replacement
+                return replacement.generation
+            }
+            guard
+                prediction.recoverableSuffixLength
+                    < Shortcode.maximumLength
+            else {
+                let generation = prediction.generation
+                invalidatePassThroughContext(state: &state)
+                return generation
+            }
+            prediction.recoverableSuffixLength += 1
+            state.exactCommitPrediction = prediction
+            suspendPassThroughContext(state: &state)
+            return prediction.generation
+        }
+
         if character == state.exactCommitTrigger {
             if var prediction = state.exactCommitPrediction {
                 guard
@@ -804,18 +865,45 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
 
         guard
             var prediction = state.exactCommitPrediction,
-            !prediction.isClosed,
-            EmojiAliasSyntax.isValidToken(String(character)),
-            prediction.token.utf8.count < Shortcode.maximumLength
+            !prediction.isClosed
         else {
             invalidatePassThroughContext(state: &state)
             return nil
+        }
+        guard EmojiAliasSyntax.isValidToken(String(character)) else {
+            prediction.recoverableSuffixLength = 1
+            state.exactCommitPrediction = prediction
+            suspendPassThroughContext(state: &state)
+            return prediction.generation
+        }
+        guard
+            prediction.token.utf8.count < Shortcode.maximumLength
+        else {
+            let generation = prediction.generation
+            invalidatePassThroughContext(state: &state)
+            return generation
         }
         prediction.token.append(
             contentsOf: EmojiAliasSyntax.normalizedToken(String(character))
         )
         state.exactCommitPrediction = prediction
         return prediction.generation
+    }
+
+    private func suspendPassThroughContext(
+        state: inout State
+    ) {
+        let invalidatedInteraction =
+            state.exactCommitPrediction != nil
+                || state.mode == .suggestions
+        if state.mode == .suggestions {
+            state.mode = .hidden
+            clearCommitIntent(state: &state)
+            state.presentationRevision &+= 1
+        }
+        if invalidatedInteraction {
+            state.interactionRevision &+= 1
+        }
     }
 
     private func invalidatePassThroughContext(

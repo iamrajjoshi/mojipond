@@ -818,6 +818,132 @@ final class RuntimeKeyboardTests: XCTestCase {
         )
     }
 
+    func testBackspaceRestoresPredictionAfterInvalidCharacter() throws {
+        let gate = RuntimeInterceptionGate()
+        gate.configureExactCommitPrediction(
+            trigger: ":",
+            isEnabled: true,
+            exactTokens: ["frog"]
+        )
+        gate.setCaptureEnabled(true)
+        let opening = gate.outcome(
+            for: snapshot(keyCode: 41, characters: ":")
+        )
+        let generation = try XCTUnwrap(opening.predictionGeneration)
+        for character in "fro" {
+            _ = gate.outcome(
+                for: snapshot(
+                    keyCode: 0,
+                    characters: String(character)
+                )
+            )
+        }
+        XCTAssertTrue(
+            gate.verifyExactCommitPrediction(
+                generation: generation,
+                expectedToken: ":fro"
+            )
+        )
+        gate.setMode(
+            .suggestions,
+            acceptsTab: true,
+            acceptsReturn: true
+        )
+
+        let invalid = gate.outcome(
+            for: snapshot(keyCode: 49, characters: " ")
+        )
+        XCTAssertEqual(invalid.decision, .passThrough)
+        XCTAssertEqual(gate.mode, .hidden)
+
+        let recovery = gate.outcome(
+            for: snapshot(keyCode: RuntimeKeyboardKeyCode.delete)
+        )
+        XCTAssertEqual(recovery.predictionGeneration, generation)
+        XCTAssertTrue(
+            gate.verifyExactCommitPrediction(
+                generation: generation,
+                expectedToken: ":fro"
+            )
+        )
+        let interactionRevision = try XCTUnwrap(
+            recovery.interactionRevision
+        )
+        XCTAssertTrue(
+            gate.expectPresentation(
+                revision: 1,
+                interactionRevision: interactionRevision
+            )
+        )
+        XCTAssertTrue(
+            gate.activatePresentation(
+                revision: 1,
+                mode: .suggestions,
+                acceptsTab: true,
+                acceptsReturn: true
+            )
+        )
+        XCTAssertEqual(gate.mode, .suggestions)
+
+        _ = gate.outcome(
+            for: snapshot(keyCode: 5, characters: "g")
+        )
+        XCTAssertTrue(
+            gate.verifyExactCommitPrediction(
+                generation: generation,
+                expectedToken: ":frog"
+            )
+        )
+        _ = gate.outcome(
+            for: snapshot(keyCode: 41, characters: ":")
+        )
+        XCTAssertEqual(gate.mode, .committing)
+        XCTAssertEqual(
+            gate.outcome(
+                for: snapshot(
+                    keyCode: RuntimeKeyboardKeyCode.returnKey
+                )
+            ),
+            .intercepting(.committing)
+        )
+    }
+
+    func testTriggerStartsFreshPredictionDuringInvalidSuffix() throws {
+        let gate = RuntimeInterceptionGate()
+        gate.configureExactCommitPrediction(
+            trigger: ":",
+            isEnabled: true,
+            exactTokens: ["frog", "smile"]
+        )
+        gate.setCaptureEnabled(true)
+        let opening = gate.outcome(
+            for: snapshot(keyCode: 41, characters: ":")
+        )
+        let firstGeneration = try XCTUnwrap(
+            opening.predictionGeneration
+        )
+        _ = gate.outcome(
+            for: snapshot(keyCode: 3, characters: "f")
+        )
+        _ = gate.outcome(
+            for: snapshot(keyCode: 49, characters: " ")
+        )
+
+        let restarted = gate.outcome(
+            for: snapshot(keyCode: 41, characters: ":")
+        )
+        XCTAssertNotEqual(
+            restarted.predictionGeneration,
+            firstGeneration
+        )
+        XCTAssertTrue(
+            gate.verifyExactCommitPrediction(
+                generation: restarted.predictionGeneration,
+                expectedToken: ":"
+            )
+        )
+    }
+
     func testStaleInteractionCannotRegisterANewPresentation() throws {
         let gate = RuntimeInterceptionGate()
         gate.configureExactCommitPrediction(

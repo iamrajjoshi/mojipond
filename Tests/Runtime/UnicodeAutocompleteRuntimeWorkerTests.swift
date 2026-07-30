@@ -90,6 +90,81 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         XCTAssertEqual(harness.poster.pasteCount, 0)
     }
 
+    func testRecoveredExactCloseStillInterceptsImmediateReturn()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":frog:",
+            presentationDelayMilliseconds: 160
+        )
+        harness.worker.setCaptureEnabled(true)
+        harness.gate.setCaptureEnabled(true)
+        deliver(":fro", into: harness)
+        let initiallyArmed = await eventually {
+            harness.gate.isExactCommitArmed
+        }
+        XCTAssertTrue(initiallyArmed)
+
+        let space = keySnapshot(keyCode: 49, characters: " ")
+        let spaceOutcome = harness.gate.outcome(for: space)
+        harness.worker.enqueue(space.delivered(with: spaceOutcome))
+        let hidden = await eventually {
+            harness.gate.mode == .hidden
+        }
+        XCTAssertTrue(hidden)
+
+        let backspace = keySnapshot(
+            keyCode: RuntimeKeyboardKeyCode.delete
+        )
+        let backspaceOutcome = harness.gate.outcome(for: backspace)
+        harness.worker.enqueue(
+            backspace.delivered(with: backspaceOutcome)
+        )
+        let restored = await eventually {
+            harness.gate.mode == .suggestions
+                && harness.gate.isExactCommitArmed
+        }
+        XCTAssertTrue(restored)
+
+        let finalCharacter = keySnapshot(
+            keyCode: 5,
+            characters: "g"
+        )
+        let finalCharacterOutcome = harness.gate.outcome(
+            for: finalCharacter
+        )
+        let closingTrigger = keySnapshot(
+            keyCode: 41,
+            characters: ":"
+        )
+        let closingOutcome = harness.gate.outcome(for: closingTrigger)
+        XCTAssertEqual(closingOutcome.decision, .passThrough)
+
+        let returnKey = keySnapshot(
+            keyCode: RuntimeKeyboardKeyCode.returnKey
+        )
+        let returnOutcome = harness.gate.outcome(for: returnKey)
+        XCTAssertEqual(returnOutcome, .intercepting(.committing))
+
+        harness.worker.enqueue(
+            finalCharacter.delivered(with: finalCharacterOutcome)
+        )
+        harness.worker.enqueue(
+            closingTrigger.delivered(with: closingOutcome)
+        )
+        harness.worker.enqueue(
+            returnKey.delivered(with: returnOutcome)
+        )
+
+        let insertedThenSent = await eventually {
+            harness.system.text == "🐸"
+                && harness.poster.returnCount == 1
+        }
+        XCTAssertTrue(insertedThenSent)
+        XCTAssertEqual(harness.poster.pasteCount, 0)
+    }
+
     func testBlockedReturnReportsMissingSendPermissionAfterInsertion()
         async throws
     {
@@ -827,6 +902,101 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
 
         XCTAssertTrue(hidden)
         XCTAssertEqual(harness.gate.mode, .hidden)
+    }
+
+    func testBackspaceRestoresSuggestionsAfterAccidentalSpace()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":f"
+        )
+        harness.worker.setCaptureEnabled(true)
+        type(":f", into: harness.worker)
+        let initiallyShown = await eventually {
+            harness.gate.mode == .suggestions
+        }
+        XCTAssertTrue(initiallyShown)
+
+        let updateStart = harness.presenter.updates.count
+        let space = keySnapshot(keyCode: 49, characters: " ")
+        let spaceOutcome = harness.gate.outcome(for: space)
+        harness.worker.enqueue(space.delivered(with: spaceOutcome))
+        let hidden = await eventually {
+            harness.gate.mode == .hidden
+                && harness.presenter.updates.dropFirst(updateStart).contains {
+                    guard case .hide = $0 else {
+                        return false
+                    }
+                    return true
+                }
+        }
+        XCTAssertTrue(hidden)
+
+        let backspace = keySnapshot(
+            keyCode: RuntimeKeyboardKeyCode.delete
+        )
+        let backspaceOutcome = harness.gate.outcome(for: backspace)
+        harness.worker.enqueue(
+            backspace.delivered(with: backspaceOutcome)
+        )
+        let restored = await eventually {
+            harness.gate.mode == .suggestions
+                && harness.presenter.updates.dropFirst(updateStart).contains {
+                    guard case .show = $0 else {
+                        return false
+                    }
+                    return true
+                }
+        }
+        XCTAssertTrue(restored)
+    }
+
+    func testRapidBackspaceRestoresSuggestionsAfterNoMatch()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":f"
+        )
+        harness.worker.setCaptureEnabled(true)
+        type(":f", into: harness.worker)
+        let initiallyShown = await eventually {
+            harness.gate.mode == .suggestions
+        }
+        XCTAssertTrue(initiallyShown)
+
+        let updateStart = harness.presenter.updates.count
+        let typo = keySnapshot(keyCode: 6, characters: "z")
+        let typoOutcome = harness.gate.outcome(for: typo)
+        let backspace = keySnapshot(
+            keyCode: RuntimeKeyboardKeyCode.delete
+        )
+        let backspaceOutcome = harness.gate.outcome(for: backspace)
+
+        harness.worker.enqueue(typo.delivered(with: typoOutcome))
+        harness.worker.enqueue(
+            backspace.delivered(with: backspaceOutcome)
+        )
+
+        let restored = await eventually {
+            harness.gate.mode == .suggestions
+                && harness.presenter.updates.dropFirst(updateStart).contains {
+                    guard case .show = $0 else {
+                        return false
+                    }
+                    return true
+                }
+        }
+        XCTAssertTrue(restored)
+        XCTAssertFalse(
+            harness.presenter.updates.dropFirst(updateStart).contains {
+                guard case .hide = $0 else {
+                    return false
+                }
+                return true
+            }
+        )
     }
 
     func testSuggestionRefreshCaptureFailureHidesVisiblePanelAndDisablesInterception()

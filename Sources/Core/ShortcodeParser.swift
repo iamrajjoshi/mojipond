@@ -88,6 +88,7 @@ struct ShortcodeParserSession: Equatable, Sendable {
     let openedAt: Date
     var lastInputAt: Date
     var query: String
+    var recoverableSuffixLength: Int
 
     func token(trigger: ShortcodeTrigger, closed: Bool = false) -> ParsedShortcodeToken {
         ParsedShortcodeToken(trigger: trigger, query: query, isClosed: closed)
@@ -234,13 +235,47 @@ struct ShortcodeParser: Sendable {
             return
         }
 
+        if session.recoverableSuffixLength > 0 {
+            if
+                character
+                    == configuration.preferences.trigger.character
+            {
+                reset(.externallyCancelled, actions: &actions)
+                beginSession(at: date, actions: &actions)
+                return
+            }
+            guard
+                session.recoverableSuffixLength
+                    < configuration.maximumTokenLength
+            else {
+                reset(.maximumLengthExceeded, actions: &actions)
+                return
+            }
+            session.recoverableSuffixLength += 1
+            session.lastInputAt = date
+            state = .collecting(session)
+            actions.append(
+                .hideSuggestions(
+                    transactionID: session.transactionID
+                )
+            )
+            return
+        }
+
         if character == configuration.preferences.trigger.character {
             handleClosingTrigger(session: session, actions: &actions)
             return
         }
 
         guard EmojiAliasSyntax.isValidToken(String(character)) else {
-            reset(.invalidCharacter(character), actions: &actions)
+            session.recoverableSuffixLength = 1
+            session.lastInputAt = date
+            state = .collecting(session)
+            actions.append(
+                .hideSuggestions(
+                    transactionID: session.transactionID
+                )
+            )
             return
         }
         guard session.query.utf8.count < configuration.maximumTokenLength else {
@@ -301,6 +336,40 @@ struct ShortcodeParser: Sendable {
         }
         if modifiers.containsUnsupportedTypingModifier {
             reset(.unsupportedModifiers, actions: &actions)
+            return
+        }
+        if session.recoverableSuffixLength > 0 {
+            session.recoverableSuffixLength -= 1
+            session.lastInputAt = date
+            state = .collecting(session)
+            if session.recoverableSuffixLength > 0 {
+                actions.append(
+                    .hideSuggestions(
+                        transactionID: session.transactionID
+                    )
+                )
+            } else if
+                session.query.isEmpty
+                    && !configuration.preferences
+                        .showsSuggestionsOnBareTrigger
+            {
+                actions.append(
+                    .hideSuggestions(
+                        transactionID: session.transactionID
+                    )
+                )
+            } else {
+                actions.append(
+                    .updateSuggestions(
+                        transactionID: session.transactionID,
+                        query: session.query,
+                        token: session.token(
+                            trigger:
+                                configuration.preferences.trigger
+                        )
+                    )
+                )
+            }
             return
         }
         guard !session.query.isEmpty else {
@@ -386,7 +455,8 @@ struct ShortcodeParser: Sendable {
             transactionID: ParserTransactionID(rawValue: nextTransactionID),
             openedAt: date,
             lastInputAt: date,
-            query: ""
+            query: "",
+            recoverableSuffixLength: 0
         )
         nextTransactionID &+= 1
         state = .collecting(session)
@@ -430,7 +500,11 @@ struct ShortcodeParser: Sendable {
         guard case let .collecting(session) = state else {
             return false
         }
-        return configuration.preferences.showsSuggestionsOnBareTrigger || !session.query.isEmpty
+        return session.recoverableSuffixLength == 0
+            && (
+                configuration.preferences.showsSuggestionsOnBareTrigger
+                    || !session.query.isEmpty
+            )
     }
 
     private func transition(
