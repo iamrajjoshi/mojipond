@@ -126,6 +126,99 @@ final class ShortcodeParserTests: XCTestCase {
         )
     }
 
+    func testBackspaceRestoresSuggestionsAfterInvalidSuffix() {
+        var parser = ShortcodeParser()
+        parser.handle(.character(":"), at: start)
+        parser.handle(.character("f"), at: start)
+
+        let invalid = parser.handle(.character(" "), at: start)
+        XCTAssertEqual(invalid.currentState.session?.query, "f")
+        XCTAssertEqual(
+            invalid.actions,
+            [
+                .hideSuggestions(
+                    transactionID: ParserTransactionID(rawValue: 1)
+                )
+            ]
+        )
+
+        let trailingCharacter = parser.handle(
+            .character("x"),
+            at: start
+        )
+        XCTAssertEqual(trailingCharacter.currentState.session?.query, "f")
+        XCTAssertEqual(
+            trailingCharacter.actions,
+            [
+                .hideSuggestions(
+                    transactionID: ParserTransactionID(rawValue: 1)
+                )
+            ]
+        )
+
+        let firstBackspace = parser.handle(.backspace(), at: start)
+        XCTAssertEqual(firstBackspace.currentState.session?.query, "f")
+        XCTAssertEqual(
+            firstBackspace.actions,
+            [
+                .hideSuggestions(
+                    transactionID: ParserTransactionID(rawValue: 1)
+                )
+            ]
+        )
+
+        let restoringBackspace = parser.handle(.backspace(), at: start)
+        XCTAssertEqual(restoringBackspace.currentState.session?.query, "f")
+        XCTAssertEqual(
+            restoringBackspace.actions,
+            [
+                .updateSuggestions(
+                    transactionID: ParserTransactionID(rawValue: 1),
+                    query: "f",
+                    token: ParsedShortcodeToken(
+                        trigger: .colon,
+                        query: "f",
+                        isClosed: false
+                    )
+                )
+            ]
+        )
+    }
+
+    func testTriggerStartsFreshSessionDuringInvalidSuffix() {
+        var parser = ShortcodeParser()
+        parser.handle(.character(":"), at: start)
+        parser.handle(.character("f"), at: start)
+        parser.handle(.character(" "), at: start)
+
+        let restarted = parser.handle(.character(":"), at: start)
+
+        XCTAssertEqual(restarted.currentState.session?.query, "")
+        XCTAssertEqual(
+            restarted.currentState.session?.transactionID,
+            ParserTransactionID(rawValue: 2)
+        )
+        XCTAssertEqual(
+            restarted.actions,
+            [
+                .reset(
+                    transactionID: ParserTransactionID(rawValue: 1),
+                    reason: .externallyCancelled
+                ),
+                .began(
+                    ShortcodeParserSession(
+                        transactionID:
+                            ParserTransactionID(rawValue: 2),
+                        openedAt: start,
+                        lastInputAt: start,
+                        query: "",
+                        recoverableSuffixLength: 0
+                    )
+                )
+            ]
+        )
+    }
+
     func testMaximumLengthIsCappedAndOverflowResetsAggressively() {
         var parser = ShortcodeParser(
             configuration: ShortcodeParserConfiguration(maximumTokenLength: 3)
@@ -170,7 +263,7 @@ final class ShortcodeParserTests: XCTestCase {
         )
     }
 
-    func testUnsupportedModifierAndInvalidCharacterResetWithoutConsumption() {
+    func testUnsupportedModifierResetsWithoutConsumption() {
         var parser = ShortcodeParser()
         parser.handle(.character(":"), at: start)
         let modified = parser.handle(
@@ -186,18 +279,6 @@ final class ShortcodeParserTests: XCTestCase {
                 .reset(
                     transactionID: ParserTransactionID(rawValue: 1),
                     reason: .unsupportedModifiers
-                )
-            ]
-        )
-
-        parser.handle(.character(":"), at: start)
-        let invalid = parser.handle(.character(" "), at: start)
-        XCTAssertEqual(
-            invalid.actions,
-            [
-                .reset(
-                    transactionID: ParserTransactionID(rawValue: 2),
-                    reason: .invalidCharacter(" ")
                 )
             ]
         )

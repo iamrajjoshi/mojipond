@@ -271,6 +271,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
     private var uiRevision: UInt64 = 0
     private var processingPredictionGeneration: UInt64?
     private var processingInteractionRevision: UInt64?
+    private var processingEventRevision: UInt64?
 
     init(
         searchIndex: EmojiSearchIndex,
@@ -489,9 +490,12 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             interceptionOutcome.predictionGeneration
         processingInteractionRevision =
             interceptionOutcome.interactionRevision
+        processingEventRevision =
+            interceptionOutcome.eventRevision
         defer {
             processingPredictionGeneration = nil
             processingInteractionRevision = nil
+            processingEventRevision = nil
         }
 
         if handleCommitAction(
@@ -1573,10 +1577,24 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                 )
 
             case let .hideSuggestions(transactionID):
-                guard activeTransaction?.transactionID == transactionID else {
+                guard
+                    var transaction = activeTransaction,
+                    transaction.transactionID == transactionID
+                else {
                     continue
                 }
-                hideSurface()
+                armShortcodeInactivityTimeout(for: &transaction)
+                activeTransaction = transaction
+                guard
+                    interceptionGate.isEventRevisionCurrent(
+                        processingEventRevision
+                    )
+                else {
+                    continue
+                }
+                hideSurface(
+                    preservingExactCommitPrediction: true
+                )
 
             case let .requestExactReplacement(
                 transactionID,
@@ -1676,7 +1694,16 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         activeTransaction = transaction
 
         guard !transaction.results.isEmpty else {
-            hideSurface()
+            guard
+                interceptionGate.isEventRevisionCurrent(
+                    processingEventRevision
+                )
+            else {
+                return
+            }
+            hideSurface(
+                preservingExactCommitPrediction: true
+            )
             return
         }
         retainSurfacePresentationDuringRefresh()
@@ -2903,11 +2930,15 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
     }
 
     private func hideSurface(
-        preservingInterceptionMode: Bool = false
+        preservingInterceptionMode: Bool = false,
+        preservingExactCommitPrediction: Bool = false
     ) {
         suggestionPresentationTask?.cancel()
         suggestionPresentationTask = nil
-        if !preservingInterceptionMode {
+        if
+            !preservingInterceptionMode,
+            !preservingExactCommitPrediction
+        {
             interceptionGate.disarmExactCommit()
         }
         if var transaction = activeTransaction {
