@@ -2,7 +2,8 @@
 
 MojiPond currently supports two different artifact classes:
 
-1. **Local development artifacts** — ad-hoc signed, suitable for this Mac, and
+1. **Local development artifacts** — Apple Development signed when one valid
+   identity is available, otherwise ad-hoc signed; suitable for this Mac and
    not public distribution.
 2. **Direct-distribution artifacts** — signed with a Developer ID Application
    certificate, hardened, timestamped, notarized by Apple, stapled, and tested
@@ -132,8 +133,9 @@ List available identities:
 security find-identity -v -p codesigning
 ```
 
-The current development machine has no signing identity, so Developer ID
-release steps cannot be verified there until one is installed.
+An Apple Development identity used for local Debug builds is not a substitute
+for Developer ID Application signing. Developer ID release steps cannot be
+verified until that separate identity is installed.
 
 ## 4. Build a Developer ID archive and packages
 

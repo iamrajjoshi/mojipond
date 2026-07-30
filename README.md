@@ -92,10 +92,18 @@ From the repository root:
 ./scripts/install-local.sh
 ```
 
-`install-local.sh` builds an ad-hoc-signed development copy, verifies its
-signature, installs it at `/Applications/MojiPond.app`, and launches it. A
-stable path matters because macOS privacy approvals are associated with the
-installed application.
+`install-local.sh` builds a development copy, verifies its signature, installs
+it at `/Applications/MojiPond.app`, and launches it. For Debug builds,
+`build.sh` automatically reuses the sole valid Apple Development identity in
+the Keychain search list. This gives local rebuilds a stable signing identity
+so macOS can preserve privacy approvals across installs. If no Apple
+Development identity is available, Debug builds remain ad-hoc signed. If more
+than one is available, set `MOJIPOND_SIGNING_IDENTITY` explicitly to the
+intended identity name or fingerprint. An explicit setting always overrides
+automatic selection.
+
+Release builds and local release packages remain ad-hoc signed by default.
+Developer ID and notarization are still required for public distribution.
 
 To produce a local Universal Release archive, ZIP, DMG, fixed-schema
 build-provenance metadata, and SHA-256 checksum file:
