@@ -29,7 +29,8 @@ struct UnicodeAutocompleteRuntimeConfiguration: Equatable, Sendable {
 
     init(
         preferences: MojiPondPreferences = .defaults,
-        suggestionLimit: Int = 5,
+        suggestionLimit: Int =
+            RuntimeSuggestionPresentationMetrics.maximumVisibleRows,
         accessibilitySettleDelayMilliseconds: Int = 12,
         accessibilityRetryLimit: Int = 2,
         mediaSearchDebounceMilliseconds: Int = 140,
@@ -37,7 +38,10 @@ struct UnicodeAutocompleteRuntimeConfiguration: Equatable, Sendable {
         mediaInactivityTimeoutMilliseconds: Int = 8_000
     ) {
         self.preferences = preferences
-        self.suggestionLimit = min(max(1, suggestionLimit), 5)
+        self.suggestionLimit = min(
+            max(1, suggestionLimit),
+            RuntimeSuggestionPresentationMetrics.maximumVisibleRows
+        )
         self.accessibilitySettleDelayMilliseconds = min(
             max(0, accessibilitySettleDelayMilliseconds),
             100

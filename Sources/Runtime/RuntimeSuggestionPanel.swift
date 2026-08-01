@@ -2,6 +2,13 @@ import AppKit
 import Combine
 import SwiftUI
 
+enum RuntimeSuggestionPresentationMetrics {
+    static let maximumVisibleRows = 6
+    static let suggestionRowHeight: CGFloat = 42
+    static let suggestionFooterHeight: CGFloat = 26
+    static let suggestionDividerHeight: CGFloat = 1
+}
+
 struct RuntimeSuggestionRow: Identifiable, Equatable, Sendable {
     let id: EmojiItem.ID
     let glyph: String
@@ -63,8 +70,22 @@ struct RuntimeSuggestionPanelSnapshot: Equatable, Sendable {
         self.acceptsReturn = acceptsReturn
     }
 
+    var visibleRows: [RuntimeSuggestionRow] {
+        guard mode == .suggestions else {
+            return rows
+        }
+        return Array(
+            rows.prefix(
+                RuntimeSuggestionPresentationMetrics.maximumVisibleRows
+            )
+        )
+    }
+
     var selectedRow: RuntimeSuggestionRow? {
-        rows.indices.contains(selectedIndex) ? rows[selectedIndex] : nil
+        let rows = visibleRows
+        return rows.indices.contains(selectedIndex)
+            ? rows[selectedIndex]
+            : nil
     }
 
     var compactInteractionHint: String {
@@ -113,7 +134,7 @@ enum RuntimeVoiceOverAnnouncement {
                 .filter { !$0.isEmpty }
                 .joined(separator: " ")
         }
-        let count = snapshot.rows.count
+        let count = snapshot.visibleRows.count
         let word = count == 1 ? "suggestion" : "suggestions"
         return ["\(count) emoji \(word).", selected]
             .filter { !$0.isEmpty }
@@ -417,10 +438,17 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
         case .hidden, .committing:
             return CGSize(width: 380, height: 1)
         case .suggestions:
-            let visibleRowCount = min(max(snapshot.rows.count, 1), 5)
+            let visibleRowCount = max(snapshot.visibleRows.count, 1)
             return CGSize(
                 width: 380,
-                height: CGFloat(visibleRowCount * 48 + 80)
+                height:
+                    CGFloat(visibleRowCount)
+                    * RuntimeSuggestionPresentationMetrics
+                        .suggestionRowHeight
+                    + RuntimeSuggestionPresentationMetrics
+                        .suggestionDividerHeight
+                    + RuntimeSuggestionPresentationMetrics
+                        .suggestionFooterHeight
             )
         case .browser:
             return CGSize(
@@ -477,31 +505,6 @@ struct RuntimeSuggestionPanelView: View {
                         .fill(PondDesign.ripple.opacity(0.48))
                         .frame(height: 1)
                 }
-            } else {
-                HStack(spacing: 8) {
-                    Image(systemName: "water.waves")
-                        .foregroundStyle(PondDesign.onDeepWater)
-                    Text("MojiPond")
-                        .font(.subheadline.weight(.semibold))
-                    if let query = snapshot.query, !query.isEmpty {
-                        Text("\(snapshot.trigger.rawValue)\(query)")
-                            .font(.subheadline.monospaced())
-                            .foregroundStyle(
-                                PondDesign.onDeepWater.opacity(0.76)
-                            )
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 8)
-                }
-                .foregroundStyle(PondDesign.onDeepWater)
-                .padding(.horizontal, 12)
-                .frame(height: 36)
-                .background(PondDesign.deepWater)
-                .overlay(alignment: .bottom) {
-                    Rectangle()
-                        .fill(PondDesign.ripple.opacity(0.48))
-                        .frame(height: 1)
-                }
             }
 
             if snapshot.mode == .browser {
@@ -527,7 +530,10 @@ struct RuntimeSuggestionPanelView: View {
                     rows
                     Rectangle()
                         .fill(PondDesign.ripple.opacity(0.24))
-                        .frame(height: 1)
+                        .frame(
+                            height: RuntimeSuggestionPresentationMetrics
+                                .suggestionDividerHeight
+                        )
                     Text(snapshot.compactInteractionHint)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -537,15 +543,17 @@ struct RuntimeSuggestionPanelView: View {
                         .padding(.horizontal, 12)
                         .frame(
                             maxWidth: .infinity,
-                            minHeight: 30,
-                            maxHeight: 30,
+                            minHeight: RuntimeSuggestionPresentationMetrics
+                                .suggestionFooterHeight,
+                            maxHeight: RuntimeSuggestionPresentationMetrics
+                                .suggestionFooterHeight,
                             alignment: .leading
                         )
                         .background(PondDesign.raisedSurface)
                 }
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, snapshot.mode == .browser ? 6 : 0)
         .background {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(
@@ -591,13 +599,20 @@ struct RuntimeSuggestionPanelView: View {
 
     @ViewBuilder
     private var rows: some View {
-        if snapshot.rows.isEmpty {
+        let visibleRows = snapshot.visibleRows
+        if visibleRows.isEmpty {
             Text("No matching emoji")
                 .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, minHeight: 48)
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: snapshot.mode == .browser
+                        ? 44
+                        : RuntimeSuggestionPresentationMetrics
+                            .suggestionRowHeight
+                )
         } else {
             let selectedID = snapshot.selectedRow?.id
-            ForEach(snapshot.rows) { row in
+            ForEach(visibleRows) { row in
                 RuntimeSuggestionRowView(
                     row: row,
                     isSelected: row.id == selectedID,
@@ -679,7 +694,11 @@ private struct RuntimeSuggestionRowView: View {
             }
         }
         .padding(.horizontal, 10)
-        .frame(height: compact ? 44 : 48)
+        .frame(
+            height: compact
+                ? 44
+                : RuntimeSuggestionPresentationMetrics.suggestionRowHeight
+        )
         .foregroundStyle(
             isSelected
                 ? PondDesign.onDeepWater

@@ -550,6 +550,24 @@ final class MojiPondUITests: XCTestCase {
             matchingText.waitForExistence(timeout: 5),
             "Expected \(windowTitle) to contain \(expectedText)"
         )
+        if initialScreen == "suggestions" {
+            XCTAssertTrue(
+                window.descendants(matching: .any)[
+                    "Duck, colon duck colon"
+                ].waitForExistence(timeout: 2),
+                "Expected the compact panel to expose a sixth suggestion"
+            )
+            XCTAssertTrue(
+                window.descendants(matching: .any)[
+                    "Up and Down Arrow choose, Tab or Return inserts, Escape closes"
+                ].waitForExistence(timeout: 2),
+                "Expected keyboard guidance to remain in the footer"
+            )
+            XCTAssertFalse(
+                window.staticTexts["MojiPond"].exists,
+                "The suggestion panel should not spend a row on branding"
+            )
+        }
         attachScreen(named: screenshotName, element: window)
     }
 

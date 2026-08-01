@@ -4,6 +4,25 @@ import XCTest
 
 @MainActor
 final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
+    func testSuggestionLimitMatchesVisiblePanelCapacity() {
+        XCTAssertEqual(
+            UnicodeAutocompleteRuntimeConfiguration().suggestionLimit,
+            6
+        )
+        XCTAssertEqual(
+            UnicodeAutocompleteRuntimeConfiguration(
+                suggestionLimit: 99
+            ).suggestionLimit,
+            6
+        )
+        XCTAssertEqual(
+            UnicodeAutocompleteRuntimeConfiguration(
+                suggestionLimit: 0
+            ).suggestionLimit,
+            1
+        )
+    }
+
     func testClosingTokenReplacesExactMatchButNeverPrefix() async throws {
         let exact = try makeHarness(
             items: [emoji(shortcode: "frog", value: "🐸")],
