@@ -80,7 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             observeApplicationState()
             configureStatusItem()
             switch launchConfiguration.initialScreen {
-            case .library:
+            case .library, .libraryEmptyPack:
                 showLibrary()
             case .settings:
                 showSettings()
@@ -782,6 +782,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 usageStore: usage
             )
             libraryViewModel = viewModel
+            if launchConfiguration.initialScreen == .libraryEmptyPack {
+                Task {
+                    do {
+                        let pack = try await library.createPack(
+                            name: "ZIP Only Pack"
+                        )
+                        await viewModel.reload()
+                        viewModel.scope = .pack(pack.id)
+                    } catch {
+                        appState.setRuntimeState(
+                            .failed(error.localizedDescription)
+                        )
+                    }
+                }
+            }
             if launchConfiguration.initialScreen == .importPreview {
                 Task {
                     await viewModel.reload()

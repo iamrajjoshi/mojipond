@@ -216,11 +216,10 @@ custom emoji in a grid or list. From the Library you can:
 - Resolve each collision by keeping the existing item, replacing it, renaming
   the import, or dropping an alias; the same choice can be applied to all
   matching conflicts.
-- Enable, disable, reorder, inspect, create, edit, and remove packs; add a
-  custom Unicode emoji with its own shortcode, aliases, tags, and category; add
-  or replace image assets; export a portable pack; and reveal managed files.
-- Search custom Unicode by shortcode, alias, name, tag, or category, then copy
-  the Unicode value directly from its Library detail view.
+- Enable, disable, reorder, inspect, edit, and remove imported packs; add or
+  replace image assets; export a portable pack; and reveal managed files.
+- Search imported items by shortcode, alias, name, tag, or category, then copy
+  their value directly from the Library detail view.
 
 ZIP preparation is local, cancellable, and reviewed before installation.
 Replacing an installed pack also requires one ZIP and updates its contents

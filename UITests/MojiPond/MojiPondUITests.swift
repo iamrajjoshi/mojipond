@@ -91,50 +91,51 @@ final class MojiPondUITests: XCTestCase {
         )
     }
 
-    func testPackDetailsKeepsImageImportZIPOnly() {
+    func testLibraryUsesZIPImportInsteadOfManualCreation() {
         continueAfterFailure = false
         let application = launch(
-            initialScreen: "library",
+            initialScreen: "library-empty-pack",
             appearance: .light
         )
         defer {
             application.terminate()
         }
 
-        assertLibraryIsReady(application)
-        let newPackButton = application.buttons["New Empty Pack…"]
-        XCTAssertTrue(newPackButton.waitForExistence(timeout: 2))
-        newPackButton.click()
-
         XCTAssertTrue(
-            application.staticTexts[
-                "Create an empty pack"
-            ].waitForExistence(timeout: 2)
+            application.windows["MojiPond Library"]
+                .waitForExistence(timeout: 5)
         )
-        let nameField = application.descendants(
-            matching: .any
-        )["newPack.name"]
-        XCTAssertTrue(nameField.waitForExistence(timeout: 2))
-        nameField.click()
-        nameField.typeText("ZIP Only Pack")
-        application.buttons["Create Pack"].click()
-
-        let packLabel = application.staticTexts["ZIP Only Pack"].firstMatch
-        XCTAssertTrue(packLabel.waitForExistence(timeout: 3))
-        packLabel.click()
-        let detailsButton = application.buttons["Pack Details"]
-        XCTAssertTrue(detailsButton.waitForExistence(timeout: 2))
-        detailsButton.click()
-
         XCTAssertTrue(
-            application.buttons[
-                "Replace Contents from ZIP…"
-            ].waitForExistence(timeout: 2)
+            application.buttons["Import ZIP"].waitForExistence(timeout: 5)
         )
-        XCTAssertFalse(application.buttons["Add Files…"].exists)
-        XCTAssertFalse(
-            application.buttons["Check GitHub Revision…"].exists
+        XCTAssertFalse(application.buttons["New Empty Pack…"].exists)
+
+        let packButton = application.buttons.matching(
+            NSPredicate(
+                format: "label CONTAINS[c] %@",
+                "ZIP Only Pack"
+            )
+        ).firstMatch
+        XCTAssertTrue(packButton.waitForExistence(timeout: 3))
+        packButton.click()
+        XCTAssertTrue(
+            application.buttons["Pack Details"]
+                .waitForExistence(timeout: 2)
         )
+        XCTAssertTrue(
+            application.staticTexts["No emoji in this view"]
+                .waitForExistence(timeout: 2)
+        )
+        XCTAssertFalse(application.buttons["Add Unicode Emoji"].exists)
+
+        packButton.rightClick()
+        XCTAssertTrue(
+            application.menuItems["Pack Details…"]
+                .waitForExistence(timeout: 2)
+        )
+        XCTAssertFalse(application.buttons["Add Unicode Emoji…"].exists)
+        XCTAssertFalse(application.menuItems["Add Unicode Emoji…"].exists)
+        application.typeKey(.escape, modifierFlags: [])
     }
 
     func testOnboardingPermissionStatesRenderDeterministically() {

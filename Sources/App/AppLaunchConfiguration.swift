@@ -4,6 +4,7 @@ struct AppLaunchConfiguration: Equatable {
     enum InitialScreen: String {
         case onboarding
         case library
+        case libraryEmptyPack = "library-empty-pack"
         case settings
         case importPreview = "import-preview"
         case suggestions
@@ -112,7 +113,9 @@ struct AppLaunchConfiguration: Equatable {
             uiTestAppearance: appearance,
             uiTestUpdateScenario: updateScenario,
             ephemeralRootURL: ephemeralRootURL,
-            opensLibraryAtLaunch: initialScreen == .library
+            opensLibraryAtLaunch:
+                initialScreen == .library
+                    || initialScreen == .libraryEmptyPack
         )
     }
 
@@ -121,6 +124,7 @@ struct AppLaunchConfiguration: Equatable {
     ) -> InitialPresentation {
         if isUITesting {
             return initialScreen == .library
+                || initialScreen == .libraryEmptyPack
                 ? .library
                 : .onboarding
         }

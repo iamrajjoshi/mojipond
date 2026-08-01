@@ -87,6 +87,27 @@ final class AppLaunchConfigurationTests: XCTestCase {
         )
     }
 
+    func testUITestEmptyPackFixtureStillPresentsLibrary() {
+        let configuration = AppLaunchConfiguration.parse(
+            arguments: [
+                "MojiPond",
+                AppLaunchConfiguration.uiTestingFlag,
+                AppLaunchConfiguration.uiTestScreenArgument,
+                "library-empty-pack"
+            ],
+            processIdentifier: 7,
+            temporaryDirectory: URL(fileURLWithPath: "/private/tmp")
+        )
+
+        XCTAssertEqual(configuration.initialScreen, .libraryEmptyPack)
+        XCTAssertEqual(
+            configuration.initialPresentation(
+                hasCompletedOnboarding: false
+            ),
+            .library
+        )
+    }
+
     @MainActor
     func testUITestLaunchSelectsDocumentationSurfaceAndPermissionState() {
         let configuration = AppLaunchConfiguration.parse(
