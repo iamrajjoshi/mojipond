@@ -257,11 +257,16 @@ final class MojiPondUITests: XCTestCase {
 
         application.descendants(matching: .any)["Privacy"].click()
         XCTAssertTrue(
-            application.staticTexts[
-                "Send & Media Pasting"
-            ].waitForExistence(timeout: 2)
+            application.staticTexts["Accessibility"]
+                .waitForExistence(timeout: 2)
         )
         XCTAssertTrue(
+            application.staticTexts["Input Monitoring"].exists
+        )
+        XCTAssertFalse(
+            application.staticTexts["Send & Media Pasting"].exists
+        )
+        XCTAssertFalse(
             application.buttons["Allow Send & Media Pasting"].exists
         )
 
