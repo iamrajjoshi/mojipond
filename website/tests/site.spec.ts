@@ -19,13 +19,12 @@ const expectNoHorizontalOverflow = async (page: Page) => {
 
 const expectPreviewState = async (page: Page) => {
   const downloadActions = page.locator("[data-release-download]");
-  await expect(downloadActions).toHaveCount(2);
-  await expect(downloadActions.nth(0)).toBeHidden();
-  await expect(downloadActions.nth(1)).toBeHidden();
-  await expect(page.locator("[data-release-detail]")).toHaveText([
-    "Public build pending Apple signing",
-    "Public build pending Apple signing",
-  ]);
+  await expect(downloadActions).toHaveCount(1);
+  await expect(downloadActions).toBeHidden();
+  await expect(page.locator("[data-release-fallback]")).toHaveText(
+    "Mac app in final testing.",
+  );
+  await expect(page.locator("[data-release-detail]")).toBeHidden();
 };
 
 test("home page explains the product without a false download", async ({
@@ -40,12 +39,13 @@ test("home page explains the product without a false download", async ({
       name: /your emoji, one colon away/i,
     }),
   ).toBeVisible();
-  await expect(page.getByText("Native Mac app")).toBeVisible();
+  await expect(page.getByText("Native macOS app")).toBeVisible();
+  await expect(page.getByText(/Apple signing/i)).toHaveCount(0);
   await expectPreviewState(page);
   await expectNoHorizontalOverflow(page);
 });
 
-test("one release check updates every download action", async ({ page }) => {
+test("one release check updates the download action", async ({ page }) => {
   let releaseRequestCount = 0;
   await page.route("**/releases/release.json", async (route) => {
     releaseRequestCount += 1;
@@ -57,12 +57,11 @@ test("one release check updates every download action", async ({ page }) => {
   await page.goto("/");
 
   await expect(
-    page.getByRole("link", { name: "Download for macOS" }),
-  ).toHaveCount(2);
-  await expect(page.locator("[data-release-detail]")).toHaveText([
+    page.getByRole("link", { name: "Download for Mac" }),
+  ).toHaveCount(1);
+  await expect(page.locator("[data-release-detail]")).toHaveText(
     "Version 1.2.3 · 10 MB · macOS 14 or newer",
-    "Version 1.2.3 · 10 MB · macOS 14 or newer",
-  ]);
+  );
   expect(releaseRequestCount).toBe(1);
 });
 
@@ -135,4 +134,11 @@ test("legal pages and the branded 404 are reachable", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "That shortcut leads nowhere." }),
   ).toBeVisible();
+});
+
+test("privacy page describes local Noto filtering", async ({ page }) => {
+  await page.goto("/privacy/");
+
+  await expect(page.getByText(/filters it on your Mac/)).toBeVisible();
+  await expect(page.getByText(/doesn't send your search query/)).toBeVisible();
 });

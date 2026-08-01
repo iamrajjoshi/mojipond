@@ -9,7 +9,7 @@ const description =
 <BaseLayout title={title} description={description}>
   <article class="legal-page">
     <p class="eyebrow">Privacy</p>
-    <h1>The short version: your messages are not MojiPond's business.</h1>
+    <h1>Your messages aren't sent to MojiPond.</h1>
     <div class="legal-note">
       <strong>No account. No app telemetry. No Messages database access.</strong
       >
@@ -41,8 +41,9 @@ const description =
     <p>Two optional features make HTTPS requests:</p>
     <ul>
       <li>
-        Online Noto sticker search sends the sticker query to Google's emoji
-        artwork service after you enable the setting.
+        When online Noto search is enabled, MojiPond downloads Google's fixed
+        emoji manifest, filters it on your Mac, and fetches only the artwork you
+        choose. It doesn't send your search query.
       </li>
       <li>
         Signed update checks contact the configured update host after you

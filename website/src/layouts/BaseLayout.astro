@@ -1,6 +1,8 @@
 ---
 import { getImage } from "astro:assets";
-import socialImageSource from "../../../docs/screenshots/library.png";
+import "@fontsource-variable/newsreader/wght-italic.css";
+import "@fontsource-variable/newsreader/wght.css";
+import socialImageSource from "../assets/pond-hero-desktop.png";
 import SiteFooter from "../components/SiteFooter.astro";
 import SiteHeader from "../components/SiteHeader.astro";
 import "../styles/global.css";
@@ -16,7 +18,6 @@ const canonicalURL = new URL(Astro.url.pathname, Astro.site);
 const socialImage = await getImage({
   src: socialImageSource,
   width: 1200,
-  height: 630,
   format: "jpeg",
   quality: 84,
 });
@@ -28,7 +29,7 @@ const socialImageURL = new URL(socialImage.src, Astro.site);
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width" />
-    <meta name="theme-color" content="#eff4ee" />
+    <meta name="theme-color" content="#f7f4ec" />
     <meta name="description" content={description} />
     {noindex && <meta name="robots" content="noindex" />}
     <link rel="canonical" href={canonicalURL} />
@@ -42,7 +43,7 @@ const socialImageURL = new URL(socialImage.src, Astro.site);
     <meta property="og:image" content={socialImageURL} />
     <meta
       property="og:image:alt"
-      content="The MojiPond emoji library on macOS"
+      content="A quiet sculpted pond created for MojiPond"
     />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
