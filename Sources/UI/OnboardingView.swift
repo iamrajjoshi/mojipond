@@ -109,33 +109,48 @@ struct OnboardingView: View {
             minHeight: 600,
             idealHeight: 700
         )
-        .background(.background)
+        .background {
+            PondWindowBackdrop()
+        }
+        .tint(PondDesign.pond)
     }
 
     private var header: some View {
-        HStack {
-            Label("MojiPond", systemImage: "water.waves")
-                .font(.headline)
+        HStack(spacing: 10) {
+            PondMark(size: 34)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("MojiPond")
+                    .font(.headline)
+                Text("SETUP")
+                    .font(.caption2.weight(.semibold))
+                    .tracking(1.2)
+                    .foregroundStyle(PondDesign.onDeepWater)
+            }
             Spacer()
+            Text("Shortcodes, anywhere you type")
+                .font(.caption)
+                .foregroundStyle(PondDesign.onDeepWater.opacity(0.78))
         }
+        .foregroundStyle(PondDesign.onDeepWater)
         .padding(.horizontal, 24)
-        .frame(height: 56)
+        .frame(height: 58)
+        .background(PondDesign.deepWater)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(PondDesign.ripple.opacity(0.5))
+                .frame(height: 1)
+        }
     }
 
     private var setupContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                HStack(spacing: 18) {
-                    PondMark(size: 72)
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("Welcome to MojiPond")
-                            .font(.title2.weight(.semibold))
-                        Text(
-                            "Type \(triggerText)wave\(triggerText), choose an emoji, and keep typing."
-                        )
-                        .foregroundStyle(.secondary)
-                    }
-                }
+                PondPageHeader(
+                    icon: "water.waves",
+                    title: "Welcome to MojiPond",
+                    detail:
+                        "Type \(triggerText)wave\(triggerText), choose an emoji, and keep typing."
+                )
 
                 if !appState.isInstalledInApplications {
                     Label {
@@ -271,12 +286,12 @@ struct OnboardingView: View {
                     }
                 }
                 .background(
-                    .background.secondary,
+                    PondDesign.raisedSurface,
                     in: RoundedRectangle(cornerRadius: 9)
                 )
                 .overlay {
                     RoundedRectangle(cornerRadius: 9)
-                        .stroke(.separator)
+                        .stroke(PondDesign.ripple.opacity(0.45))
                 }
             }
 
@@ -320,6 +335,7 @@ struct OnboardingView: View {
         }
         .padding(.horizontal, 24)
         .frame(height: 64)
+        .background(PondDesign.surface.opacity(0.94))
     }
 
     private func finish() {
@@ -503,7 +519,7 @@ private struct PermissionCard: View {
         .background(
             status == .granted
                 ? PondDesign.lily.opacity(0.08)
-                : Color(nsColor: .controlBackgroundColor),
+                : PondDesign.surface,
             in: RoundedRectangle(cornerRadius: PondDesign.cornerRadius)
         )
         .overlay {
@@ -511,7 +527,7 @@ private struct PermissionCard: View {
                 .stroke(
                     status == .granted
                         ? PondDesign.lily.opacity(0.8)
-                        : Color(nsColor: .separatorColor).opacity(0.55),
+                        : PondDesign.ripple.opacity(0.45),
                     lineWidth: status == .granted ? 2 : 1
                 )
         }

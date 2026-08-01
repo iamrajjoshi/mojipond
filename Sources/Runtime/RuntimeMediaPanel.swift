@@ -211,6 +211,13 @@ struct RuntimeMediaPanelView: View {
             if snapshot.items.isEmpty {
                 status
                     .frame(maxWidth: .infinity, minHeight: 54)
+                    .background(
+                        PondDesign.raisedSurface,
+                        in: RoundedRectangle(
+                            cornerRadius: PondDesign.compactCornerRadius,
+                            style: .continuous
+                        )
+                    )
             } else {
                 mediaGrid
             }
@@ -219,21 +226,39 @@ struct RuntimeMediaPanelView: View {
         }
         .padding(12)
         .background {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(
+                cornerRadius: PondDesign.cornerRadius,
+                style: .continuous
+            )
                 .fill(
                     reduceTransparency
-                        ? AnyShapeStyle(
-                            Color(nsColor: .windowBackgroundColor)
-                        )
+                        ? AnyShapeStyle(PondDesign.surface)
                         : AnyShapeStyle(.regularMaterial)
                 )
+                .overlay {
+                    if !reduceTransparency {
+                        RoundedRectangle(
+                            cornerRadius: PondDesign.cornerRadius,
+                            style: .continuous
+                        )
+                        .fill(PondDesign.surface.opacity(0.76))
+                    }
+                }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .clipShape(
+            RoundedRectangle(
+                cornerRadius: PondDesign.cornerRadius,
+                style: .continuous
+            )
+        )
         .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(
+                cornerRadius: PondDesign.cornerRadius,
+                style: .continuous
+            )
                 .strokeBorder(
-                    .primary.opacity(
-                        contrast == .increased ? 0.5 : 0.12
+                    PondDesign.ripple.opacity(
+                        contrast == .increased ? 1 : 0.58
                     ),
                     lineWidth: contrast == .increased ? 2 : 1
                 )
@@ -245,17 +270,33 @@ struct RuntimeMediaPanelView: View {
     private var header: some View {
         HStack(spacing: 8) {
             Image(systemName: "sparkles.rectangle.stack")
-            .foregroundStyle(.tint)
+                .foregroundStyle(PondDesign.onDeepWater)
             Text(snapshot.command?.invocation ?? "Media")
                 .font(.headline.monospaced())
             statusBadge
             Spacer()
             Text("arrows choose  ·  ↩ insert  ·  esc close")
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(
+                    PondDesign.onDeepWater.opacity(0.72)
+                )
                 .accessibilityLabel(
                     "Arrow keys choose, Return inserts, Escape closes"
                 )
+        }
+        .foregroundStyle(PondDesign.onDeepWater)
+        .background {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(PondDesign.deepWater)
+                .padding(.horizontal, -7)
+                .padding(.vertical, -5)
+        }
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(PondDesign.ripple.opacity(0.48))
+                .frame(height: 1)
+                .padding(.horizontal, -7)
+                .offset(y: 5)
         }
     }
 
@@ -380,6 +421,11 @@ struct RuntimeMediaPanelView: View {
             }
         }
         .frame(minHeight: 22)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(PondDesign.ripple.opacity(0.22))
+                .frame(height: 1)
+        }
     }
 
     private func failureMessage(_ failure: MediaCommandFailure) -> String {
@@ -421,10 +467,24 @@ private struct RuntimeMediaCell: View {
             .frame(height: 78)
             .clipShape(
                 RoundedRectangle(
-                    cornerRadius: 8,
+                    cornerRadius: PondDesign.compactCornerRadius,
                     style: .continuous
                 )
             )
+            .background(
+                PondDesign.surface,
+                in: RoundedRectangle(
+                    cornerRadius: PondDesign.compactCornerRadius,
+                    style: .continuous
+                )
+            )
+            .overlay {
+                RoundedRectangle(
+                    cornerRadius: PondDesign.compactCornerRadius,
+                    style: .continuous
+                )
+                .stroke(PondDesign.ripple.opacity(0.16), lineWidth: 1)
+            }
             Text(item.title)
                 .font(.caption2)
                 .lineLimit(1)
@@ -432,22 +492,39 @@ private struct RuntimeMediaCell: View {
         .padding(5)
         .foregroundStyle(
             isSelected
-                ? PondDesign.selectionForeground
+                ? PondDesign.onDeepWater
                 : Color.primary
         )
         .background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(
+                cornerRadius: PondDesign.compactCornerRadius,
+                style: .continuous
+            )
                 .fill(
                     isSelected
-                        ? PondDesign.selectionBackground
-                        : Color.primary.opacity(0.055)
+                        ? PondDesign.deepWater
+                        : PondDesign.raisedSurface
                 )
+        }
+        .overlay {
+            RoundedRectangle(
+                cornerRadius: PondDesign.compactCornerRadius,
+                style: .continuous
+            )
+            .stroke(
+                PondDesign.ripple.opacity(isSelected ? 0.72 : 0.18),
+                lineWidth: 1
+            )
         }
         .overlay(alignment: .topTrailing) {
             if isSelected {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(PondDesign.selectionForeground)
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(
+                        PondDesign.onDeepWater,
+                        PondDesign.lotus
+                    )
                     .padding(8)
                     .accessibilityHidden(true)
             }
@@ -463,6 +540,11 @@ private struct RuntimeMediaCell: View {
         case .loading:
             ProgressView()
                 .controlSize(.small)
+                .tint(
+                    isSelected
+                        ? PondDesign.onDeepWater
+                        : PondDesign.ripple
+                )
                 .accessibilityLabel("Loading media preview")
         case .loaded:
             EmptyView()
@@ -475,7 +557,11 @@ private struct RuntimeMediaCell: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
             }
-            .foregroundStyle(.secondary)
+            .foregroundStyle(
+                isSelected
+                    ? PondDesign.onDeepWater.opacity(0.78)
+                    : Color.secondary
+            )
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Media preview unavailable")
         }

@@ -12,6 +12,7 @@ struct LibraryShellView: View {
     @State private var unicodeItemDestination:
         UnicodeItemDestination?
     @State private var isDropTargeted = false
+    @FocusState private var focusedSidebarScope: LibraryScope?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(appState: AppState) {
@@ -55,6 +56,10 @@ struct LibraryShellView: View {
             }
         }
         .frame(minWidth: 840, minHeight: 560)
+        .tint(PondDesign.pond)
+        .background {
+            PondWindowBackdrop()
+        }
         .environment(
             \.libraryThumbnailLoader,
             viewModel.thumbnailService
@@ -91,7 +96,11 @@ struct LibraryShellView: View {
             LibraryNewPackView(viewModel: viewModel)
         }
         .sheet(item: $selectedItem) { item in
-            LibraryItemDetailView(viewModel: viewModel, item: item)
+            LibraryItemDetailView(
+                viewModel: viewModel,
+                item: item,
+                showsPersonalAliasEditor: viewModel.scope == .aliases
+            )
         }
         .sheet(item: $packDetails) { selection in
             LibraryPackDetailView(
@@ -128,95 +137,286 @@ struct LibraryShellView: View {
     }
 
     private var sidebar: some View {
-        List(selection: $viewModel.scope) {
-            Section("Library") {
-                Label("All Emoji", systemImage: "square.grid.2x2")
-                    .badge(viewModel.allDisplayItems.count)
-                    .tag(LibraryScope.all)
-                Label("Favorites", systemImage: "star")
-                    .badge(viewModel.usageSnapshot.favoriteItemIDs.count)
-                    .tag(LibraryScope.favorites)
-                Label("Built-in", systemImage: "face.smiling")
-                    .badge(viewModel.builtInPack?.items.count ?? 0)
-                    .tag(LibraryScope.builtIn)
-                Label("Custom", systemImage: "shippingbox")
-                    .badge(viewModel.packs.reduce(0) { $0 + $1.items.count })
-                    .tag(LibraryScope.custom)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                PondMark(size: 38)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("MojiPond")
+                        .font(.headline)
+                    Text("EMOJI LIBRARY")
+                        .font(.caption2.weight(.semibold))
+                        .tracking(1.1)
+                        .foregroundStyle(PondDesign.pond)
+                }
+                Spacer()
+                Circle()
+                    .fill(PondDesign.lotus)
+                    .frame(width: 7, height: 7)
+                    .accessibilityHidden(true)
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 18)
+            .padding(.bottom, 15)
 
-            Section("Packs") {
-                ForEach(viewModel.packs) { pack in
-                    HStack(spacing: 8) {
-                        Image(systemName: pack.isEnabled ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(
-                                pack.isEnabled ? PondDesign.lily : Color.secondary
-                            )
-                            .accessibilityHidden(true)
-                        Text(pack.name)
-                            .lineLimit(1)
-                        Spacer()
-                        Text(pack.items.count.formatted())
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-                    .tag(LibraryScope.pack(pack.id))
-                    .accessibilityLabel(
-                        "\(pack.name), \(pack.items.count) emoji, \(pack.isEnabled ? "enabled" : "disabled")"
+            Rectangle()
+                .fill(PondDesign.ripple.opacity(0.2))
+                .frame(height: 1)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 5) {
+                    sidebarSectionTitle("Library")
+
+                    sidebarScopeRow(
+                        .all,
+                        title: "All Emoji",
+                        icon: "square.grid.2x2",
+                        count: viewModel.allDisplayItems.count
                     )
-                    .contextMenu {
-                        Button(pack.isEnabled ? "Disable Pack" : "Enable Pack") {
-                            Task {
-                                await viewModel.setPackEnabled(
-                                    pack.id,
-                                    isEnabled: !pack.isEnabled
-                                )
-                            }
+                    sidebarScopeRow(
+                        .favorites,
+                        title: "Favorites",
+                        icon: "star",
+                        count: viewModel.usageSnapshot.favoriteItemIDs.count
+                    )
+                    sidebarScopeRow(
+                        .aliases,
+                        title: "Aliases",
+                        icon: "tag",
+                        count: viewModel.personalAliasCount,
+                        countDescription: viewModel.personalAliasCount == 1
+                            ? "1 personal alias"
+                            : "\(viewModel.personalAliasCount) personal aliases"
+                    )
+                    sidebarScopeRow(
+                        .builtIn,
+                        title: "Built-in",
+                        icon: "face.smiling",
+                        count: viewModel.builtInPack?.items.count ?? 0
+                    )
+                    sidebarScopeRow(
+                        .custom,
+                        title: "Custom",
+                        icon: "shippingbox",
+                        count: viewModel.packs.reduce(0) {
+                            $0 + $1.items.count
                         }
-                        Button("Pack Details…") {
-                            packDetails = PackDetailSelection(id: pack.id)
-                        }
-                        Button("Add Unicode Emoji…") {
-                            unicodeItemDestination =
-                                UnicodeItemDestination(
-                                    id: pack.id,
-                                    packName: pack.name
-                                )
-                        }
-                        Divider()
-                        Button("Move Up") {
-                            Task {
-                                await viewModel.movePack(pack.id, by: -1)
-                            }
-                        }
-                        .disabled(!viewModel.canMovePack(pack.id, by: -1))
-                        Button("Move Down") {
-                            Task {
-                                await viewModel.movePack(pack.id, by: 1)
-                            }
-                        }
-                        .disabled(!viewModel.canMovePack(pack.id, by: 1))
-                        Divider()
-                        Button("Remove Pack…", role: .destructive) {
-                            viewModel.requestRemovePack(pack)
-                        }
+                    )
+
+                    sidebarSectionTitle("Packs")
+                        .padding(.top, 12)
+
+                    ForEach(viewModel.packs) { pack in
+                        sidebarPackRow(pack)
                     }
-                }
 
-                Button {
-                    showsNewPack = true
-                } label: {
-                    Label("New Empty Pack…", systemImage: "plus")
-                }
-                .buttonStyle(.plain)
-                .keyboardShortcut("n", modifiers: [.command, .shift])
-            }
+                    Button {
+                        showsNewPack = true
+                    } label: {
+                        Label("New Empty Pack…", systemImage: "plus")
+                    }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut("n", modifiers: [.command, .shift])
+                    .foregroundStyle(PondDesign.pond)
+                    .padding(.horizontal, 11)
+                    .frame(height: 34)
 
-            Section {
-                Text("Drop a ZIP anywhere in this window.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    Text("Drop a ZIP anywhere in this window.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 11)
+                        .padding(.top, 12)
+                        .padding(.bottom, 18)
+                }
+                .padding(.horizontal, 10)
+                .padding(.top, 12)
             }
         }
+        .background(PondDesign.sidebarSurface.opacity(0.94))
+    }
+
+    private func sidebarSectionTitle(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.caption2.weight(.semibold))
+            .tracking(1)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 11)
+            .padding(.bottom, 3)
+    }
+
+    private func sidebarScopeRow(
+        _ scope: LibraryScope,
+        title: String,
+        icon: String,
+        count: Int,
+        countDescription: String? = nil
+    ) -> some View {
+        let isSelected = viewModel.scope == scope
+        let accessibilityCount = countDescription ?? "\(count) emoji"
+
+        return Button {
+            viewModel.scope = scope
+            focusedSidebarScope = scope
+        } label: {
+            sidebarRowLabel(
+                title: title,
+                icon: icon,
+                count: count,
+                isSelected: isSelected
+            )
+        }
+        .buttonStyle(.plain)
+        .focusable()
+        .focusEffectDisabled()
+        .focused($focusedSidebarScope, equals: scope)
+        .onMoveCommand(perform: moveSidebarSelection)
+        .accessibilityLabel("\(title), \(accessibilityCount)")
+        .accessibilityIdentifier("library.sidebar.\(scope.id)")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func sidebarPackRow(_ pack: EmojiPack) -> some View {
+        let scope = LibraryScope.pack(pack.id)
+        let isSelected = viewModel.scope == scope
+
+        return Button {
+            viewModel.scope = scope
+            focusedSidebarScope = scope
+        } label: {
+            sidebarRowLabel(
+                title: pack.name,
+                icon: pack.isEnabled
+                    ? "checkmark.circle.fill"
+                    : "circle",
+                count: pack.items.count,
+                isSelected: isSelected,
+                iconColor: pack.isEnabled ? PondDesign.lily : .secondary
+            )
+        }
+        .buttonStyle(.plain)
+        .focusable()
+        .focusEffectDisabled()
+        .focused($focusedSidebarScope, equals: scope)
+        .onMoveCommand(perform: moveSidebarSelection)
+        .accessibilityLabel(
+            "\(pack.name), \(pack.items.count) emoji, "
+                + (pack.isEnabled ? "enabled" : "disabled")
+        )
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .contextMenu {
+            Button(pack.isEnabled ? "Disable Pack" : "Enable Pack") {
+                Task {
+                    await viewModel.setPackEnabled(
+                        pack.id,
+                        isEnabled: !pack.isEnabled
+                    )
+                }
+            }
+            Button("Pack Details…") {
+                packDetails = PackDetailSelection(id: pack.id)
+            }
+            Button("Add Unicode Emoji…") {
+                unicodeItemDestination = UnicodeItemDestination(
+                    id: pack.id,
+                    packName: pack.name
+                )
+            }
+            Divider()
+            Button("Move Up") {
+                Task {
+                    await viewModel.movePack(pack.id, by: -1)
+                }
+            }
+            .disabled(!viewModel.canMovePack(pack.id, by: -1))
+            Button("Move Down") {
+                Task {
+                    await viewModel.movePack(pack.id, by: 1)
+                }
+            }
+            .disabled(!viewModel.canMovePack(pack.id, by: 1))
+            Divider()
+            Button("Remove Pack…", role: .destructive) {
+                viewModel.requestRemovePack(pack)
+            }
+        }
+    }
+
+    private func moveSidebarSelection(_ direction: MoveCommandDirection) {
+        let scopes = [
+            LibraryScope.all,
+            .favorites,
+            .aliases,
+            .builtIn,
+            .custom
+        ] + viewModel.packs.map { .pack($0.id) }
+        guard
+            let currentIndex = scopes.firstIndex(
+                of: focusedSidebarScope ?? viewModel.scope
+            )
+        else {
+            return
+        }
+
+        let nextIndex: Int
+        switch direction {
+        case .up:
+            nextIndex = max(scopes.startIndex, currentIndex - 1)
+        case .down:
+            nextIndex = min(scopes.index(before: scopes.endIndex), currentIndex + 1)
+        default:
+            return
+        }
+        guard nextIndex != currentIndex else {
+            return
+        }
+
+        let nextScope = scopes[nextIndex]
+        viewModel.scope = nextScope
+        focusedSidebarScope = nextScope
+    }
+
+    private func sidebarRowLabel(
+        title: String,
+        icon: String,
+        count: Int,
+        isSelected: Bool,
+        iconColor: Color? = nil
+    ) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(
+                    iconColor
+                        ?? (isSelected ? PondDesign.pond : .primary)
+                )
+                .frame(width: 19)
+                .accessibilityHidden(true)
+            Text(title)
+                .font(.callout.weight(.medium))
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            Text(count.formatted())
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(isSelected ? PondDesign.pond : .secondary)
+        }
+        .foregroundStyle(isSelected ? PondDesign.pond : .primary)
+        .padding(.horizontal, 11)
+        .frame(height: 36)
+        .background(
+            isSelected ? PondDesign.ripple.opacity(0.16) : Color.clear,
+            in: RoundedRectangle(
+                cornerRadius: PondDesign.compactCornerRadius
+            )
+        )
+        .overlay {
+            if isSelected {
+                RoundedRectangle(
+                    cornerRadius: PondDesign.compactCornerRadius
+                )
+                .stroke(PondDesign.ripple.opacity(0.35), lineWidth: 1)
+            }
+        }
+        .contentShape(Rectangle())
     }
 
     private var detail: some View {
@@ -234,12 +434,17 @@ struct LibraryShellView: View {
                 partialBanner(message)
             }
 
+            if viewModel.scope == .aliases {
+                aliasesGuide
+            }
+
             content
 
             if let undoMessage = viewModel.undoMessage {
                 undoBar(undoMessage)
             }
         }
+        .background(PondDesign.windowBottom.opacity(0.92))
     }
 
     private var header: some View {
@@ -330,6 +535,12 @@ struct LibraryShellView: View {
             }
         }
         .padding(PondDesign.contentPadding)
+        .background(PondDesign.surface.opacity(0.74))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(PondDesign.ripple.opacity(0.22))
+                .frame(height: 1)
+        }
     }
 
     @ViewBuilder
@@ -386,7 +597,14 @@ struct LibraryShellView: View {
                         spacing: 12
                     ) {
                         ForEach(viewModel.visibleItems) { item in
-                            LibraryEmojiCard(item: item) {
+                            LibraryEmojiCard(
+                                item: item,
+                                personalAliases: viewModel.customAliases(
+                                    for: item
+                                ),
+                                showsPersonalAliases:
+                                    viewModel.scope == .aliases
+                            ) {
                                 selectedItem = item
                             }
                             .contextMenu {
@@ -414,7 +632,11 @@ struct LibraryShellView: View {
                 }
             } else {
                 List(viewModel.visibleItems) { item in
-                    LibraryEmojiListRow(item: item) {
+                    LibraryEmojiListRow(
+                        item: item,
+                        personalAliases: viewModel.customAliases(for: item),
+                        showsPersonalAliases: viewModel.scope == .aliases
+                    ) {
                         selectedItem = item
                     }
                     .contextMenu {
@@ -468,6 +690,32 @@ struct LibraryShellView: View {
         }
     }
 
+    private var aliasesGuide: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "tag")
+                .foregroundStyle(PondDesign.pond)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Add or edit aliases")
+                    .font(.callout.weight(.semibold))
+                Text(
+                    "Choose any emoji below, then edit its aliases in the details."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(PondDesign.pond.opacity(0.08))
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("library.aliasesGuide")
+    }
+
     private func undoBar(_ message: String) -> some View {
         HStack {
             Text(message)
@@ -514,6 +762,9 @@ struct LibraryShellView: View {
         if case .favorites = viewModel.scope {
             return "Mark emoji as favorites from an item’s context menu or detail view."
         }
+        if case .aliases = viewModel.scope {
+            return "No emoji are available to alias. Clear the filters or import a ZIP pack."
+        }
         if case .pack = viewModel.scope {
             return "This pack is empty. Add Unicode emoji here, or review a replacement ZIP in Pack Details."
         }
@@ -537,7 +788,14 @@ struct LibraryShellView: View {
                 .keyboardShortcut(.cancelAction)
             }
             .padding(24)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+            .background(
+                PondDesign.raisedSurface,
+                in: RoundedRectangle(cornerRadius: 14)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(PondDesign.ripple.opacity(0.45))
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Preparing emoji import")

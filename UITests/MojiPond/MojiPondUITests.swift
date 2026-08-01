@@ -318,6 +318,122 @@ final class MojiPondUITests: XCTestCase {
         )
     }
 
+    func testSettingsExposeShortcutSafetyAndAliasFlows() {
+        continueAfterFailure = false
+        let application = launch(
+            initialScreen: "settings",
+            appearance: .light
+        )
+        defer {
+            application.terminate()
+        }
+
+        let settingsWindow = application.windows["MojiPond Settings"]
+        XCTAssertTrue(settingsWindow.waitForExistence(timeout: 5))
+
+        application.buttons["Shortcuts"].click()
+        XCTAssertTrue(
+            application.staticTexts["Acceptance"]
+                .waitForExistence(timeout: 2)
+        )
+        XCTAssertTrue(application.staticTexts["Trigger"].exists)
+        XCTAssertTrue(application.staticTexts["Exact shortcodes"].exists)
+        attachScreen(
+            named: "settings-shortcuts",
+            element: settingsWindow
+        )
+
+        application.buttons["Privacy"].click()
+        XCTAssertTrue(
+            application.staticTexts["Always disabled"]
+                .waitForExistence(timeout: 2)
+        )
+        XCTAssertTrue(application.checkBoxes["Include subdomains"].exists)
+        attachScreen(
+            named: "settings-privacy",
+            element: settingsWindow
+        )
+
+        application.buttons["Library"].click()
+        let manageAliases = application.buttons["Manage Aliases"]
+        XCTAssertTrue(manageAliases.waitForExistence(timeout: 2))
+        manageAliases.click()
+
+        let libraryWindow = application.windows["MojiPond Library"]
+        XCTAssertTrue(libraryWindow.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            libraryWindow.staticTexts["Aliases"]
+                .firstMatch.waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(
+            libraryWindow.descendants(matching: .any)[
+                "library.aliasesGuide"
+            ].waitForExistence(timeout: 3)
+        )
+
+        let aliasesSidebar = libraryWindow.buttons[
+            "library.sidebar.aliases"
+        ]
+        XCTAssertTrue(aliasesSidebar.waitForExistence(timeout: 2))
+        aliasesSidebar.click()
+        aliasesSidebar.typeKey(.downArrow, modifierFlags: [])
+        XCTAssertTrue(
+            libraryWindow.staticTexts["Built-in Emoji"]
+                .waitForExistence(timeout: 2)
+        )
+        libraryWindow.typeKey(.upArrow, modifierFlags: [])
+        XCTAssertTrue(
+            libraryWindow.descendants(matching: .any)[
+                "library.aliasesGuide"
+            ].waitForExistence(timeout: 2)
+        )
+        attachScreen(
+            named: "library-aliases",
+            element: libraryWindow
+        )
+
+        let emojiWithoutAlias = libraryWindow.buttons.matching(
+            NSPredicate(
+                format: "label CONTAINS %@",
+                "no personal aliases"
+            )
+        ).firstMatch
+        XCTAssertTrue(emojiWithoutAlias.waitForExistence(timeout: 5))
+        emojiWithoutAlias.click()
+        XCTAssertTrue(
+            application.staticTexts["Your aliases"]
+                .waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(
+            application.descendants(matching: .any)[
+                "library.personalAliases"
+            ].exists
+        )
+        let aliasesField = application.descendants(matching: .any)[
+            "library.personalAliases"
+        ]
+        aliasesField.click()
+        aliasesField.typeText("pond_ui_alias")
+        application.buttons["Save Aliases"].click()
+        XCTAssertTrue(
+            application.staticTexts["Aliases updated"]
+                .waitForExistence(timeout: 3)
+        )
+        attachScreen(
+            named: "library-personal-alias-editor",
+            element: libraryWindow
+        )
+        application.buttons["Done"].click()
+        XCTAssertTrue(
+            libraryWindow.buttons.matching(
+                NSPredicate(
+                    format: "label CONTAINS %@",
+                    "personal aliases, colon pond_ui_alias colon"
+                )
+            ).firstMatch.waitForExistence(timeout: 3)
+        )
+    }
+
     private func captureLibraryImportSurface(
         appearance: AppUITestAppearance,
         screenshotName: String

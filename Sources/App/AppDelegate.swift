@@ -332,8 +332,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .miniaturizable,
             .resizable
         ]
-        window.setContentSize(NSSize(width: 680, height: 540))
-        window.minSize = NSSize(width: 620, height: 500)
+        window.setContentSize(NSSize(width: 820, height: 640))
+        window.minSize = NSSize(width: 760, height: 560)
         window.center()
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
@@ -846,6 +846,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         NotificationCenter.default.publisher(for: .mojiPondShowLibrary)
             .sink { [weak self] _ in
+                self?.showLibrary()
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .mojiPondShowAliases)
+            .sink { [weak self] _ in
+                self?.libraryViewModel?.scope = .aliases
                 self?.showLibrary()
             }
             .store(in: &cancellables)

@@ -41,6 +41,38 @@ final class MojiPondPreferencesTests: XCTestCase {
         )
     }
 
+    func testApplicationExclusionsPartitionProtectedAppsFromDedupedUserApps() {
+        let userApplication = ApplicationExclusion(
+            bundleIdentifier: "com.example.Editor",
+            displayName: "Editor"
+        )
+        let exclusions = ExclusionPreferences(
+            applications: [
+                userApplication,
+                userApplication,
+                ApplicationExclusion(
+                    bundleIdentifier: "com.apple.Terminal",
+                    displayName: "Renamed Terminal"
+                )
+            ]
+        )
+
+        XCTAssertEqual(exclusions.applications.count, 2)
+        XCTAssertEqual(exclusions.userApplications, [userApplication])
+        XCTAssertTrue(
+            ExclusionPreferences.isProtectedApplication(
+                bundleIdentifier: "COM.APPLE.TERMINAL"
+            )
+        )
+        XCTAssertEqual(
+            exclusions.effectiveApplications.filter {
+                $0.matches(bundleIdentifier: "com.apple.Terminal")
+            }.count,
+            1
+        )
+        XCTAssertTrue(exclusions.effectiveApplications.contains(userApplication))
+    }
+
     func testDomainExclusionMatchesExactAndLabelBoundedSubdomains() throws {
         let exclusion = try XCTUnwrap(
             DomainExclusion(domain: "Example.COM.", includesSubdomains: true)

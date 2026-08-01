@@ -14,6 +14,19 @@ enum ShortcodeTrigger: String, CaseIterable, Codable, Hashable, Sendable {
         Character(rawValue)
     }
 
+    var accessibilityName: String {
+        switch self {
+        case .colon: "colon"
+        case .semicolon: "semicolon"
+        case .slash: "slash"
+        case .backslash: "backslash"
+        case .at: "at sign"
+        case .hash: "hash"
+        case .tilde: "tilde"
+        case .pipe: "pipe"
+        }
+    }
+
     init?(character: Character) {
         self.init(rawValue: String(character))
     }
@@ -148,6 +161,36 @@ struct ExclusionPreferences: Codable, Equatable, Sendable {
     var applications: [ApplicationExclusion]
     var domains: [DomainExclusion]
 
+    static let protectedApplications = uniquedApplications([
+        ApplicationExclusion(bundleIdentifier: "com.rajjoshi.MojiPond", displayName: "MojiPond"),
+        ApplicationExclusion(bundleIdentifier: "com.1password.1password", displayName: "1Password"),
+        ApplicationExclusion(bundleIdentifier: "com.agilebits.onepassword7", displayName: "1Password 7"),
+        ApplicationExclusion(bundleIdentifier: "com.bitwarden.desktop", displayName: "Bitwarden"),
+        ApplicationExclusion(bundleIdentifier: "org.keepassxc.keepassxc", displayName: "KeePassXC"),
+        ApplicationExclusion(bundleIdentifier: "com.apple.Terminal", displayName: "Terminal"),
+        ApplicationExclusion(bundleIdentifier: "com.googlecode.iterm2", displayName: "iTerm2"),
+        ApplicationExclusion(bundleIdentifier: "dev.warp.Warp-Stable", displayName: "Warp"),
+        ApplicationExclusion(bundleIdentifier: "net.kovidgoyal.kitty", displayName: "kitty"),
+        ApplicationExclusion(bundleIdentifier: "org.alacritty", displayName: "Alacritty"),
+        ApplicationExclusion(bundleIdentifier: "com.parallels.desktop.console", displayName: "Parallels Desktop"),
+        ApplicationExclusion(bundleIdentifier: "com.vmware.fusion", displayName: "VMware Fusion"),
+        ApplicationExclusion(bundleIdentifier: "com.microsoft.rdc.macos", displayName: "Microsoft Remote Desktop"),
+        ApplicationExclusion(bundleIdentifier: "com.tinyspeck.slackmacgap", displayName: "Slack"),
+        ApplicationExclusion(bundleIdentifier: "com.hnc.Discord", displayName: "Discord")
+    ])
+
+    var userApplications: [ApplicationExclusion] {
+        Self.uniquedApplications(
+            applications.filter {
+                !Self.isProtectedApplication(bundleIdentifier: $0.bundleIdentifier)
+            }
+        )
+    }
+
+    var effectiveApplications: [ApplicationExclusion] {
+        Self.uniquedApplications(Self.protectedApplications + userApplications)
+    }
+
     init(
         applications: [ApplicationExclusion] = [],
         domains: [DomainExclusion] = []
@@ -158,7 +201,7 @@ struct ExclusionPreferences: Codable, Equatable, Sendable {
 
     func match(bundleIdentifier: String?, domain: String?) -> ExclusionMatch? {
         if let bundleIdentifier,
-           let exclusion = applications.first(where: { $0.matches(bundleIdentifier: bundleIdentifier) }) {
+           let exclusion = effectiveApplications.first(where: { $0.matches(bundleIdentifier: bundleIdentifier) }) {
             return .application(exclusion)
         }
         if let domain, let exclusion = domains.first(where: { $0.matches(host: domain) }) {
@@ -168,24 +211,18 @@ struct ExclusionPreferences: Codable, Equatable, Sendable {
     }
 
     static let defaults = ExclusionPreferences(
-        applications: [
-            ApplicationExclusion(bundleIdentifier: "com.rajjoshi.MojiPond", displayName: "MojiPond"),
-            ApplicationExclusion(bundleIdentifier: "com.1password.1password", displayName: "1Password"),
-            ApplicationExclusion(bundleIdentifier: "com.agilebits.onepassword7", displayName: "1Password 7"),
-            ApplicationExclusion(bundleIdentifier: "com.bitwarden.desktop", displayName: "Bitwarden"),
-            ApplicationExclusion(bundleIdentifier: "org.keepassxc.keepassxc", displayName: "KeePassXC"),
-            ApplicationExclusion(bundleIdentifier: "com.apple.Terminal", displayName: "Terminal"),
-            ApplicationExclusion(bundleIdentifier: "com.googlecode.iterm2", displayName: "iTerm2"),
-            ApplicationExclusion(bundleIdentifier: "dev.warp.Warp-Stable", displayName: "Warp"),
-            ApplicationExclusion(bundleIdentifier: "net.kovidgoyal.kitty", displayName: "kitty"),
-            ApplicationExclusion(bundleIdentifier: "org.alacritty", displayName: "Alacritty"),
-            ApplicationExclusion(bundleIdentifier: "com.parallels.desktop.console", displayName: "Parallels Desktop"),
-            ApplicationExclusion(bundleIdentifier: "com.vmware.fusion", displayName: "VMware Fusion"),
-            ApplicationExclusion(bundleIdentifier: "com.microsoft.rdc.macos", displayName: "Microsoft Remote Desktop"),
-            ApplicationExclusion(bundleIdentifier: "com.tinyspeck.slackmacgap", displayName: "Slack"),
-            ApplicationExclusion(bundleIdentifier: "com.hnc.Discord", displayName: "Discord")
-        ]
+        applications: protectedApplications
     )
+
+    static func isProtectedApplication(_ application: ApplicationExclusion) -> Bool {
+        isProtectedApplication(bundleIdentifier: application.bundleIdentifier)
+    }
+
+    static func isProtectedApplication(bundleIdentifier: String) -> Bool {
+        protectedApplications.contains {
+            $0.matches(bundleIdentifier: bundleIdentifier)
+        }
+    }
 
     private static func uniquedApplications(
         _ applications: [ApplicationExclusion]

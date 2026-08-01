@@ -78,6 +78,39 @@ final class RuntimeSafetyAndCatalogTests: XCTestCase {
         )
     }
 
+    func testSafetyPolicyAlwaysBlocksProtectedAppsWhenStoredExclusionsAreEmpty() throws {
+        let storedExclusions = Data(
+            #"{"applications":[],"domains":[]}"#.utf8
+        )
+        let policy = RuntimeSessionSafetyPolicy(
+            exclusions: try JSONDecoder().decode(
+                ExclusionPreferences.self,
+                from: storedExclusions
+            )
+        )
+        let permissions = RuntimePermissionPreflight(
+            inputMonitoringGranted: true,
+            accessibilityGranted: true
+        )
+
+        for bundleIdentifier in [
+            "com.apple.Terminal",
+            "com.tinyspeck.slackmacgap"
+        ] {
+            XCTAssertEqual(
+                policy.evaluate(
+                    RuntimeSessionSafetyInput(
+                        permissions: permissions,
+                        secureEventInputEnabled: false,
+                        focusedElementIsSecure: false,
+                        bundleIdentifier: bundleIdentifier
+                    )
+                ),
+                .excludedApplication(bundleIdentifier.lowercased())
+            )
+        }
+    }
+
     func testSafetyPolicyHonorsExactAndSubdomainExclusions() throws {
         let parentDomain = try XCTUnwrap(
             DomainExclusion(

@@ -37,9 +37,60 @@ struct RuntimeSuggestionPanelSnapshot: Equatable, Sendable {
     let rows: [RuntimeSuggestionRow]
     let selectedIndex: Int
     let query: String?
+    let trigger: ShortcodeTrigger
+    let acceptsTab: Bool
+    let acceptsReturn: Bool
+
+    init(
+        revision: UInt64,
+        transactionID: ParserTransactionID,
+        mode: RuntimeInterceptionMode,
+        rows: [RuntimeSuggestionRow],
+        selectedIndex: Int,
+        query: String?,
+        trigger: ShortcodeTrigger = .colon,
+        acceptsTab: Bool = true,
+        acceptsReturn: Bool = true
+    ) {
+        self.revision = revision
+        self.transactionID = transactionID
+        self.mode = mode
+        self.rows = rows
+        self.selectedIndex = selectedIndex
+        self.query = query
+        self.trigger = trigger
+        self.acceptsTab = acceptsTab
+        self.acceptsReturn = acceptsReturn
+    }
 
     var selectedRow: RuntimeSuggestionRow? {
         rows.indices.contains(selectedIndex) ? rows[selectedIndex] : nil
+    }
+
+    var compactInteractionHint: String {
+        switch (acceptsTab, acceptsReturn) {
+        case (true, true):
+            "↑↓ choose  ·  tab or ↩ insert  ·  esc close"
+        case (true, false):
+            "↑↓ choose  ·  tab insert  ·  esc close"
+        case (false, true):
+            "↑↓ choose  ·  ↩ insert  ·  esc close"
+        case (false, false):
+            "↑↓ choose  ·  esc close"
+        }
+    }
+
+    var compactInteractionAccessibilityLabel: String {
+        switch (acceptsTab, acceptsReturn) {
+        case (true, true):
+            "Up and Down Arrow choose, Tab or Return inserts, Escape closes"
+        case (true, false):
+            "Up and Down Arrow choose, Tab inserts, Escape closes"
+        case (false, true):
+            "Up and Down Arrow choose, Return inserts, Escape closes"
+        case (false, false):
+            "Up and Down Arrow choose, Escape closes"
+        }
     }
 }
 
@@ -47,7 +98,10 @@ enum RuntimeVoiceOverAnnouncement {
     static func suggestions(
         _ snapshot: RuntimeSuggestionPanelSnapshot
     ) -> String {
-        let selected = selectedDescription(row: snapshot.selectedRow)
+        let selected = selectedDescription(
+            row: snapshot.selectedRow,
+            trigger: snapshot.trigger
+        )
         if snapshot.mode == .browser {
             let count = snapshot.rows.count
             let word = count == 1 ? "result" : "results"
@@ -100,12 +154,14 @@ enum RuntimeVoiceOverAnnouncement {
     }
 
     private static func selectedDescription(
-        row: RuntimeSuggestionRow?
+        row: RuntimeSuggestionRow?,
+        trigger: ShortcodeTrigger
     ) -> String {
         guard let row else {
             return ""
         }
-        return "Selected \(row.name), colon \(row.shortcode) colon."
+        return "Selected \(row.name), \(trigger.accessibilityName) "
+            + "\(row.shortcode) \(trigger.accessibilityName)."
     }
 }
 
@@ -392,41 +448,60 @@ struct RuntimeSuggestionPanelView: View {
             if snapshot.mode == .browser {
                 HStack(spacing: 8) {
                     Image(systemName: "water.waves")
-                        .foregroundStyle(.tint)
+                        .foregroundStyle(PondDesign.onDeepWater)
                     Text("MojiPond")
                         .font(.headline)
                     if let query = snapshot.query, !query.isEmpty {
                         Text(query)
                             .font(.body.monospaced())
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(
+                                PondDesign.onDeepWater.opacity(0.76)
+                            )
                     }
                     Spacer()
-                    Text("↑↓ choose  ·  ↩ insert  ·  esc close")
+                    Text(snapshot.compactInteractionHint)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(
+                            PondDesign.onDeepWater.opacity(0.72)
+                        )
                         .accessibilityLabel(
-                            "Up and Down Arrow choose, Return inserts, "
-                                + "Escape closes"
+                            snapshot.compactInteractionAccessibilityLabel
                         )
                 }
+                .foregroundStyle(PondDesign.onDeepWater)
                 .padding(.horizontal, 12)
                 .frame(height: 42)
+                .background(PondDesign.deepWater)
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(PondDesign.ripple.opacity(0.48))
+                        .frame(height: 1)
+                }
             } else {
                 HStack(spacing: 8) {
                     Image(systemName: "water.waves")
-                        .foregroundStyle(PondDesign.pond)
+                        .foregroundStyle(PondDesign.onDeepWater)
                     Text("MojiPond")
                         .font(.subheadline.weight(.semibold))
                     if let query = snapshot.query, !query.isEmpty {
-                        Text(":\(query)")
+                        Text("\(snapshot.trigger.rawValue)\(query)")
                             .font(.subheadline.monospaced())
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(
+                                PondDesign.onDeepWater.opacity(0.76)
+                            )
                             .lineLimit(1)
                     }
                     Spacer(minLength: 8)
                 }
+                .foregroundStyle(PondDesign.onDeepWater)
                 .padding(.horizontal, 12)
                 .frame(height: 36)
+                .background(PondDesign.deepWater)
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(PondDesign.ripple.opacity(0.48))
+                        .frame(height: 1)
+                }
             }
 
             if snapshot.mode == .browser {
@@ -450,16 +525,23 @@ struct RuntimeSuggestionPanelView: View {
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     rows
-                    Divider()
-                    Text("↑↓ choose  ·  tab or ↩ insert  ·  esc close")
+                    Rectangle()
+                        .fill(PondDesign.ripple.opacity(0.24))
+                        .frame(height: 1)
+                    Text(snapshot.compactInteractionHint)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .accessibilityLabel(
-                            "Up and Down Arrow choose, Tab or Return inserts, "
-                                + "Escape closes"
+                            snapshot.compactInteractionAccessibilityLabel
                         )
                         .padding(.horizontal, 12)
-                        .frame(height: 30)
+                        .frame(
+                            maxWidth: .infinity,
+                            minHeight: 30,
+                            maxHeight: 30,
+                            alignment: .leading
+                        )
+                        .background(PondDesign.raisedSurface)
                 }
             }
         }
@@ -468,23 +550,34 @@ struct RuntimeSuggestionPanelView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(
                     reduceTransparency
-                        ? AnyShapeStyle(
-                            Color(nsColor: .windowBackgroundColor)
-                        )
+                        ? AnyShapeStyle(PondDesign.surface)
                         : AnyShapeStyle(.regularMaterial)
                 )
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(
-                    snapshot.mode == .browser
-                        ? Color.primary.opacity(
-                            contrast == .increased ? 0.5 : 0.12
+                .overlay {
+                    if !reduceTransparency {
+                        RoundedRectangle(
+                            cornerRadius: PondDesign.cornerRadius,
+                            style: .continuous
                         )
-                        : PondDesign.pond.opacity(
-                            contrast == .increased ? 0.9 : 0.42
-                        ),
+                        .fill(PondDesign.surface.opacity(0.76))
+                    }
+                }
+        }
+        .clipShape(
+            RoundedRectangle(
+                cornerRadius: PondDesign.cornerRadius,
+                style: .continuous
+            )
+        )
+        .overlay {
+            RoundedRectangle(
+                cornerRadius: PondDesign.cornerRadius,
+                style: .continuous
+            )
+                .strokeBorder(
+                    PondDesign.ripple.opacity(
+                        contrast == .increased ? 1 : 0.58
+                    ),
                     lineWidth: contrast == .increased ? 2 : 1
                 )
         }
@@ -508,7 +601,8 @@ struct RuntimeSuggestionPanelView: View {
                 RuntimeSuggestionRowView(
                     row: row,
                     isSelected: row.id == selectedID,
-                    compact: snapshot.mode == .browser
+                    compact: snapshot.mode == .browser,
+                    trigger: snapshot.trigger
                 )
                 .id(row.id)
             }
@@ -520,6 +614,7 @@ private struct RuntimeSuggestionRowView: View {
     let row: RuntimeSuggestionRow
     let isSelected: Bool
     let compact: Bool
+    let trigger: ShortcodeTrigger
 
     var body: some View {
         HStack(spacing: 10) {
@@ -536,21 +631,50 @@ private struct RuntimeSuggestionRowView: View {
                 }
             }
             .frame(width: 32, height: 32)
+            .background(
+                isSelected
+                    ? PondDesign.onDeepWater.opacity(0.12)
+                    : PondDesign.raisedSurface,
+                in: RoundedRectangle(
+                    cornerRadius: 7,
+                    style: .continuous
+                )
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(
+                        isSelected
+                            ? PondDesign.onDeepWater.opacity(0.22)
+                            : PondDesign.ripple.opacity(0.18),
+                        lineWidth: 1
+                    )
+            }
             VStack(alignment: .leading, spacing: 1) {
-                Text(":\(row.shortcode):")
+                Text(
+                    "\(trigger.rawValue)\(row.shortcode)"
+                        + "\(trigger.rawValue)"
+                )
                     .font(.system(.body, design: .monospaced, weight: .medium))
                     .lineLimit(1)
                 if !compact {
                     Text(row.name)
                         .font(.caption)
-                        .foregroundStyle(isSelected ? .white.opacity(0.8) : .secondary)
+                        .foregroundStyle(
+                            isSelected
+                                ? PondDesign.onDeepWater.opacity(0.78)
+                                : Color.secondary
+                        )
                         .lineLimit(1)
                 }
             }
             Spacer(minLength: 4)
             if isSelected {
                 Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(PondDesign.selectionForeground)
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(
+                        PondDesign.onDeepWater,
+                        PondDesign.lotus
+                    )
                     .accessibilityHidden(true)
             }
         }
@@ -558,21 +682,31 @@ private struct RuntimeSuggestionRowView: View {
         .frame(height: compact ? 44 : 48)
         .foregroundStyle(
             isSelected
-                ? PondDesign.selectionForeground
+                ? PondDesign.onDeepWater
                 : Color.primary
         )
         .background {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(
                     isSelected
-                        ? PondDesign.selectionBackground
+                        ? PondDesign.deepWater
                         : Color.clear
                 )
                 .padding(.horizontal, 5)
         }
+        .overlay {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(PondDesign.ripple.opacity(0.72), lineWidth: 1)
+                    .padding(.horizontal, 5)
+            }
+        }
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(row.name), colon \(row.shortcode) colon")
+        .accessibilityLabel(
+            "\(row.name), \(trigger.accessibilityName) "
+                + "\(row.shortcode) \(trigger.accessibilityName)"
+        )
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 }
