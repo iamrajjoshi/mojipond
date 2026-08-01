@@ -114,7 +114,7 @@ final class AppStateTests: XCTestCase {
         delegate.resetUsageRanking()
 
         XCTAssertEqual(
-            delegate.appState.runtimeNotice,
+            delegate.appState.usageRankingResetNotice,
             UsageRankingResetNotice.failure
         )
     }

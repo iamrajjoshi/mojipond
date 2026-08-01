@@ -1318,6 +1318,43 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         XCTAssertEqual(harness.gate.mode, .browser)
     }
 
+    func testBrowserSearchAcceptsNaturalLanguageSpaces() async throws {
+        let heart = EmojiItem(
+            id: "test.heart",
+            shortcode: Shortcode(rawValue: "heart")!,
+            name: "red heart",
+            category: "symbols",
+            content: .unicode(UnicodeEmojiContent(value: "❤️")),
+            packID: "test"
+        )
+        let harness = try makeHarness(
+            items: [
+                heart,
+                emoji(shortcode: "frog", value: "🐸")
+            ],
+            targetText: "::"
+        )
+        harness.worker.setCaptureEnabled(true)
+        type("::", into: harness.worker)
+        let browserShown = await eventually {
+            harness.presenter.latestShown?.mode == .browser
+        }
+        XCTAssertTrue(browserShown)
+
+        deliver("red  heart", into: harness)
+
+        let filtered = await eventually {
+            harness.presenter.latestShown?.query == "red heart"
+        }
+        XCTAssertTrue(filtered)
+        XCTAssertEqual(
+            harness.presenter.latestShown?.rows.map(\.shortcode),
+            ["heart"]
+        )
+        XCTAssertEqual(harness.system.text, "::")
+        XCTAssertEqual(harness.gate.mode, .browser)
+    }
+
     func testMenuBrowserAnchorsAtCaretWithoutMutatingText() async throws {
         let harness = try makeHarness(
             items: [emoji(shortcode: "frog", value: "🐸")],

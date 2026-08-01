@@ -126,6 +126,8 @@ struct LibraryAssetArtwork: View {
     let url: URL
     var fallbackURL: URL? = nil
     var managedRootURL: URL? = nil
+    var contentPadding: CGFloat = 5
+    var showsLoadingIndicator = true
     var loadStateChanged:
         ((LibraryArtworkLoadState) -> Void)? = nil
 
@@ -147,12 +149,17 @@ struct LibraryAssetArtwork: View {
             } else {
                 switch loadState {
                 case .loading, .loaded:
-                    ProgressView()
-                        .controlSize(.small)
-                        .accessibilityLabel(
-                            LibraryArtworkLoadState.loading
-                                .accessibilityLabel ?? ""
-                        )
+                    if showsLoadingIndicator {
+                        ProgressView()
+                            .controlSize(.small)
+                            .accessibilityLabel(
+                                LibraryArtworkLoadState.loading
+                                    .accessibilityLabel ?? ""
+                            )
+                    } else {
+                        Color.clear
+                            .accessibilityHidden(true)
+                    }
                 case .failed:
                     Image(
                         systemName:
@@ -170,7 +177,7 @@ struct LibraryAssetArtwork: View {
                 }
             }
         }
-        .padding(5)
+        .padding(contentPadding)
         .task(
             id: LibraryArtworkLoadRequest(
                 primaryURL: url,
@@ -318,11 +325,13 @@ struct LibraryEmojiCard: View {
                     Text(":\(item.shortcode):")
                         .font(.callout.monospaced().weight(.medium))
                         .lineLimit(1)
+                        .help(":\(item.shortcode):")
                     Text(item.displayName)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                    if showsPersonalAliases {
+                        .help(item.displayName)
+                    if showsPersonalAliases, !personalAliases.isEmpty {
                         LibraryPersonalAliasSummary(
                             aliases: personalAliases
                         )
@@ -383,8 +392,13 @@ struct LibraryEmojiCard: View {
         if isFocused {
             return PondDesign.pond
         }
+        if isHovered {
+            return PondDesign.ripple.opacity(
+                contrast == .increased ? 1 : 0.42
+            )
+        }
         return PondDesign.ripple.opacity(
-            contrast == .increased ? 1 : 0.55
+            contrast == .increased ? 0.8 : 0.18
         )
     }
 
@@ -439,10 +453,14 @@ struct LibraryEmojiListRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(":\(item.shortcode):")
                         .font(.body.monospaced().weight(.medium))
+                        .lineLimit(1)
+                        .help(":\(item.shortcode):")
                     Text(item.displayName)
                         .font(.callout)
                         .foregroundStyle(.secondary)
-                    if showsPersonalAliases {
+                        .lineLimit(1)
+                        .help(item.displayName)
+                    if showsPersonalAliases, !personalAliases.isEmpty {
                         LibraryPersonalAliasSummary(
                             aliases: personalAliases
                         )

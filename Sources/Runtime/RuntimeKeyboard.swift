@@ -639,10 +639,14 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
             .intercept
         case RuntimeKeyboardKeyCode.leftArrow,
              RuntimeKeyboardKeyCode.rightArrow:
-            current.mode == .media ? .intercept : .passThrough
+            current.mode == .media && current.acceptsTab
+                ? .intercept
+                : .passThrough
         case RuntimeKeyboardKeyCode.upArrow,
              RuntimeKeyboardKeyCode.downArrow:
-            .intercept
+            current.mode != .media || current.acceptsTab
+                ? .intercept
+                : .passThrough
         case RuntimeKeyboardKeyCode.tab:
             current.acceptsTab || current.mode == .browser
                 ? .intercept
@@ -1010,7 +1014,8 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
         else {
             return false
         }
-        return EmojiAliasSyntax.isValidToken(characters)
+        return characters == " "
+            || EmojiAliasSyntax.isValidToken(characters)
     }
 
 }

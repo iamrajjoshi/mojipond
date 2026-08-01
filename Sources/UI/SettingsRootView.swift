@@ -3,8 +3,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 enum UsageRankingResetNotice {
-    static let success = "Recents and usage ranking were reset."
-    static let failure = "Usage ranking could not be reset."
+    static let success = "Learned ordering was reset."
+    static let failure = "Learned ordering could not be reset."
 }
 
 private enum SettingsDestination: String, CaseIterable, Identifiable {
@@ -29,15 +29,15 @@ private enum SettingsDestination: String, CaseIterable, Identifiable {
     var detail: String {
         switch self {
         case .general:
-            "Control when MojiPond runs and when it goes online."
+            "Choose when MojiPond runs and goes online."
         case .shortcuts:
-            "Choose how suggestions open and how emoji are inserted."
+            "Set the trigger, insertion keys, and skin tone."
         case .library:
-            "Manage packs, aliases, favorites, and recents."
+            "Browse packs, aliases, and favorites."
         case .privacy:
-            "Review permissions and places where suggestions stay off."
+            "Review permissions and turn suggestions off by app or site."
         case .about:
-            "Version, updates, and local processing details."
+            "Version, updates, and privacy."
         }
     }
 }
@@ -49,12 +49,14 @@ struct SettingsRootView: View {
 
     @State private var domainDraft = ""
     @State private var domainIncludesSubdomains = true
+    @State private var applicationExclusionError: String?
     @State private var exclusionError: String?
     @State private var permissionNavigationError: String?
-    @State private var showsUsageResetConfirmation = false
     @State private var showsManualUpdateConfirmation = false
     @State private var showsNativeUpdateConfirmation = false
-    @State private var destination = SettingsDestination.general
+    @State private var showsUsageResetConfirmation = false
+    @State private var destination: SettingsDestination
+    @FocusState private var focusedDestination: SettingsDestination?
     private let permissionSettingsOpener:
         any SystemPermissionSettingsOpening
 
@@ -68,6 +70,14 @@ struct SettingsRootView: View {
         permissions = appState.permissions
         updates = appState.updates
         self.permissionSettingsOpener = permissionSettingsOpener
+        let storedDestination = UserDefaults.standard.string(
+            forKey: "settings.selectedDestination"
+        )
+        _destination = State(
+            initialValue: storedDestination.flatMap(
+                SettingsDestination.init(rawValue:)
+            ) ?? .general
+        )
     }
 
     var body: some View {
@@ -82,7 +92,7 @@ struct SettingsRootView: View {
                     .frame(width: 1)
 
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 22) {
+                    VStack(alignment: .leading, spacing: 14) {
                         PondPageHeader(
                             icon: destination.icon,
                             title: destination.rawValue,
@@ -91,22 +101,17 @@ struct SettingsRootView: View {
 
                         selectedPage
                     }
-                    .frame(maxWidth: 720, alignment: .leading)
-                    .padding(28)
+                    .frame(maxWidth: 680, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 18)
                 }
                 .scrollContentBackground(.hidden)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .tint(PondDesign.pond)
-        .frame(
-            minWidth: 760,
-            idealWidth: 820,
-            minHeight: 560,
-            idealHeight: 640
-        )
         .confirmationDialog(
-            "Reset recents and usage ranking?",
+            "Reset recent emoji and learned ordering?",
             isPresented: $showsUsageResetConfirmation,
             titleVisibility: .visible
         ) {
@@ -120,38 +125,46 @@ struct SettingsRootView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(
-                "This removes recent emoji and learned ranking. "
-                    + "Favorites and preferred skin tones stay unchanged."
+                "MojiPond will clear recent emoji and usage ranking. This can’t be undone."
             )
         }
+        .onChange(of: destination) { _, newDestination in
+            UserDefaults.standard.set(
+                newDestination.rawValue,
+                forKey: "settings.selectedDestination"
+            )
+        }
+        .frame(
+            minWidth: 720,
+            idealWidth: 760,
+            minHeight: 520,
+            idealHeight: 560
+        )
     }
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 11) {
-                PondMark(size: 42)
+            HStack(spacing: 9) {
+                PondMark(size: 34)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("MojiPond")
-                        .font(.headline)
+                        .font(.callout.weight(.semibold))
                     Text("SETTINGS")
                         .font(.caption2.weight(.semibold))
                         .tracking(1.2)
                         .foregroundStyle(PondDesign.pond)
                 }
                 Spacer()
-                Circle()
-                    .fill(PondDesign.lotus)
-                    .frame(width: 7, height: 7)
-                    .accessibilityHidden(true)
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 20)
-            .padding(.bottom, 18)
+            .padding(.horizontal, 14)
+            .padding(.top, 15)
+            .padding(.bottom, 13)
 
-            VStack(spacing: 5) {
+            VStack(spacing: 3) {
                 ForEach(SettingsDestination.allCases) { item in
                     Button {
                         destination = item
+                        focusedDestination = item
                     } label: {
                         HStack(spacing: 10) {
                             Image(systemName: item.icon)
@@ -166,8 +179,8 @@ struct SettingsRootView: View {
                                 ? AnyShapeStyle(PondDesign.pond)
                                 : AnyShapeStyle(.primary)
                         )
-                        .padding(.horizontal, 12)
-                        .frame(height: 38)
+                        .padding(.horizontal, 10)
+                        .frame(height: 34)
                         .background(
                             destination == item
                                 ? PondDesign.ripple.opacity(0.16)
@@ -191,46 +204,37 @@ struct SettingsRootView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .focusEffectDisabled()
+                    .focused($focusedDestination, equals: item)
+                    .onMoveCommand(perform: moveSettingsDestination)
                     .accessibilityAddTraits(
                         destination == item ? .isSelected : []
                     )
                 }
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 9)
 
             Spacer(minLength: 20)
 
-            HStack(spacing: 9) {
-                Circle()
-                    .fill(
-                        appState.isEnabled
-                            ? PondDesign.lily
-                            : Color.secondary
-                    )
-                    .frame(width: 8, height: 8)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(appState.isEnabled ? "Ready to type" : "Paused")
-                        .font(.caption.weight(.semibold))
-                    Text(
-                        appState.isEnabled
-                            ? triggerExample
-                            : "Suggestions are off"
-                    )
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.secondary)
+            Rectangle()
+                .fill(PondDesign.ripple.opacity(0.16))
+                .frame(height: 1)
+                .padding(.horizontal, 14)
+
+            if appState.isEnabled && !appState.canMonitorTyping {
+                Button {
+                    destination = .privacy
+                } label: {
+                    sidebarStatus
                 }
+                .buttonStyle(.plain)
+                .help("Open Privacy settings")
+                .accessibilityHint("Opens MojiPond Privacy settings")
+            } else {
+                sidebarStatus
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                PondDesign.surface.opacity(0.72),
-                in: RoundedRectangle(
-                    cornerRadius: PondDesign.compactCornerRadius
-                )
-            )
-            .padding(12)
         }
-        .frame(width: 205)
+        .frame(width: 184)
         .frame(maxHeight: .infinity)
         .background(PondDesign.sidebarSurface.opacity(0.94))
     }
@@ -252,7 +256,7 @@ struct SettingsRootView: View {
     }
 
     private var general: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 12) {
             SettingsCard {
                 SettingsRow(
                     icon: "water.waves",
@@ -279,7 +283,7 @@ struct SettingsRootView: View {
                 SettingsRow(
                     icon: "arrow.clockwise.circle",
                     title: "Launch at login",
-                    detail: "Keep MojiPond ready after you sign in."
+                    detail: "Start MojiPond when you sign in."
                 ) {
                     Toggle(
                         "Launch at login",
@@ -304,13 +308,12 @@ struct SettingsRootView: View {
 
             SettingsCard(
                 title: "Stickers in Messages",
-                detail:
-                    "Built-in stickers stay available offline. Turn this on to fetch more Noto artwork."
+                detail: "Built-in stickers work offline."
             ) {
                 SettingsRow(
                     icon: "face.smiling.inverse",
-                    title: "Online sticker results",
-                    detail: "Type /sticker in Messages to search."
+                    title: "Search for more stickers",
+                    detail: "Use /sticker in Messages to fetch Noto artwork."
                 ) {
                     HStack(spacing: 10) {
                         PondCommandToken(value: "/sticker")
@@ -358,10 +361,9 @@ struct SettingsRootView: View {
     }
 
     private var shortcuts: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 12) {
             SettingsCard(
-                title: "Acceptance",
-                detail: "Choose the keys that insert the selected emoji."
+                title: "Acceptance"
             ) {
                 SettingsRow(
                     icon: "arrow.right.to.line.compact",
@@ -397,8 +399,7 @@ struct SettingsRootView: View {
             }
 
             SettingsCard(
-                title: "Trigger",
-                detail: "The punctuation mark that starts a shortcode."
+                title: "Trigger"
             ) {
                 SettingsRow(
                     icon: "character.cursor.ibeam",
@@ -470,8 +471,7 @@ struct SettingsRootView: View {
 
             SettingsCard(
                 title: "Exact shortcodes",
-                detail:
-                    "Typing both punctuation marks can replace an exact match immediately."
+                detail: "Close a shortcode to replace an exact match."
             ) {
                 SettingsRow(
                     icon: "text.badge.checkmark",
@@ -534,16 +534,12 @@ struct SettingsRootView: View {
     }
 
     private var library: some View {
-        VStack(spacing: 16) {
-            SettingsCard(
-                title: "Emoji library",
-                detail:
-                    "Browse built-in emoji, imported ZIP packs, favorites, and local aliases."
-            ) {
+        VStack(spacing: 12) {
+            SettingsCard {
                 SettingsActionRow(
                     icon: "square.grid.2x2",
-                    title: "Open the full library",
-                    detail: "Search, preview, import, and edit emoji."
+                    title: "Open library",
+                    detail: "Browse, import, and manage emoji."
                 ) {
                     Button("Open MojiPond Library") {
                         NotificationCenter.default.post(
@@ -559,8 +555,7 @@ struct SettingsRootView: View {
                 SettingsActionRow(
                     icon: "text.badge.plus",
                     title: "Personal aliases",
-                    detail:
-                        "Map another shortcode to any emoji without changing its pack."
+                    detail: "Add another shortcode to any emoji."
                 ) {
                     Button("Manage Aliases") {
                         NotificationCenter.default.post(
@@ -573,22 +568,23 @@ struct SettingsRootView: View {
 
             SettingsCard(
                 title: "Local data",
-                detail: "Your packs and preferences stay on this Mac."
+                detail: "Your packs and settings stay on this Mac."
             ) {
                 Text(
-                    "Imported assets are copied into MojiPond’s Application Support folder."
+                    "Imported images are copied to Application Support."
                 )
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
                 SettingsDivider()
 
-                Button("Reset recents and usage ranking", role: .destructive) {
+                Text("Clears recent emoji and usage ranking.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Reset learned ordering…", role: .destructive) {
                     showsUsageResetConfirmation = true
                 }
-                if let notice = appState.runtimeNotice,
-                   notice == UsageRankingResetNotice.success
-                    || notice == UsageRankingResetNotice.failure {
+                if let notice = appState.usageRankingResetNotice {
                     Label(
                         notice,
                         systemImage:
@@ -614,15 +610,16 @@ struct SettingsRootView: View {
     }
 
     private var privacy: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 12) {
             SettingsCard(
                 title: "System permissions",
                 detail:
-                    "MojiPond asks only for access needed while you type."
+                    "Typing needs Input Monitoring and Accessibility. Image pasting is optional."
             ) {
                 PermissionSettingsRow(
+                    icon: "keyboard",
                     title: "Input Monitoring",
-                    detail: "Notices when you type an emoji shortcut.",
+                    detail: "Detects emoji shortcuts as you type.",
                     status: permissions.snapshot.inputMonitoring,
                     request: { permissions.requestInputMonitoring() },
                     openSettings: {
@@ -633,13 +630,28 @@ struct SettingsRootView: View {
                 SettingsDivider()
 
                 PermissionSettingsRow(
+                    icon: "accessibility",
                     title: "Accessibility",
-                    detail:
-                        "Finds the active text field and inserts the emoji you choose.",
+                    detail: "Positions suggestions and inserts your choice.",
                     status: permissions.snapshot.accessibility,
                     request: { permissions.requestAccessibility() },
                     openSettings: {
                         openPermissionSettings(.accessibility)
+                    }
+                )
+
+                SettingsDivider()
+
+                PermissionSettingsRow(
+                    icon: "photo.on.rectangle",
+                    title: "Image emoji in Messages",
+                    detail:
+                        "Pastes custom images and lets Return send after insertion. Unicode insertion itself does not need this.",
+                    status: permissions.snapshot.eventPosting,
+                    isOptional: true,
+                    request: { permissions.requestEventPosting() },
+                    openSettings: {
+                        openPermissionSettings(.eventPosting)
                     }
                 )
                 if let permissionNavigationError {
@@ -655,8 +667,7 @@ struct SettingsRootView: View {
 
             SettingsCard(
                 title: "Disabled apps",
-                detail:
-                    "MojiPond will not show suggestions in apps you add here."
+                detail: "Add an app to keep suggestions off there."
             ) {
                 if userApplicationExclusions.isEmpty {
                     Text("No apps added.")
@@ -698,16 +709,23 @@ struct SettingsRootView: View {
                     "Add Application…",
                     action: chooseExcludedApplication
                 )
+                if let applicationExclusionError {
+                    Text(applicationExclusionError)
+                        .font(.caption)
+                        .foregroundStyle(PondDesign.warningForeground)
+                }
             }
 
             SettingsCard(
                 title: "Disabled websites",
-                detail:
-                    "Supported browsers include subdomains unless you choose an exact host."
+                detail: "Add a site to keep suggestions off there."
             ) {
                 ForEach(appState.preferences.exclusions.domains) { domain in
                     HStack {
                         Text(domain.domain)
+                            .accessibilityIdentifier(
+                                "settings.disabledDomain.\(domain.domain)"
+                            )
                         Spacer()
                         Text(
                             domain.includesSubdomains
@@ -737,12 +755,19 @@ struct SettingsRootView: View {
                 }
                 HStack {
                     TextField("example.com", text: $domainDraft)
+                        .accessibilityLabel("Website domain")
                         .onSubmit(addDomainExclusion)
+                        .onChange(of: domainDraft) { _, _ in
+                            exclusionError = nil
+                        }
                     Toggle(
                         "Include subdomains",
                         isOn: $domainIncludesSubdomains
                     )
                     .toggleStyle(.checkbox)
+                    .onChange(of: domainIncludesSubdomains) { _, _ in
+                        exclusionError = nil
+                    }
                     Button("Add", action: addDomainExclusion)
                         .disabled(domainDraft.isEmpty)
                 }
@@ -752,15 +777,14 @@ struct SettingsRootView: View {
                         .foregroundStyle(PondDesign.warningForeground)
                 }
                 Text(
-                    "If the active website cannot be identified, MojiPond stays off."
+                    "If MojiPond cannot identify a site, suggestions stay off."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
 
             SettingsCard(
-                title: "Always disabled",
-                detail: "For safety, these app groups cannot be enabled."
+                title: "Always disabled"
             ) {
                 Label(
                     "Password managers and secure text fields",
@@ -815,14 +839,12 @@ struct SettingsRootView: View {
                     )
                 }
                 if case let .available(metadata) = updates.state {
-                    Button(
-                        "Download & Verify MojiPond \(metadata.version)…"
-                    ) {
+                    Button("Download MojiPond \(metadata.version)…") {
                         updates.stageAvailableUpdate()
                     }
                     .buttonStyle(.borderedProminent)
                     .accessibilityHint(
-                        "Downloads and verifies the update before installation."
+                        "Downloads and checks the update before installation."
                     )
                 }
                 if case let .staging(metadata) = updates.state {
@@ -830,8 +852,12 @@ struct SettingsRootView: View {
                         ProgressView()
                             .controlSize(.small)
                         Text(
-                            "Downloading and verifying MojiPond \(metadata.version)…"
+                            "Downloading MojiPond \(metadata.version)…"
                         )
+                        Spacer()
+                        Button("Cancel") {
+                            updates.cancelCurrentOperation()
+                        }
                     }
                 }
                 if case let .revalidating(metadata) = updates.state {
@@ -839,8 +865,12 @@ struct SettingsRootView: View {
                         ProgressView()
                             .controlSize(.small)
                         Text(
-                            "Verifying MojiPond \(metadata.version)…"
+                            "Checking MojiPond \(metadata.version)…"
                         )
+                        Spacer()
+                        Button("Cancel") {
+                            updates.cancelCurrentOperation()
+                        }
                     }
                 }
                 if case let .launchingInstaller(metadata) = updates.state {
@@ -902,6 +932,11 @@ struct SettingsRootView: View {
                     )
                 }
                 .disabled(updates.isBusy)
+                if updates.isChecking {
+                    Button("Cancel Update Check") {
+                        updates.cancelCurrentOperation()
+                    }
+                }
             }
             Text(
                 "Shortcodes are processed on this Mac. MojiPond does not "
@@ -961,18 +996,86 @@ struct SettingsRootView: View {
         "\(triggerText)wave\(triggerText)"
     }
 
+    private var sidebarStatusColor: Color {
+        switch appState.statusSummary {
+        case "Ready":
+            PondDesign.lily
+        case "Permissions needed":
+            PondDesign.warningForeground
+        case "Needs attention":
+            PondDesign.errorForeground
+        case "Starting…":
+            PondDesign.pond
+        default:
+            Color.secondary
+        }
+    }
+
+    private var sidebarStatusDetail: String {
+        guard appState.isEnabled else {
+            return "Suggestions are off"
+        }
+        guard appState.canMonitorTyping else {
+            return "Open Privacy to allow access"
+        }
+        return appState.statusSummary == "Ready"
+            ? "Type \(triggerExample)"
+            : "Suggestions are not active"
+    }
+
+    private var sidebarStatus: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(sidebarStatusColor)
+                .frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(appState.statusSummary)
+                    .font(.caption.weight(.semibold))
+                Text(sidebarStatusDetail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+
     private var userApplicationExclusions: [ApplicationExclusion] {
         appState.preferences.exclusions.userApplications
     }
 
-    private func clearUsageResetNotice() {
-        guard
-            appState.runtimeNotice == UsageRankingResetNotice.success
-                || appState.runtimeNotice == UsageRankingResetNotice.failure
-        else {
+    private func moveSettingsDestination(
+        _ direction: MoveCommandDirection
+    ) {
+        let destinations = SettingsDestination.allCases
+        guard let currentIndex = destinations.firstIndex(
+            of: focusedDestination ?? destination
+        ) else {
             return
         }
-        appState.setRuntimeNotice(nil)
+        let nextIndex: Int
+        switch direction {
+        case .up:
+            nextIndex = max(destinations.startIndex, currentIndex - 1)
+        case .down:
+            nextIndex = min(
+                destinations.index(before: destinations.endIndex),
+                currentIndex + 1
+            )
+        default:
+            return
+        }
+        guard nextIndex != currentIndex else {
+            return
+        }
+        destination = destinations[nextIndex]
+        focusedDestination = destination
+    }
+
+    private func clearUsageResetNotice() {
+        appState.setUsageRankingResetNotice(nil)
     }
 
     private func preference<Value>(
@@ -989,6 +1092,7 @@ struct SettingsRootView: View {
     }
 
     private func chooseExcludedApplication() {
+        applicationExclusionError = nil
         let panel = NSOpenPanel()
         panel.title = "Exclude an Application"
         panel.prompt = "Exclude"
@@ -1008,17 +1112,21 @@ struct SettingsRootView: View {
                 forInfoDictionaryKey: "CFBundleDisplayName"
             ) as? String ?? url.deletingPathExtension().lastPathComponent
         )
+        guard !appState.preferences.exclusions.applications.contains(
+            where: { $0.id == exclusion.id }
+        ) else {
+            applicationExclusionError =
+                "\(exclusion.displayName) is already disabled."
+            return
+        }
         appState.updatePreferences {
-            guard !$0.exclusions.applications.contains(
-                where: { $0.id == exclusion.id }
-            ) else {
-                return
-            }
             $0.exclusions.applications.append(exclusion)
         }
+        applicationExclusionError = nil
     }
 
     private func removeApplicationExclusion(_ id: String) {
+        applicationExclusionError = nil
         appState.updatePreferences {
             $0.exclusions.applications.removeAll { $0.id == id }
         }
@@ -1044,12 +1152,24 @@ struct SettingsRootView: View {
             exclusionError = "Enter a hostname such as example.com."
             return
         }
-        appState.updatePreferences {
-            guard !$0.exclusions.domains.contains(
-                where: { $0.id == exclusion.id }
-            ) else {
+        if let existingIndex =
+            appState.preferences.exclusions.domains.firstIndex(
+                where: { $0.domain == exclusion.domain }
+            ) {
+            guard appState.preferences.exclusions.domains[
+                existingIndex
+            ].includesSubdomains != exclusion.includesSubdomains else {
+                exclusionError = "This site is already disabled."
                 return
             }
+            appState.updatePreferences {
+                $0.exclusions.domains[existingIndex] = exclusion
+            }
+            domainDraft = ""
+            exclusionError = nil
+            return
+        }
+        appState.updatePreferences {
             $0.exclusions.domains.append(exclusion)
         }
         domainDraft = ""
@@ -1057,6 +1177,7 @@ struct SettingsRootView: View {
     }
 
     private func removeDomainExclusion(_ id: String) {
+        exclusionError = nil
         appState.updatePreferences {
             $0.exclusions.domains.removeAll { $0.id == id }
         }
@@ -1080,14 +1201,14 @@ private struct SettingsCard<Content: View>: View {
 
     var body: some View {
         PondCard {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
                 if let title {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(title)
-                            .font(.headline)
+                            .font(.subheadline.weight(.semibold))
                         if let detail {
                             Text(detail)
-                                .font(.callout)
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(
                                     horizontal: false,
@@ -1124,11 +1245,11 @@ private struct SettingsRow<Accessory: View>: View {
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .center, spacing: 10) {
             Image(systemName: icon)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(PondDesign.pond)
-                .frame(width: 30, height: 30)
+                .frame(width: 28, height: 28)
                 .background(
                     PondDesign.pond.opacity(0.1),
                     in: RoundedRectangle(
@@ -1145,9 +1266,11 @@ private struct SettingsRow<Accessory: View>: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            .layoutPriority(1)
 
-            Spacer(minLength: 14)
+            Spacer(minLength: 10)
             accessory
+                .fixedSize(horizontal: true, vertical: false)
         }
     }
 }
@@ -1186,7 +1309,7 @@ private struct SettingsDivider: View {
         Rectangle()
             .fill(PondDesign.ripple.opacity(0.16))
             .frame(height: 1)
-            .padding(.leading, 42)
+            .padding(.leading, 38)
             .accessibilityHidden(true)
     }
 }
@@ -1198,56 +1321,69 @@ private extension ShortcodeTrigger {
 }
 
 private struct PermissionSettingsRow: View {
+    let icon: String
     let title: String
     let detail: String
     let status: SystemPermissionStatus
+    var isOptional = false
     let request: () -> Void
     let openSettings: () -> Void
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Image(
-                systemName:
-                    title == "Accessibility"
-                        ? "accessibility"
-                        : "keyboard"
-            )
-            .font(.system(size: 15, weight: .semibold))
-            .foregroundStyle(
-                status == .granted
-                    ? PondDesign.lily
-                    : PondDesign.pond
-            )
-            .frame(width: 30, height: 30)
-            .background(
-                (status == .granted
-                    ? PondDesign.lily
-                    : PondDesign.pond).opacity(0.1),
-                in: RoundedRectangle(
-                    cornerRadius: PondDesign.compactCornerRadius
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(
+                    status == .granted
+                        ? PondDesign.lily
+                        : PondDesign.pond
                 )
-            )
-            .accessibilityHidden(true)
+                .frame(width: 28, height: 28)
+                .background(
+                    (status == .granted
+                        ? PondDesign.lily
+                        : PondDesign.pond).opacity(0.1),
+                    in: RoundedRectangle(
+                        cornerRadius: PondDesign.compactCornerRadius
+                    )
+                )
+                .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.callout.weight(.medium))
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Text(title)
+                        .font(.callout.weight(.medium))
+                    PermissionStatusView(
+                        permissionName: title,
+                        status: status,
+                        isRequired: !isOptional
+                    )
+                }
                 Text(detail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                permissionAction
             }
-            Spacer()
-            PermissionStatusView(permissionName: title, status: status)
-            ForEach(status.availableActions, id: \.self) { action in
-                switch action {
-                case .request:
-                    Button("Request Access", action: request)
-                        .accessibilityLabel("Request \(title) Access")
-                case .openSettings:
-                    Button("Open Settings", action: openSettings)
-                        .accessibilityLabel("Open \(title) Settings")
-                }
-            }
+            .layoutPriority(1)
+        }
+    }
+
+    @ViewBuilder
+    private var permissionAction: some View {
+        switch status {
+        case .notRequested:
+            Button("Request Access", action: request)
+                .buttonStyle(.borderedProminent)
+                .accessibilityLabel("Request \(title) Access")
+        case .pending, .denied, .revoked:
+            Button("System Settings…", action: openSettings)
+                .buttonStyle(.plain)
+                .foregroundStyle(PondDesign.pond)
+                .accessibilityLabel("Open \(title) Settings")
+        case .granted:
+            EmptyView()
         }
     }
 }

@@ -623,7 +623,8 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         case .navigation, .escape, .reset, .backspace:
             return true
         case let .character(character, _):
-            return EmojiAliasSyntax.isValidToken(String(character))
+            return character == " "
+                || EmojiAliasSyntax.isValidToken(String(character))
         case .ignore:
             return false
         }
@@ -786,7 +787,9 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                 cancelCurrentTransaction(reason: .unsupportedModifiers)
                 return true
             }
-            guard EmojiAliasSyntax.isValidToken(String(character)) else {
+            let characterText = String(character)
+            guard characterText == " "
+                    || EmojiAliasSyntax.isValidToken(characterText) else {
                 cancelCurrentTransaction(
                     reason: .invalidCharacter(character)
                 )
@@ -798,10 +801,20 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             else {
                 return true
             }
+            let nextQuery: String
+            if characterText == " " {
+                guard !transaction.browserQuery.isEmpty,
+                      transaction.browserQuery.last != " " else {
+                    return true
+                }
+                nextQuery = transaction.browserQuery + " "
+            } else {
+                nextQuery = transaction.browserQuery
+                    + EmojiAliasSyntax.normalizedToken(characterText)
+            }
             updateBrowserQuery(
                 transactionID: transaction.transactionID,
-                query: transaction.browserQuery
-                    + EmojiAliasSyntax.normalizedToken(String(character))
+                query: nextQuery
             )
             return true
         case let .backspace(modifiers):
@@ -1181,6 +1194,17 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             return false
         }
 
+        if transaction.panelState == .resolving {
+            if key == .escape {
+                cancelMediaTransaction(showCancelled: true)
+            }
+            return true
+        }
+
+        guard transaction.panelState.allowsResultSelection else {
+            return false
+        }
+
         armMediaInactivityTimeout(for: &transaction)
         let action = transaction.grid.handle(key)
         switch action {
@@ -1420,6 +1444,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         let gate = interceptionGate
         let bridge = mainActorBridge
         let queue = queue
+        let capturesSelectionKeys = snapshot.capturesSelectionKeys
         Task { @MainActor [weak self] in
             let result = await bridge.applyMediaReportingVisibility(
                 .show(
@@ -1430,8 +1455,8 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                     gate.activatePresentation(
                         revision: revision,
                         mode: .media,
-                        acceptsTab: true,
-                        acceptsReturn: true
+                        acceptsTab: capturesSelectionKeys,
+                        acceptsReturn: capturesSelectionKeys
                     )
                 }
             )
@@ -1733,7 +1758,10 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             clear(transactionID: transactionID)
             return
         }
-        guard beginCommit(transactionID: transactionID) else {
+        guard beginCommit(
+            transactionID: transactionID,
+            item: result.item
+        ) else {
             return
         }
         scheduleCapture(
@@ -1891,7 +1919,10 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             activeTransaction = transaction
         }
         let item = transaction.results[transaction.selectedIndex].item
-        guard beginCommit(transactionID: transactionID) else {
+        guard beginCommit(
+            transactionID: transactionID,
+            item: item
+        ) else {
             return
         }
         scheduleCapture(
@@ -1903,7 +1934,8 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
 
     @discardableResult
     private func beginCommit(
-        transactionID: ParserTransactionID
+        transactionID: ParserTransactionID,
+        item: EmojiItem
     ) -> Bool {
         guard
             var transaction = activeTransaction,
@@ -1919,14 +1951,73 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             cancelCurrentTransaction(reason: .externallyCancelled)
             return false
         }
-        transaction.visibleMode = .hidden
+        let showsProgress: Bool
+        if case .media = item.content {
+            showsProgress = true
+            transaction.visibleMode = .committing
+        } else {
+            showsProgress = false
+            transaction.visibleMode = .hidden
+        }
         transaction.activityRevision &+= 1
         transaction.commitState = ActiveTransaction.CommitState(
             gateGeneration: gateGeneration
         )
         activeTransaction = transaction
-        hideSurface(preservingInterceptionMode: true)
+        if showsProgress {
+            scheduleCommitProgress(
+                transactionID: transactionID
+            )
+        } else {
+            hideSurface(preservingInterceptionMode: true)
+        }
         return true
+    }
+
+    private func scheduleCommitProgress(
+        transactionID: ParserTransactionID
+    ) {
+        queue.asyncAfter(
+            deadline: .now() + .milliseconds(120)
+        ) { [weak self] in
+            guard
+                let self,
+                let transaction = activeTransaction,
+                transaction.transactionID == transactionID,
+                transaction.visibleMode == .committing,
+                transaction.commitState != nil,
+                let caretBounds = transaction.caretBounds,
+                transaction.presentationRows.indices.contains(
+                    transaction.selectedIndex
+                )
+            else {
+                return
+            }
+
+            uiRevision &+= 1
+            let selectedRow = transaction.presentationRows[
+                transaction.selectedIndex
+            ]
+            let snapshot = RuntimeSuggestionPanelSnapshot(
+                revision: uiRevision,
+                transactionID: transactionID,
+                mode: .committing,
+                rows: [selectedRow],
+                selectedIndex: 0,
+                query: nil,
+                trigger: configuration.preferences.shortcode.trigger,
+                acceptsTab: false,
+                acceptsReturn: false
+            )
+            let update = RuntimeSuggestionPanelUpdate.show(
+                snapshot: snapshot,
+                quartzCaretBounds: caretBounds
+            )
+            let bridge = mainActorBridge
+            Task { @MainActor in
+                bridge.apply(update)
+            }
+        }
     }
 
     private func scheduleCapture(

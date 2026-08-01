@@ -4,7 +4,10 @@ import SwiftUI
 
 enum RuntimeSuggestionPresentationMetrics {
     static let maximumVisibleRows = 6
+    static let maximumVisibleBrowserRows = 7
     static let suggestionRowHeight: CGFloat = 42
+    static let browserHeaderHeight: CGFloat = 42
+    static let browserRowHeight: CGFloat = 42
     static let suggestionFooterHeight: CGFloat = 26
     static let suggestionDividerHeight: CGFloat = 1
 }
@@ -89,36 +92,77 @@ struct RuntimeSuggestionPanelSnapshot: Equatable, Sendable {
     }
 
     var compactInteractionHint: String {
+        if visibleRows.isEmpty {
+            if mode == .browser, (query ?? "").isEmpty {
+                return "type to search  ·  esc close"
+            }
+            return "⌫ edit  ·  esc close"
+        }
+
         switch (acceptsTab, acceptsReturn) {
         case (true, true):
-            "↑↓ choose  ·  tab or ↩ insert  ·  esc close"
+            return "↑↓ choose  ·  tab or ↩ insert  ·  esc close"
         case (true, false):
-            "↑↓ choose  ·  tab insert  ·  esc close"
+            return "↑↓ choose  ·  tab insert  ·  esc close"
         case (false, true):
-            "↑↓ choose  ·  ↩ insert  ·  esc close"
+            return "↑↓ choose  ·  ↩ insert  ·  esc close"
         case (false, false):
-            "↑↓ choose  ·  esc close"
+            return "↑↓ choose  ·  esc close"
         }
     }
 
     var compactInteractionAccessibilityLabel: String {
+        if visibleRows.isEmpty {
+            if mode == .browser, (query ?? "").isEmpty {
+                return "Type to search, Escape closes"
+            }
+            return "Backspace edits, Escape closes"
+        }
+
         switch (acceptsTab, acceptsReturn) {
         case (true, true):
-            "Up and Down Arrow choose, Tab or Return inserts, Escape closes"
+            return "Up and Down Arrow choose, Tab or Return inserts, Escape closes"
         case (true, false):
-            "Up and Down Arrow choose, Tab inserts, Escape closes"
+            return "Up and Down Arrow choose, Tab inserts, Escape closes"
         case (false, true):
-            "Up and Down Arrow choose, Return inserts, Escape closes"
+            return "Up and Down Arrow choose, Return inserts, Escape closes"
         case (false, false):
-            "Up and Down Arrow choose, Escape closes"
+            return "Up and Down Arrow choose, Escape closes"
         }
     }
 }
 
 enum RuntimeVoiceOverAnnouncement {
+    static func suggestionUpdate(
+        _ snapshot: RuntimeSuggestionPanelSnapshot,
+        after previous: RuntimeSuggestionPanelSnapshot?
+    ) -> String {
+        guard
+            let previous,
+            previous.transactionID == snapshot.transactionID,
+            previous.mode == snapshot.mode,
+            previous.query == snapshot.query,
+            previous.rows.count == snapshot.rows.count,
+            previous.selectedRow?.id != snapshot.selectedRow?.id
+        else {
+            return suggestions(snapshot)
+        }
+
+        return selectedDescription(
+            row: snapshot.selectedRow,
+            trigger: snapshot.trigger
+        )
+    }
+
     static func suggestions(
         _ snapshot: RuntimeSuggestionPanelSnapshot
     ) -> String {
+        if snapshot.mode == .committing {
+            guard let row = snapshot.selectedRow else {
+                return "Adding custom emoji. Escape cancels."
+            }
+            return "Adding \(row.name). Escape cancels."
+        }
         let selected = selectedDescription(
             row: snapshot.selectedRow,
             trigger: snapshot.trigger
@@ -151,27 +195,48 @@ enum RuntimeVoiceOverAnnouncement {
         case .loading:
             state = "Searching for media."
         case .results:
-            state = "\(snapshot.items.count) media results."
+            state = resultCountDescription(
+                snapshot.items.count,
+                qualifier: "media"
+            )
         case .offline:
-            state = "Offline. Showing \(snapshot.items.count) bundled results."
+            state = "Offline. Showing "
+                + resultCountDescription(
+                    snapshot.items.count,
+                    qualifier: "bundled",
+                    capitalized: false
+                )
         case .empty:
             state = "No matching media."
         case .cancelled:
             state = "Media search cancelled."
         case .rateLimited:
             state = "Media provider is busy."
-        case .failed:
-            state = "Media search failed."
+        case let .failed(failure):
+            state = "Media search failed. "
+                + failure.runtimePresentationMessage
         case .resolving:
             state = "Preparing selected media."
         }
+        let selection = mediaSelectionDescription(snapshot)
+        return [state, selection]
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    static func mediaUpdate(
+        _ snapshot: RuntimeMediaPanelSnapshot,
+        after previous: RuntimeMediaPanelSnapshot?
+    ) -> String {
         guard
-            let selectedIndex = snapshot.selectedIndex,
-            snapshot.items.indices.contains(selectedIndex)
+            let previous,
+            previous.state == snapshot.state,
+            previous.items == snapshot.items,
+            previous.selectedIndex != snapshot.selectedIndex
         else {
-            return state
+            return media(snapshot)
         }
-        return "\(state) Selected \(snapshot.items[selectedIndex].title)."
+        return mediaSelectionDescription(snapshot)
     }
 
     private static func selectedDescription(
@@ -183,6 +248,32 @@ enum RuntimeVoiceOverAnnouncement {
         }
         return "Selected \(row.name), \(trigger.accessibilityName) "
             + "\(row.shortcode) \(trigger.accessibilityName)."
+    }
+
+    private static func mediaSelectionDescription(
+        _ snapshot: RuntimeMediaPanelSnapshot
+    ) -> String {
+        guard
+            let selectedIndex = snapshot.selectedIndex,
+            snapshot.items.indices.contains(selectedIndex)
+        else {
+            return ""
+        }
+        return "Selected \(snapshot.items[selectedIndex].title), "
+            + "\(selectedIndex + 1) of \(snapshot.items.count)."
+    }
+
+    private static func resultCountDescription(
+        _ count: Int,
+        qualifier: String,
+        capitalized: Bool = true
+    ) -> String {
+        let result = count == 1 ? "result" : "results"
+        let description = "\(count) \(qualifier) \(result)."
+        guard capitalized, let first = description.first else {
+            return description
+        }
+        return first.uppercased() + description.dropFirst()
     }
 }
 
@@ -262,7 +353,10 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
     private var latestRevision: UInt64 = 0
     private var latestMediaRevision: UInt64 = 0
     private var lastSuggestionAnnouncement: String?
+    private var lastAnnouncedSuggestionSnapshot:
+        RuntimeSuggestionPanelSnapshot?
     private var lastMediaAnnouncement: String?
+    private var lastAnnouncedMediaSnapshot: RuntimeMediaPanelSnapshot?
 
     init() {
         let initialSnapshot = RuntimeSuggestionPanelSnapshot(
@@ -324,6 +418,7 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
         case .hide:
             mediaPanel.orderOut(nil)
             lastMediaAnnouncement = nil
+            lastAnnouncedMediaSnapshot = nil
             return false
         case let .show(snapshot, caretBounds):
             panel.orderOut(nil)
@@ -366,6 +461,7 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
             _ = revision
             panel.orderOut(nil)
             lastSuggestionAnnouncement = nil
+            lastAnnouncedSuggestionSnapshot = nil
             return false
 
         case let .show(snapshot, caretBounds):
@@ -398,7 +494,11 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
     private func announceSuggestions(
         _ snapshot: RuntimeSuggestionPanelSnapshot
     ) {
-        let announcement = RuntimeVoiceOverAnnouncement.suggestions(snapshot)
+        let announcement = RuntimeVoiceOverAnnouncement.suggestionUpdate(
+            snapshot,
+            after: lastAnnouncedSuggestionSnapshot
+        )
+        lastAnnouncedSuggestionSnapshot = snapshot
         guard announcement != lastSuggestionAnnouncement else {
             return
         }
@@ -409,7 +509,11 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
     private func announceMedia(
         _ snapshot: RuntimeMediaPanelSnapshot
     ) {
-        let announcement = RuntimeVoiceOverAnnouncement.media(snapshot)
+        let announcement = RuntimeVoiceOverAnnouncement.mediaUpdate(
+            snapshot,
+            after: lastAnnouncedMediaSnapshot
+        )
+        lastAnnouncedMediaSnapshot = snapshot
         guard announcement != lastMediaAnnouncement else {
             return
         }
@@ -426,7 +530,7 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
             notification: .announcementRequested,
             userInfo: [
                 .announcement: announcement,
-                .priority: NSAccessibilityPriorityLevel.high.rawValue
+                .priority: NSAccessibilityPriorityLevel.medium.rawValue
             ]
         )
     }
@@ -435,8 +539,10 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
         for snapshot: RuntimeSuggestionPanelSnapshot
     ) -> CGSize {
         switch snapshot.mode {
-        case .hidden, .committing:
+        case .hidden:
             return CGSize(width: 380, height: 1)
+        case .committing:
+            return CGSize(width: 380, height: 44)
         case .suggestions:
             let visibleRowCount = max(snapshot.visibleRows.count, 1)
             return CGSize(
@@ -451,9 +557,20 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
                         .suggestionFooterHeight
             )
         case .browser:
+            let visibleRowCount = min(
+                max(snapshot.rows.count, 1),
+                RuntimeSuggestionPresentationMetrics.maximumVisibleBrowserRows
+            )
             return CGSize(
                 width: 440,
-                height: CGFloat(min(max(snapshot.rows.count, 1), 8) * 44 + 48)
+                height:
+                    RuntimeSuggestionPresentationMetrics.browserHeaderHeight
+                    + CGFloat(visibleRowCount)
+                    * RuntimeSuggestionPresentationMetrics.browserRowHeight
+                    + RuntimeSuggestionPresentationMetrics
+                        .suggestionDividerHeight
+                    + RuntimeSuggestionPresentationMetrics
+                        .suggestionFooterHeight
             )
         case .media:
             return CGSize(width: 440, height: 1)
@@ -473,103 +590,131 @@ struct RuntimeSuggestionPanelView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if snapshot.mode == .browser {
+            if snapshot.mode == .committing {
+                commitProgress
+            } else {
+                if snapshot.mode == .browser {
+                let query = snapshot.query ?? ""
+                let resultCount = snapshot.rows.count
                 HStack(spacing: 8) {
-                    Image(systemName: "water.waves")
-                        .foregroundStyle(PondDesign.onDeepWater)
-                    Text("MojiPond")
-                        .font(.headline)
-                    if let query = snapshot.query, !query.isEmpty {
-                        Text(query)
-                            .font(.body.monospaced())
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.caption.weight(.semibold))
                             .foregroundStyle(
-                                PondDesign.onDeepWater.opacity(0.76)
+                                PondDesign.onDeepWater.opacity(0.72)
                             )
+                            .accessibilityHidden(true)
+                        if query.isEmpty {
+                            Text("Type to search")
+                                .foregroundStyle(
+                                    PondDesign.onDeepWater.opacity(0.72)
+                                )
+                        } else {
+                            Text(query)
+                                .font(.body.monospaced())
+                                .foregroundStyle(PondDesign.onDeepWater)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
                     }
-                    Spacer()
-                    Text(snapshot.compactInteractionHint)
-                        .font(.caption)
+                    .padding(.horizontal, 8)
+                    .frame(
+                        maxWidth: .infinity,
+                        minHeight: 28,
+                        maxHeight: 28,
+                        alignment: .leading
+                    )
+                    .background(
+                        PondDesign.onDeepWater.opacity(0.1),
+                        in: RoundedRectangle(
+                            cornerRadius: 7,
+                            style: .continuous
+                        )
+                    )
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityIdentifier("runtime.browserQuery")
+                    .accessibilityLabel("Emoji search")
+                    .accessibilityValue(
+                        query.isEmpty ? "Type to search" : query
+                    )
+
+                    Text(
+                        "\(resultCount) "
+                            + (resultCount == 1 ? "result" : "results")
+                    )
+                        .font(.caption2.monospacedDigit())
                         .foregroundStyle(
                             PondDesign.onDeepWater.opacity(0.72)
                         )
-                        .accessibilityLabel(
-                            snapshot.compactInteractionAccessibilityLabel
-                        )
+                        .fixedSize()
                 }
                 .foregroundStyle(PondDesign.onDeepWater)
-                .padding(.horizontal, 12)
-                .frame(height: 42)
+                .padding(.horizontal, 10)
+                .frame(
+                    height: RuntimeSuggestionPresentationMetrics
+                        .browserHeaderHeight
+                )
                 .background(PondDesign.deepWater)
                 .overlay(alignment: .bottom) {
                     Rectangle()
                         .fill(PondDesign.ripple.opacity(0.48))
                         .frame(height: 1)
                 }
-            }
+                }
 
-            if snapshot.mode == .browser {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            rows
+                if snapshot.mode == .browser {
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 0) {
+                                rows
+                            }
+                        }
+                        .onAppear {
+                            if let selected = snapshot.selectedRow {
+                                proxy.scrollTo(selected.id, anchor: .center)
+                            }
+                        }
+                        .onChange(of: snapshot.selectedRow?.id) {
+                            if let selected = snapshot.selectedRow {
+                                proxy.scrollTo(selected.id, anchor: .center)
+                            }
                         }
                     }
-                    .onAppear {
-                        if let selected = snapshot.selectedRow {
-                            proxy.scrollTo(selected.id, anchor: .center)
-                        }
-                    }
-                    .onChange(of: snapshot.selectedRow?.id) {
-                        if let selected = snapshot.selectedRow {
-                            proxy.scrollTo(selected.id, anchor: .center)
-                        }
-                    }
-                }
-            } else {
-                VStack(alignment: .leading, spacing: 0) {
+                } else {
                     rows
-                    Rectangle()
-                        .fill(PondDesign.ripple.opacity(0.24))
-                        .frame(
-                            height: RuntimeSuggestionPresentationMetrics
-                                .suggestionDividerHeight
-                        )
-                    Text(snapshot.compactInteractionHint)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .accessibilityLabel(
-                            snapshot.compactInteractionAccessibilityLabel
-                        )
-                        .padding(.horizontal, 12)
-                        .frame(
-                            maxWidth: .infinity,
-                            minHeight: RuntimeSuggestionPresentationMetrics
-                                .suggestionFooterHeight,
-                            maxHeight: RuntimeSuggestionPresentationMetrics
-                                .suggestionFooterHeight,
-                            alignment: .leading
-                        )
-                        .background(PondDesign.raisedSurface)
                 }
+
+                Rectangle()
+                    .fill(PondDesign.ripple.opacity(0.24))
+                    .frame(
+                        height: RuntimeSuggestionPresentationMetrics
+                            .suggestionDividerHeight
+                    )
+                Text(snapshot.compactInteractionHint)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel(
+                        snapshot.compactInteractionAccessibilityLabel
+                    )
+                    .padding(.horizontal, 12)
+                    .frame(
+                        maxWidth: .infinity,
+                        minHeight: RuntimeSuggestionPresentationMetrics
+                            .suggestionFooterHeight,
+                        maxHeight: RuntimeSuggestionPresentationMetrics
+                            .suggestionFooterHeight,
+                        alignment: .leading
+                    )
+                    .background(PondDesign.raisedSurface)
             }
         }
-        .padding(.vertical, snapshot.mode == .browser ? 6 : 0)
         .background {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(
-                    reduceTransparency
-                        ? AnyShapeStyle(PondDesign.surface)
-                        : AnyShapeStyle(.regularMaterial)
+                    PondDesign.surface.opacity(
+                        reduceTransparency ? 1 : 0.97
+                    )
                 )
-                .overlay {
-                    if !reduceTransparency {
-                        RoundedRectangle(
-                            cornerRadius: PondDesign.cornerRadius,
-                            style: .continuous
-                        )
-                        .fill(PondDesign.surface.opacity(0.76))
-                    }
-                }
         }
         .clipShape(
             RoundedRectangle(
@@ -590,10 +735,33 @@ struct RuntimeSuggestionPanelView: View {
                 )
         }
         .accessibilityElement(children: .contain)
+    }
+
+    private var commitProgress: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.small)
+            Text("Adding")
+                .foregroundStyle(.secondary)
+            if let row = snapshot.selectedRow {
+                Text(":\(row.shortcode):")
+                    .font(.body.monospaced().weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            } else {
+                Text("custom emoji")
+                    .font(.body.weight(.medium))
+            }
+            Spacer(minLength: 8)
+            Text("esc cancel")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 44)
+        .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            snapshot.mode == .browser
-                ? "MojiPond emoji browser"
-                : "MojiPond emoji suggestions"
+            RuntimeVoiceOverAnnouncement.suggestions(snapshot)
         )
     }
 
@@ -606,7 +774,8 @@ struct RuntimeSuggestionPanelView: View {
                 .frame(
                     maxWidth: .infinity,
                     minHeight: snapshot.mode == .browser
-                        ? 44
+                        ? RuntimeSuggestionPresentationMetrics
+                            .browserRowHeight
                         : RuntimeSuggestionPresentationMetrics
                             .suggestionRowHeight
                 )
@@ -638,7 +807,9 @@ private struct RuntimeSuggestionRowView: View {
                     LibraryAssetArtwork(
                         url: artworkURL,
                         fallbackURL: row.artworkFallbackURL,
-                        managedRootURL: row.artworkRootURL
+                        managedRootURL: row.artworkRootURL,
+                        contentPadding: 1,
+                        showsLoadingIndicator: false
                     )
                 } else {
                     Text(row.glyph)
@@ -647,9 +818,7 @@ private struct RuntimeSuggestionRowView: View {
             }
             .frame(width: 32, height: 32)
             .background(
-                isSelected
-                    ? PondDesign.onDeepWater.opacity(0.12)
-                    : PondDesign.raisedSurface,
+                PondDesign.raisedSurface,
                 in: RoundedRectangle(
                     cornerRadius: 7,
                     style: .continuous
@@ -658,9 +827,7 @@ private struct RuntimeSuggestionRowView: View {
             .overlay {
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .stroke(
-                        isSelected
-                            ? PondDesign.onDeepWater.opacity(0.22)
-                            : PondDesign.ripple.opacity(0.18),
+                        PondDesign.ripple.opacity(0.18),
                         lineWidth: 1
                     )
             }
@@ -671,32 +838,23 @@ private struct RuntimeSuggestionRowView: View {
                 )
                     .font(.system(.body, design: .monospaced, weight: .medium))
                     .lineLimit(1)
-                if !compact {
-                    Text(row.name)
-                        .font(.caption)
-                        .foregroundStyle(
-                            isSelected
-                                ? PondDesign.onDeepWater.opacity(0.78)
-                                : Color.secondary
-                        )
-                        .lineLimit(1)
-                }
+                    .truncationMode(.middle)
+                    .layoutPriority(1)
+                Text(row.name)
+                    .font(.caption)
+                    .foregroundStyle(
+                        isSelected
+                            ? PondDesign.onDeepWater.opacity(0.78)
+                            : Color.secondary
+                    )
+                    .lineLimit(1)
             }
             Spacer(minLength: 4)
-            if isSelected {
-                Image(systemName: "checkmark.circle.fill")
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(
-                        PondDesign.onDeepWater,
-                        PondDesign.lotus
-                    )
-                    .accessibilityHidden(true)
-            }
         }
         .padding(.horizontal, 10)
         .frame(
             height: compact
-                ? 44
+                ? RuntimeSuggestionPresentationMetrics.browserRowHeight
                 : RuntimeSuggestionPresentationMetrics.suggestionRowHeight
         )
         .foregroundStyle(
@@ -712,13 +870,6 @@ private struct RuntimeSuggestionRowView: View {
                         : Color.clear
                 )
                 .padding(.horizontal, 5)
-        }
-        .overlay {
-            if isSelected {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(PondDesign.ripple.opacity(0.72), lineWidth: 1)
-                    .padding(.horizontal, 5)
-            }
         }
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)

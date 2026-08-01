@@ -2,9 +2,9 @@ import AppKit
 import SwiftUI
 
 enum PondDesign {
-    static let cornerRadius: CGFloat = 12
-    static let compactCornerRadius: CGFloat = 9
-    static let contentPadding: CGFloat = 20
+    static let cornerRadius: CGFloat = 10
+    static let compactCornerRadius: CGFloat = 8
+    static let contentPadding: CGFloat = 16
     static let windowTop = Color(nsColor: windowTopColor)
     static let windowBottom = Color(nsColor: windowBottomColor)
     static let surface = Color(nsColor: surfaceColor)
@@ -444,7 +444,7 @@ struct PondCard<Content: View>: View {
 
     var body: some View {
         content
-            .padding(16)
+            .padding(14)
             .background(
                 PondDesign.surface,
                 in: RoundedRectangle(
@@ -455,15 +455,15 @@ struct PondCard<Content: View>: View {
                 RoundedRectangle(cornerRadius: PondDesign.cornerRadius)
                     .stroke(
                         PondDesign.ripple.opacity(
-                            contrast == .increased ? 1 : 0.55
+                            contrast == .increased ? 1 : 0.2
                         ),
-                        lineWidth: contrast == .increased ? 2 : 0.75
+                        lineWidth: contrast == .increased ? 2 : 1
                     )
             }
             .shadow(
-                color: Color.black.opacity(contrast == .increased ? 0 : 0.06),
-                radius: 12,
-                y: 5
+                color: Color.black.opacity(contrast == .increased ? 0 : 0.035),
+                radius: 7,
+                y: 2
             )
     }
 }
@@ -485,7 +485,7 @@ struct PondWindowBackdrop: View {
                     ForEach([150.0, 245.0, 350.0], id: \.self) { size in
                         Circle()
                             .stroke(
-                                PondDesign.ripple.opacity(0.09),
+                                PondDesign.ripple.opacity(0.055),
                                 lineWidth: 1
                             )
                             .frame(width: size, height: size)
@@ -497,7 +497,7 @@ struct PondWindowBackdrop: View {
                 )
 
                 Circle()
-                    .fill(PondDesign.lotus.opacity(0.045))
+                    .fill(PondDesign.lotus.opacity(0.03))
                     .frame(width: 190, height: 190)
                     .position(x: 18, y: proxy.size.height - 12)
             }
@@ -512,11 +512,11 @@ struct PondPageHeader: View {
     let detail: String
 
     var body: some View {
-        HStack(alignment: .center, spacing: 14) {
+        HStack(alignment: .center, spacing: 11) {
             Image(systemName: icon)
-                .font(.system(size: 20, weight: .semibold))
+                .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(PondDesign.onDeepWater)
-                .frame(width: 42, height: 42)
+                .frame(width: 34, height: 34)
                 .background(
                     PondDesign.deepWater,
                     in: RoundedRectangle(
@@ -527,9 +527,9 @@ struct PondPageHeader: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.title2.weight(.semibold))
+                    .font(.title3.weight(.semibold))
                 Text(detail)
-                    .font(.callout)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
@@ -582,7 +582,7 @@ struct PondMark: View {
             .interpolation(.high)
             .aspectRatio(contentMode: .fit)
         .frame(width: size, height: size)
-        .shadow(color: PondDesign.pond.opacity(0.22), radius: 16, y: 8)
+        .shadow(color: PondDesign.pond.opacity(0.16), radius: 8, y: 3)
         .accessibilityHidden(true)
     }
 }

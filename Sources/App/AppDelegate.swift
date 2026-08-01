@@ -188,7 +188,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configureStatusItem() {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        let item: NSStatusItem
+        if let statusItem {
+            item = statusItem
+        } else {
+            item = NSStatusBar.system.statusItem(
+                withLength: NSStatusItem.squareLength
+            )
+            statusItem = item
+        }
         item.button?.image = NSImage(
             systemSymbolName: statusSymbolName,
             accessibilityDescription: "MojiPond"
@@ -197,7 +205,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let menu = NSMenu()
         let enabledItem = NSMenuItem(
-            title: "MojiPond Enabled",
+            title: "Enabled",
             action: #selector(toggleEnabled),
             keyEquivalent: ""
         )
@@ -230,19 +238,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
         }
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Open Library", action: #selector(showLibrary), keyEquivalent: "o")
         menu.addItem(
-            withTitle: "Open Emoji Browser",
+            withTitle: "Emoji Library…",
+            action: #selector(showLibrary),
+            keyEquivalent: "o"
+        )
+        let browserItem = menu.addItem(
+            withTitle: "Insert Emoji at Caret…",
             action: #selector(openEmojiBrowser),
             keyEquivalent: "b"
         )
-        menu.addItem(withTitle: "Setup & Permissions", action: #selector(showOnboarding), keyEquivalent: "")
+        browserItem.isEnabled = appState.isEnabled
+            && appState.canMonitorTyping
+        menu.addItem(
+            withTitle: "Setup & Permissions…",
+            action: #selector(showOnboarding),
+            keyEquivalent: ""
+        )
         menu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
         addUpdateItems(to: menu)
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit MojiPond", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.menu = menu
-        statusItem = item
     }
 
     @objc
@@ -274,8 +291,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .miniaturizable,
             .resizable
         ]
-        window.setContentSize(NSSize(width: 760, height: 570))
-        window.minSize = NSSize(width: 680, height: 520)
+        window.setContentSize(NSSize(width: 720, height: 620))
+        window.minSize = NSSize(width: 660, height: 560)
         window.center()
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
@@ -304,8 +321,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let window = NSWindow(contentViewController: controller)
         window.title = "MojiPond Library"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.setContentSize(NSSize(width: 960, height: 660))
-        window.minSize = NSSize(width: 840, height: 560)
+        window.setContentSize(NSSize(width: 920, height: 620))
+        window.minSize = NSSize(width: 780, height: 520)
         window.center()
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
@@ -321,6 +338,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        if !launchConfiguration.isUITesting {
+            NSApp.activate(ignoringOtherApps: true)
+            if NSApp.sendAction(
+                Selector(("showSettingsWindow:")),
+                to: nil,
+                from: nil
+            ) {
+                return
+            }
+        }
+
         let controller = NSHostingController(
             rootView: SettingsRootView(appState: appState)
         )
@@ -328,12 +356,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.title = "MojiPond Settings"
         window.styleMask = [
             .titled,
-            .closable,
-            .miniaturizable,
-            .resizable
+            .closable
         ]
-        window.setContentSize(NSSize(width: 820, height: 640))
-        window.minSize = NSSize(width: 760, height: 560)
+        window.setContentSize(NSSize(width: 760, height: 560))
         window.center()
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
@@ -362,8 +387,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .miniaturizable,
             .resizable
         ]
-        window.setContentSize(NSSize(width: 900, height: 700))
-        window.minSize = NSSize(width: 780, height: 600)
+        window.setContentSize(NSSize(width: 860, height: 640))
+        window.minSize = NSSize(width: 760, height: 560)
         window.center()
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
@@ -490,14 +515,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc
     private func showVerifiedUpdateForManualInstall() {
         let alert = NSAlert()
-        alert.messageText = "Prepare the verified app for manual installation?"
+        alert.messageText = "Show the update in Finder?"
         alert.informativeText =
-            "MojiPond will verify the signed ZIP and both app identities "
-            + "again. It will then reveal the staged app in Finder. Quit "
-            + "MojiPond, replace the installed copy at its existing "
-            + "location, and relaunch it."
+            "MojiPond will check the download again, then show the app. "
+            + "Quit MojiPond, replace the installed copy, and reopen it."
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "Revalidate and Show in Finder")
+        alert.addButton(withTitle: "Show in Finder")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else {
             return
@@ -516,12 +539,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc
     private func installVerifiedUpdateAndRelaunch() {
         let alert = NSAlert()
-        alert.messageText = "Install the verified update and relaunch?"
+        alert.messageText = "Install the update and relaunch?"
         alert.informativeText =
-            "MojiPond will verify the signed ZIP and both app identities "
-            + "again, quit this process, replace the app using a locked "
-            + "atomic swap, verify the installed result, and relaunch. "
-            + "Any failure after replacement begins restores this version."
+            "MojiPond will check the download, install it, and reopen. "
+            + "If installation fails, this version is restored."
         alert.alertStyle = .informational
         alert.addButton(withTitle: "Install & Relaunch")
         alert.addButton(withTitle: "Cancel")
@@ -538,6 +559,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc
     private func discardVerifiedUpdate() {
         appState.updates.discardStagedUpdate()
+    }
+
+    @objc
+    private func cancelUpdateOperation() {
+        appState.updates.cancelCurrentOperation()
     }
 
     @objc
@@ -573,21 +599,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case let .staging(metadata):
             menu.addItem(
                 withTitle:
-                    "Downloading & Verifying MojiPond \(metadata.version)…",
+                    "Downloading MojiPond \(metadata.version)…",
                 action: nil,
                 keyEquivalent: ""
             ).isEnabled = false
+            menu.addItem(
+                withTitle: "Cancel Update",
+                action: #selector(cancelUpdateOperation),
+                keyEquivalent: ""
+            )
         case let .revalidating(metadata):
             menu.addItem(
                 withTitle:
-                    "Revalidating MojiPond \(metadata.version)…",
+                    "Checking MojiPond \(metadata.version)…",
                 action: nil,
                 keyEquivalent: ""
             ).isEnabled = false
+            menu.addItem(
+                withTitle: "Cancel Update",
+                action: #selector(cancelUpdateOperation),
+                keyEquivalent: ""
+            )
         case let .launchingInstaller(metadata):
             menu.addItem(
                 withTitle:
-                    "Starting MojiPond \(metadata.version) Installer…",
+                    "Preparing MojiPond \(metadata.version)…",
                 action: nil,
                 keyEquivalent: ""
             ).isEnabled = false
@@ -604,20 +640,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .manualInstallRequired:
                 menu.addItem(
                     withTitle:
-                        "Show Verified MojiPond \(metadata.version) in Finder…",
+                        "Show MojiPond \(metadata.version) in Finder…",
                     action:
                         #selector(showVerifiedUpdateForManualInstall),
                     keyEquivalent: ""
                 )
             case .unavailable, .none:
                 menu.addItem(
-                    withTitle: "Verified Update Needs Attention",
+                    withTitle: "Update Needs Attention",
                     action: nil,
                     keyEquivalent: ""
                 ).isEnabled = false
             }
             menu.addItem(
-                withTitle: "Discard Verified Update",
+                withTitle: "Discard Update",
                 action: #selector(discardVerifiedUpdate),
                 keyEquivalent: ""
             )
@@ -634,6 +670,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 action: nil,
                 keyEquivalent: ""
             ).isEnabled = false
+            menu.addItem(
+                withTitle: "Cancel Update Check",
+                action: #selector(cancelUpdateOperation),
+                keyEquivalent: ""
+            )
         case .unconfigured:
             break
         case .idle,
@@ -659,8 +700,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func rebuildStatusMenu() {
-        statusItem?.menu = nil
-        statusItem = nil
         configureStatusItem()
     }
 
@@ -873,8 +912,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         NotificationCenter.default.publisher(for: .mojiPondShowAliases)
             .sink { [weak self] _ in
-                self?.libraryViewModel?.scope = .aliases
                 self?.showLibrary()
+                self?.libraryViewModel?.scope = .aliases
+                DispatchQueue.main.async { [weak self] in
+                    self?.libraryViewModel?.scope = .aliases
+                }
             }
             .store(in: &cancellables)
 
@@ -889,7 +931,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func resetUsageRanking() {
         guard let usageStore else {
-            appState.setRuntimeNotice(UsageRankingResetNotice.failure)
+            appState.setUsageRankingResetNotice(
+                UsageRankingResetNotice.failure
+            )
             return
         }
         Task {
@@ -897,13 +941,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try await usageStore.resetUsageRanking()
                 await MainActor.run {
                     self.runtimeController?.reloadUsageSnapshot()
-                    self.appState.setRuntimeNotice(
+                    self.appState.setUsageRankingResetNotice(
                         UsageRankingResetNotice.success
                     )
                 }
             } catch {
                 await MainActor.run {
-                    self.appState.setRuntimeNotice(
+                    self.appState.setUsageRankingResetNotice(
                         UsageRankingResetNotice.failure
                     )
                 }
@@ -965,7 +1009,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
         case .sendAfterInsertionUnavailable:
             appState.setRuntimeNotice(
-                "Emoji inserted, but macOS blocked Return. Allow Send & Media Pasting to send immediately."
+                "Emoji inserted, but macOS could not send it. Allow Image emoji in Messages in Settings → Privacy."
             )
         case let .sessionDenied(denial):
             let notice = runtimeNotice(for: denial)

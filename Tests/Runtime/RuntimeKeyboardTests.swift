@@ -183,7 +183,7 @@ final class RuntimeKeyboardTests: XCTestCase {
             gate.decision(
                 for: snapshot(keyCode: 49, characters: " ")
             ),
-            .passThrough
+            .intercept
         )
         XCTAssertEqual(
             gate.decision(
@@ -283,6 +283,36 @@ final class RuntimeKeyboardTests: XCTestCase {
                 for: snapshot(keyCode: RuntimeKeyboardKeyCode.rightArrow)
             ),
             .passThrough
+        )
+    }
+
+    func testMediaPanelPassesSelectionKeysWhenThereIsNoSelection() {
+        let gate = RuntimeInterceptionGate()
+        gate.setCaptureEnabled(true)
+        gate.setMode(
+            .media,
+            acceptsTab: false,
+            acceptsReturn: false
+        )
+
+        for keyCode in [
+            RuntimeKeyboardKeyCode.leftArrow,
+            RuntimeKeyboardKeyCode.rightArrow,
+            RuntimeKeyboardKeyCode.upArrow,
+            RuntimeKeyboardKeyCode.downArrow,
+            RuntimeKeyboardKeyCode.tab,
+            RuntimeKeyboardKeyCode.returnKey
+        ] {
+            XCTAssertEqual(
+                gate.decision(for: snapshot(keyCode: keyCode)),
+                .passThrough
+            )
+        }
+        XCTAssertEqual(
+            gate.decision(
+                for: snapshot(keyCode: RuntimeKeyboardKeyCode.escape)
+            ),
+            .intercept
         )
     }
 
