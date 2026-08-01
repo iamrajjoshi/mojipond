@@ -10,6 +10,94 @@ DERIVED_DATA_PATH=${MOJIPOND_DERIVED_DATA_PATH:-"${REPOSITORY_ROOT}/DerivedData"
 SIGNING_IDENTITY=${MOJIPOND_SIGNING_IDENTITY:-}
 DEVELOPMENT_TEAM=${MOJIPOND_DEVELOPMENT_TEAM:-}
 BUILD_ARCHITECTURES=${MOJIPOND_ARCHS:-}
+UPDATE_FEED_URL=${MOJIPOND_UPDATE_FEED_URL:-}
+UPDATE_SIGNATURE_ALGORITHM=${MOJIPOND_UPDATE_SIGNATURE_ALGORITHM:-}
+UPDATE_PUBLIC_KEY_BASE64=${MOJIPOND_UPDATE_PUBLIC_KEY_BASE64:-}
+UPDATE_TEAM_IDENTIFIER=${MOJIPOND_UPDATE_TEAM_IDENTIFIER:-}
+
+UPDATE_CONFIGURATION_VALUES=(
+  "${UPDATE_FEED_URL}"
+  "${UPDATE_SIGNATURE_ALGORITHM}"
+  "${UPDATE_PUBLIC_KEY_BASE64}"
+  "${UPDATE_TEAM_IDENTIFIER}"
+)
+UPDATE_CONFIGURATION_VALUE_COUNT=0
+for value in "${UPDATE_CONFIGURATION_VALUES[@]}"; do
+  if [[ -n "${value}" ]]; then
+    (( UPDATE_CONFIGURATION_VALUE_COUNT += 1 ))
+  fi
+done
+
+if (( UPDATE_CONFIGURATION_VALUE_COUNT != 0 \
+      && UPDATE_CONFIGURATION_VALUE_COUNT != 4 )); then
+  echo "Update configuration must set all four MOJIPOND_UPDATE_* values or none." >&2
+  exit 64
+fi
+
+if (( UPDATE_CONFIGURATION_VALUE_COUNT == 4 )); then
+  if [[ "${UPDATE_FEED_URL}" != https://* \
+        || "${UPDATE_FEED_URL}" == *[[:space:]]* ]]; then
+    echo "MOJIPOND_UPDATE_FEED_URL must be an absolute HTTPS URL without whitespace." >&2
+    exit 64
+  fi
+  UPDATE_FEED_AUTHORITY=${UPDATE_FEED_URL#https://}
+  UPDATE_FEED_AUTHORITY=${UPDATE_FEED_AUTHORITY%%/*}
+  UPDATE_FEED_AUTHORITY=${UPDATE_FEED_AUTHORITY%%\?*}
+  UPDATE_FEED_AUTHORITY=${UPDATE_FEED_AUTHORITY%%\#*}
+  if [[ -z "${UPDATE_FEED_AUTHORITY}" \
+        || "${UPDATE_FEED_AUTHORITY}" == *"@"* ]]; then
+    echo "MOJIPOND_UPDATE_FEED_URL must include a host and must not include credentials." >&2
+    exit 64
+  fi
+
+  case "${UPDATE_SIGNATURE_ALGORITHM}" in
+    ed25519)
+      EXPECTED_UPDATE_PUBLIC_KEY_BYTE_COUNT=32
+      ;;
+    p256-sha256)
+      EXPECTED_UPDATE_PUBLIC_KEY_BYTE_COUNT=64
+      ;;
+    *)
+      echo "MOJIPOND_UPDATE_SIGNATURE_ALGORITHM must be ed25519 or p256-sha256." >&2
+      exit 64
+      ;;
+  esac
+
+  if [[ "${UPDATE_PUBLIC_KEY_BASE64}" == *[[:space:]]* ]]; then
+    echo "MOJIPOND_UPDATE_PUBLIC_KEY_BASE64 must not contain whitespace." >&2
+    exit 64
+  fi
+  if ! /usr/bin/printf '%s\n' "${UPDATE_PUBLIC_KEY_BASE64}" \
+      | /usr/bin/grep -Eq '^[A-Za-z0-9+/]+={1,2}$'; then
+    echo "MOJIPOND_UPDATE_PUBLIC_KEY_BASE64 must contain valid standard Base64." >&2
+    exit 64
+  fi
+  if ! DECODED_UPDATE_PUBLIC_KEY_BYTE_COUNT=$(
+    /usr/bin/printf '%s' "${UPDATE_PUBLIC_KEY_BASE64}" \
+      | /usr/bin/base64 -D 2>/dev/null \
+      | /usr/bin/wc -c \
+      | /usr/bin/tr -d '[:space:]'
+  ); then
+    echo "MOJIPOND_UPDATE_PUBLIC_KEY_BASE64 must contain valid Base64." >&2
+    exit 64
+  fi
+  if [[ "${DECODED_UPDATE_PUBLIC_KEY_BYTE_COUNT}" \
+        != "${EXPECTED_UPDATE_PUBLIC_KEY_BYTE_COUNT}" ]]; then
+    echo "MOJIPOND_UPDATE_PUBLIC_KEY_BASE64 has the wrong raw-key length for ${UPDATE_SIGNATURE_ALGORITHM}." >&2
+    exit 64
+  fi
+
+  if ! /usr/bin/printf '%s\n' "${UPDATE_TEAM_IDENTIFIER}" \
+      | /usr/bin/grep -Eq '^[A-Z0-9]{10}$'; then
+    echo "MOJIPOND_UPDATE_TEAM_IDENTIFIER must be a 10-character uppercase Apple Team ID." >&2
+    exit 64
+  fi
+  if [[ -n "${DEVELOPMENT_TEAM}" \
+        && "${UPDATE_TEAM_IDENTIFIER}" != "${DEVELOPMENT_TEAM}" ]]; then
+    echo "MOJIPOND_UPDATE_TEAM_IDENTIFIER must match MOJIPOND_DEVELOPMENT_TEAM." >&2
+    exit 64
+  fi
+fi
 
 case "${BUILD_CONFIGURATION}" in
   Debug|Release)
@@ -99,6 +187,15 @@ if [[ -n "${BUILD_ARCHITECTURES}" ]]; then
   )
 fi
 
+if (( UPDATE_CONFIGURATION_VALUE_COUNT == 4 )); then
+  BUILD_SETTINGS+=(
+    "MOJIPOND_UPDATE_FEED_URL=${UPDATE_FEED_URL}"
+    "MOJIPOND_UPDATE_SIGNATURE_ALGORITHM=${UPDATE_SIGNATURE_ALGORITHM}"
+    "MOJIPOND_UPDATE_PUBLIC_KEY_BASE64=${UPDATE_PUBLIC_KEY_BASE64}"
+    "MOJIPOND_UPDATE_TEAM_IDENTIFIER=${UPDATE_TEAM_IDENTIFIER}"
+  )
+fi
+
 XCODEBUILD_ARGUMENTS=(
   -project MojiPond.xcodeproj \
   -scheme MojiPond \
@@ -136,6 +233,19 @@ if [[ ! -d "${APPLICATION_PATH}" ]]; then
 fi
 
 /usr/bin/codesign --verify --deep --strict "${APPLICATION_PATH}"
+
+if (( UPDATE_CONFIGURATION_VALUE_COUNT == 4 )); then
+  SIGNED_TEAM_IDENTIFIER=$(
+    /usr/bin/codesign --display --verbose=4 \
+      "${APPLICATION_PATH}" 2>&1 \
+      | /usr/bin/sed -n 's/^TeamIdentifier=//p' \
+      | /usr/bin/head -n 1
+  )
+  if [[ "${SIGNED_TEAM_IDENTIFIER}" != "${UPDATE_TEAM_IDENTIFIER}" ]]; then
+    echo "The signed app TeamIdentifier does not match MOJIPOND_UPDATE_TEAM_IDENTIFIER." >&2
+    exit 65
+  fi
+fi
 
 if [[ "${BUILD_CONFIGURATION}" == "Release" \
       && "${BUILD_ARCHITECTURES}" == *arm64* \

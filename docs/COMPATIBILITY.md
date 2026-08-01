@@ -138,7 +138,7 @@ Signing identities installed: none
 | Developer ID, Hardened Runtime, timestamp, Gatekeeper, and same-team policy | Automated | Stager policy tests use controlled signature identities; both the running and candidate apps must pass, so an ad-hoc current app is rejected by design |
 | Explicit one-executable installation plan | Automated | Stager/controller tests require fresh confirmation and revalidation before launching the verified candidate in installer mode |
 | Automatic checks off without feed, key, and opt-in | Automated | Disabled-path tests |
-| Manual check, opt-in startup check, and newer-version UI state | Automated | App update-controller tests use controlled checker results |
+| Manual check, opt-in daily background check, relaunch recheck, and newer-version UI state | Automated | App update-controller tests use controlled checker results, persisted scheduling hints, and a deterministic scheduler |
 | Minimum-system-version validation and gating | Automated | Checker rejects malformed versions; controller and stager tests reject a signed release requiring a newer macOS version |
 | Production feed, embedded public key, and expected Team ID | Pending | No production update configuration exists |
 | Staging a real notarized release from a Developer ID build | Pending | Requires a production-signed current app, a same-team notarized candidate, configured feed/key/Team ID, and a live Gatekeeper check |

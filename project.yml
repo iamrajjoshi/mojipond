@@ -45,6 +45,10 @@ targets:
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: "-"
         DEVELOPMENT_TEAM: ""
+        MOJIPOND_UPDATE_FEED_URL: ""
+        MOJIPOND_UPDATE_SIGNATURE_ALGORITHM: ""
+        MOJIPOND_UPDATE_PUBLIC_KEY_BASE64: ""
+        MOJIPOND_UPDATE_TEAM_IDENTIFIER: ""
     scheme:
       gatherCoverageData: true
       testTargets:

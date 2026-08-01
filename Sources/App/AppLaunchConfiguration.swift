@@ -23,12 +23,19 @@ struct AppLaunchConfiguration: Equatable {
         case dark
     }
 
+    enum UITestUpdateScenario: String {
+        case unconfigured
+        case configured
+    }
+
     static let uiTestingFlag = "--mojipond-ui-testing"
     static let uiTestScreenArgument = "--mojipond-ui-test-screen"
     static let uiTestPermissionArgument =
         "--mojipond-ui-test-permissions"
     static let uiTestAppearanceArgument =
         "--mojipond-ui-test-appearance"
+    static let uiTestUpdatesArgument =
+        "--mojipond-ui-test-updates"
     static let openLibraryArgument = "--mojipond-open-library"
 
     enum InitialPresentation: Equatable {
@@ -41,6 +48,7 @@ struct AppLaunchConfiguration: Equatable {
     let initialScreen: InitialScreen?
     let uiTestPermissionScenario: UITestPermissionScenario
     let uiTestAppearance: UITestAppearance?
+    let uiTestUpdateScenario: UITestUpdateScenario
     let ephemeralRootURL: URL?
     let opensLibraryAtLaunch: Bool
 
@@ -63,6 +71,7 @@ struct AppLaunchConfiguration: Equatable {
                 initialScreen: nil,
                 uiTestPermissionScenario: .notRequested,
                 uiTestAppearance: nil,
+                uiTestUpdateScenario: .unconfigured,
                 ephemeralRootURL: nil,
                 opensLibraryAtLaunch:
                     arguments.contains(openLibraryArgument)
@@ -85,6 +94,11 @@ struct AppLaunchConfiguration: Equatable {
             in: arguments
         ).flatMap(UITestAppearance.init)
             ?? .light
+        let updateScenario = value(
+            following: uiTestUpdatesArgument,
+            in: arguments
+        ).flatMap(UITestUpdateScenario.init)
+            ?? .unconfigured
         let ephemeralRootURL = temporaryDirectory
             .appendingPathComponent(
                 "MojiPond-UI-Tests-\(processIdentifier)",
@@ -96,6 +110,7 @@ struct AppLaunchConfiguration: Equatable {
             initialScreen: initialScreen,
             uiTestPermissionScenario: permissionScenario,
             uiTestAppearance: appearance,
+            uiTestUpdateScenario: updateScenario,
             ephemeralRootURL: ephemeralRootURL,
             opensLibraryAtLaunch: initialScreen == .library
         )
@@ -129,9 +144,30 @@ struct AppLaunchConfiguration: Equatable {
                 scenario: uiTestPermissionScenario
             )
         )
+        let updates: AppUpdateController
+        switch uiTestUpdateScenario {
+        case .unconfigured:
+            updates = AppUpdateController()
+        case .configured:
+            updates = AppUpdateController(
+                configuration: SignedUpdateConfiguration(
+                    feedURL: URL(
+                        string: "https://updates.example.invalid/feed.json"
+                    ),
+                    publicKey: .ed25519(
+                        rawRepresentation: Data(repeating: 0, count: 32)
+                    )
+                ),
+                checkerFactory: { _ in UITestUpdateChecker() },
+                checkHistoryStore: UITestUpdateCheckHistoryStore(),
+                automaticCheckScheduler:
+                    UITestAutomaticUpdateCheckScheduler()
+            )
+        }
         return AppState(
             permissions: permissions,
             preferencesStore: UITestPreferencesStore(),
+            updates: updates,
             initialOnboardingCompletion:
                 initialScreen != .onboarding,
             launchAtLoginController:
@@ -223,4 +259,36 @@ private struct UITestPreferencesStore: PreferencesPersisting {
     }
 
     func save(_ preferences: MojiPondPreferences) {}
+}
+
+private struct UITestUpdateChecker: SignedUpdateChecking {
+    func check(
+        for kind: UpdateCheckKind
+    ) async throws -> SignedUpdateCheckResult {
+        _ = kind
+        throw SignedUpdateCheckError.transportFailure
+    }
+}
+
+private final class UITestUpdateCheckHistoryStore:
+    UpdateCheckHistoryStoring
+{
+    var lastAutomaticCheckDate: Date?
+    var lastSuccessfulAutomaticCheckOutcome:
+        SuccessfulUpdateCheckOutcome?
+}
+
+@MainActor
+private final class UITestAutomaticUpdateCheckScheduler:
+    AutomaticUpdateCheckScheduling
+{
+    func schedule(
+        after delay: TimeInterval,
+        action: @escaping @MainActor @Sendable () -> Void
+    ) {
+        _ = delay
+        _ = action
+    }
+
+    func cancel() {}
 }

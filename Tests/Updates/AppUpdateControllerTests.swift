@@ -112,6 +112,422 @@ final class AppUpdateControllerTests: XCTestCase {
         XCTAssertEqual(controller.state, .idle)
     }
 
+    func testAutomaticChecksRunImmediatelyAndRepeatDaily()
+        async throws
+    {
+        let fixture = try await makeVerifiedUpdateFixture()
+        let firstChecker = ImmediateUpdateChecker(
+            result: .verified(fixture.metadata)
+        )
+        let secondChecker = ImmediateUpdateChecker(
+            result: .verified(fixture.metadata)
+        )
+        let checkerSequence = UpdateCheckerSequence([
+            firstChecker,
+            secondChecker,
+        ])
+        let now = MutableUpdateCheckDate(
+            Date(timeIntervalSince1970: 1_900_000_000)
+        )
+        let history = InMemoryUpdateCheckHistoryStore()
+        let scheduler = ManualAutomaticUpdateCheckScheduler()
+        let controller = AppUpdateController(
+            configuration: fixture.configuration,
+            currentVersion: "0.2.0",
+            currentBuild: 2,
+            checkerFactory: { _ in checkerSequence.next() },
+            currentDate: { now.value },
+            checkHistoryStore: history,
+            automaticCheckScheduler: scheduler
+        )
+
+        controller.start(automaticChecksEnabled: true)
+
+        XCTAssertEqual(controller.state, .checking)
+        XCTAssertEqual(history.lastAutomaticCheckDate, now.value)
+        XCTAssertEqual(
+            try XCTUnwrap(scheduler.scheduledDelay),
+            AppUpdateController.defaultAutomaticCheckInterval,
+            accuracy: 0.001
+        )
+        await waitForCheckToFinish(controller)
+        XCTAssertEqual(
+            controller.state,
+            .current(version: "0.2.0")
+        )
+        XCTAssertEqual(
+            history.lastSuccessfulAutomaticCheckOutcome,
+            .noActionableUpdate
+        )
+
+        now.value = now.value.addingTimeInterval(
+            AppUpdateController.defaultAutomaticCheckInterval
+        )
+        scheduler.fire()
+
+        XCTAssertEqual(controller.state, .checking)
+        XCTAssertEqual(history.lastAutomaticCheckDate, now.value)
+        await waitForCheckToFinish(controller)
+        XCTAssertEqual(
+            controller.state,
+            .current(version: "0.2.0")
+        )
+    }
+
+    func testRecentCurrentCheckWaitsOnlyForRemainingInterval()
+        async throws
+    {
+        let fixture = try await makeVerifiedUpdateFixture()
+        let checkerSequence = UpdateCheckerSequence([
+            ImmediateUpdateChecker(
+                result: .verified(fixture.metadata)
+            ),
+        ])
+        let hour: TimeInterval = 60 * 60
+        let now = MutableUpdateCheckDate(
+            Date(timeIntervalSince1970: 1_900_000_000)
+        )
+        let history = InMemoryUpdateCheckHistoryStore()
+        history.lastAutomaticCheckDate = now.value
+            .addingTimeInterval(-hour)
+        history.lastSuccessfulAutomaticCheckOutcome = .noActionableUpdate
+        let scheduler = ManualAutomaticUpdateCheckScheduler()
+        let controller = AppUpdateController(
+            configuration: fixture.configuration,
+            currentVersion: "0.2.0",
+            currentBuild: 2,
+            checkerFactory: { _ in checkerSequence.next() },
+            currentDate: { now.value },
+            checkHistoryStore: history,
+            automaticCheckScheduler: scheduler
+        )
+
+        controller.start(automaticChecksEnabled: true)
+
+        XCTAssertEqual(controller.state, .idle)
+        XCTAssertEqual(
+            try XCTUnwrap(scheduler.scheduledDelay),
+            AppUpdateController.defaultAutomaticCheckInterval - hour,
+            accuracy: 0.001
+        )
+
+        now.value = try XCTUnwrap(history.lastAutomaticCheckDate)
+            .addingTimeInterval(
+                AppUpdateController.defaultAutomaticCheckInterval
+            )
+        scheduler.fire()
+
+        XCTAssertEqual(controller.state, .checking)
+        XCTAssertEqual(history.lastAutomaticCheckDate, now.value)
+        await waitForCheckToFinish(controller)
+        XCTAssertEqual(
+            controller.state,
+            .current(version: "0.2.0")
+        )
+    }
+
+    func testRecentAvailableOutcomeRechecksOnLaunch()
+        async throws
+    {
+        let fixture = try await makeVerifiedUpdateFixture()
+        let now = Date(timeIntervalSince1970: 1_900_000_000)
+        let history = InMemoryUpdateCheckHistoryStore()
+        history.lastAutomaticCheckDate = now.addingTimeInterval(-60 * 60)
+        history.lastSuccessfulAutomaticCheckOutcome = .updateAvailable
+        let checker = SuspendedUpdateChecker()
+        let scheduler = ManualAutomaticUpdateCheckScheduler()
+        let controller = AppUpdateController(
+            configuration: fixture.configuration,
+            currentVersion: "0.1.0",
+            currentBuild: 1,
+            checkerFactory: { _ in checker },
+            currentDate: { now },
+            checkHistoryStore: history,
+            automaticCheckScheduler: scheduler
+        )
+
+        controller.start(automaticChecksEnabled: true)
+        await checker.waitUntilStarted()
+
+        XCTAssertEqual(controller.state, .checking)
+        XCTAssertEqual(history.lastAutomaticCheckDate, now)
+        await checker.finish(with: .verified(fixture.metadata))
+        await waitForCheckToFinish(controller)
+
+        XCTAssertEqual(
+            controller.state,
+            .available(fixture.metadata)
+        )
+        XCTAssertEqual(
+            history.lastSuccessfulAutomaticCheckOutcome,
+            .updateAvailable
+        )
+    }
+
+    func testRecentIncompatibleOutcomeWaitsForRemainingInterval()
+        async throws
+    {
+        let fixture = try await makeVerifiedUpdateFixture(
+            minimumSystemVersion: "15.1"
+        )
+        let hour: TimeInterval = 60 * 60
+        let now = MutableUpdateCheckDate(
+            Date(timeIntervalSince1970: 1_900_000_000)
+        )
+        let history = InMemoryUpdateCheckHistoryStore()
+        let firstScheduler = ManualAutomaticUpdateCheckScheduler()
+        let firstController = AppUpdateController(
+            configuration: fixture.configuration,
+            currentVersion: "0.1.0",
+            currentBuild: 1,
+            currentSystemVersion: try XCTUnwrap(
+                UpdateSystemVersion("15.0")
+            ),
+            checkerFactory: { _ in
+                ImmediateUpdateChecker(
+                    result: .verified(fixture.metadata)
+                )
+            },
+            currentDate: { now.value },
+            checkHistoryStore: history,
+            automaticCheckScheduler: firstScheduler
+        )
+
+        firstController.start(automaticChecksEnabled: true)
+        await waitForCheckToFinish(firstController)
+
+        XCTAssertEqual(
+            firstController.state,
+            .incompatible(
+                metadata: fixture.metadata,
+                requiredSystemVersion: "15.1"
+            )
+        )
+        XCTAssertEqual(
+            history.lastSuccessfulAutomaticCheckOutcome,
+            .noActionableUpdate
+        )
+
+        now.value = now.value.addingTimeInterval(hour)
+        let relaunchScheduler = ManualAutomaticUpdateCheckScheduler()
+        let relaunchedController = AppUpdateController(
+            configuration: fixture.configuration,
+            currentVersion: "0.1.0",
+            currentBuild: 1,
+            currentSystemVersion: try XCTUnwrap(
+                UpdateSystemVersion("15.0")
+            ),
+            checkerFactory: { _ in
+                XCTFail("A recent incompatible result should not recheck")
+                return ImmediateUpdateChecker(
+                    result: .verified(fixture.metadata)
+                )
+            },
+            currentDate: { now.value },
+            checkHistoryStore: history,
+            automaticCheckScheduler: relaunchScheduler
+        )
+
+        relaunchedController.start(automaticChecksEnabled: true)
+
+        XCTAssertEqual(relaunchedController.state, .idle)
+        XCTAssertEqual(
+            try XCTUnwrap(relaunchScheduler.scheduledDelay),
+            AppUpdateController.defaultAutomaticCheckInterval - hour,
+            accuracy: 0.001
+        )
+    }
+
+    func testTurningOffAutomaticChecksCancelsTimerAndActiveCheck()
+        async throws
+    {
+        let fixture = try await makeVerifiedUpdateFixture()
+        let checker = SuspendedUpdateChecker()
+        let scheduler = ManualAutomaticUpdateCheckScheduler()
+        let controller = AppUpdateController(
+            configuration: fixture.configuration,
+            checkerFactory: { _ in checker },
+            checkHistoryStore: InMemoryUpdateCheckHistoryStore(),
+            automaticCheckScheduler: scheduler
+        )
+
+        controller.start(automaticChecksEnabled: true)
+        await checker.waitUntilStarted()
+        XCTAssertTrue(scheduler.hasScheduledAction)
+
+        controller.automaticChecksPreferenceDidChange(enabled: false)
+
+        XCTAssertEqual(controller.state, .idle)
+        XCTAssertFalse(scheduler.hasScheduledAction)
+    }
+
+    func testCancelCurrentOperationKeepsAutomaticSchedule()
+        async throws
+    {
+        let fixture = try await makeVerifiedUpdateFixture()
+        let checker = SuspendedUpdateChecker()
+        let scheduler = ManualAutomaticUpdateCheckScheduler()
+        let controller = AppUpdateController(
+            configuration: fixture.configuration,
+            checkerFactory: { _ in checker },
+            checkHistoryStore: InMemoryUpdateCheckHistoryStore(),
+            automaticCheckScheduler: scheduler
+        )
+
+        controller.start(automaticChecksEnabled: true)
+        await checker.waitUntilStarted()
+
+        controller.cancelCurrentOperation()
+
+        XCTAssertEqual(controller.state, .idle)
+        XCTAssertTrue(scheduler.hasScheduledAction)
+        controller.automaticChecksPreferenceDidChange(enabled: false)
+    }
+
+    func testScheduledCheckRefreshesAnAvailableUpdate()
+        async throws
+    {
+        let firstFixture = try await makeVerifiedUpdateFixture()
+        let newerFixture = try await makeVerifiedUpdateFixture(
+            version: "0.3.0",
+            build: 3
+        )
+        let checkerSequence = UpdateCheckerSequence([
+            ImmediateUpdateChecker(
+                result: .verified(firstFixture.metadata)
+            ),
+            ImmediateUpdateChecker(
+                result: .verified(newerFixture.metadata)
+            ),
+        ])
+        let now = MutableUpdateCheckDate(
+            Date(timeIntervalSince1970: 1_900_000_000)
+        )
+        let scheduler = ManualAutomaticUpdateCheckScheduler()
+        let controller = AppUpdateController(
+            configuration: firstFixture.configuration,
+            currentVersion: "0.1.0",
+            currentBuild: 1,
+            checkerFactory: { _ in checkerSequence.next() },
+            currentDate: { now.value },
+            checkHistoryStore: InMemoryUpdateCheckHistoryStore(),
+            automaticCheckScheduler: scheduler
+        )
+
+        controller.start(automaticChecksEnabled: true)
+        await waitForCheckToFinish(controller)
+        XCTAssertEqual(
+            controller.state,
+            .available(firstFixture.metadata)
+        )
+
+        now.value = now.value.addingTimeInterval(
+            AppUpdateController.defaultAutomaticCheckInterval
+        )
+        scheduler.fire()
+
+        XCTAssertEqual(controller.state, .checking)
+        await waitForCheckToFinish(controller)
+        XCTAssertEqual(
+            controller.state,
+            .available(newerFixture.metadata)
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(scheduler.scheduledDelay),
+            AppUpdateController.defaultAutomaticCheckInterval,
+            accuracy: 0.001
+        )
+    }
+
+    func testTurningOffDuringScheduledRefreshKeepsVerifiedUpdate()
+        async throws
+    {
+        let fixture = try await makeVerifiedUpdateFixture()
+        let refreshChecker = SuspendedUpdateChecker()
+        let checkerSequence = UpdateCheckerSequence([
+            ImmediateUpdateChecker(
+                result: .verified(fixture.metadata)
+            ),
+            refreshChecker,
+        ])
+        let scheduler = ManualAutomaticUpdateCheckScheduler()
+        let controller = AppUpdateController(
+            configuration: fixture.configuration,
+            currentVersion: "0.1.0",
+            currentBuild: 1,
+            checkerFactory: { _ in checkerSequence.next() },
+            checkHistoryStore: InMemoryUpdateCheckHistoryStore(),
+            automaticCheckScheduler: scheduler
+        )
+
+        controller.start(automaticChecksEnabled: true)
+        await waitForCheckToFinish(controller)
+        XCTAssertEqual(
+            controller.state,
+            .available(fixture.metadata)
+        )
+
+        scheduler.fire()
+        await refreshChecker.waitUntilStarted()
+        XCTAssertEqual(controller.state, .checking)
+
+        controller.automaticChecksPreferenceDidChange(enabled: false)
+
+        XCTAssertEqual(
+            controller.state,
+            .available(fixture.metadata)
+        )
+        XCTAssertFalse(scheduler.hasScheduledAction)
+    }
+
+    func testFailedScheduledRefreshKeepsLastVerifiedUpdate()
+        async throws
+    {
+        let fixture = try await makeVerifiedUpdateFixture()
+        let checkerSequence = UpdateCheckerSequence([
+            ImmediateUpdateChecker(
+                result: .verified(fixture.metadata)
+            ),
+            FailingUpdateChecker(error: .transportFailure),
+        ])
+        let now = MutableUpdateCheckDate(
+            Date(timeIntervalSince1970: 1_900_000_000)
+        )
+        let history = InMemoryUpdateCheckHistoryStore()
+        let scheduler = ManualAutomaticUpdateCheckScheduler()
+        let controller = AppUpdateController(
+            configuration: fixture.configuration,
+            currentVersion: "0.1.0",
+            currentBuild: 1,
+            checkerFactory: { _ in checkerSequence.next() },
+            currentDate: { now.value },
+            checkHistoryStore: history,
+            automaticCheckScheduler: scheduler
+        )
+
+        controller.start(automaticChecksEnabled: true)
+        await waitForCheckToFinish(controller)
+        XCTAssertEqual(
+            controller.state,
+            .available(fixture.metadata)
+        )
+
+        now.value = now.value.addingTimeInterval(
+            AppUpdateController.defaultAutomaticCheckInterval
+        )
+        scheduler.fire()
+        await waitForCheckToFinish(controller)
+
+        XCTAssertEqual(
+            controller.state,
+            .available(fixture.metadata)
+        )
+        XCTAssertEqual(
+            history.lastSuccessfulAutomaticCheckOutcome,
+            .updateAvailable
+        )
+    }
+
     func testVerificationFailureSurfacesWithoutFeedContents() async {
         let configuration = SignedUpdateConfiguration(
             feedURL: URL(
@@ -230,7 +646,7 @@ final class AppUpdateControllerTests: XCTestCase {
 
         XCTAssertEqual(controller.state, .checking)
 
-        controller.cancel()
+        controller.cancelCurrentOperation()
         XCTAssertEqual(controller.state, .idle)
         await secondChecker.finish(with: .verified(fixture.metadata))
         await secondChecker.waitUntilReturned()
@@ -392,7 +808,7 @@ final class AppUpdateControllerTests: XCTestCase {
                 await waitForCheckToFinish(controller)
                 expectedState = .available(fixture.metadata)
             } else {
-                controller.cancel()
+                controller.cancelCurrentOperation()
                 expectedState = .idle
             }
             XCTAssertEqual(
@@ -552,7 +968,9 @@ final class AppUpdateControllerTests: XCTestCase {
     }
 
     private func makeVerifiedUpdateFixture(
-        minimumSystemVersion: String? = "14.0"
+        minimumSystemVersion: String? = "14.0",
+        version: String = "0.2.0",
+        build: Int = 2
     ) async throws -> (
         configuration: SignedUpdateConfiguration,
         metadata: VerifiedUpdateMetadata
@@ -563,8 +981,8 @@ final class AppUpdateControllerTests: XCTestCase {
         let privateKey = Curve25519.Signing.PrivateKey()
         let payload = UpdateControllerPayloadFixture(
             schemaVersion: 1,
-            version: "0.2.0",
-            build: 2,
+            version: version,
+            build: build,
             publishedAt: Date(timeIntervalSince1970: 1_800_000_000),
             minimumSystemVersion: minimumSystemVersion,
             downloadURL: try XCTUnwrap(
@@ -684,6 +1102,54 @@ private final class UpdateCheckerSequence: @unchecked Sendable {
             }
             return checkers[index]
         }
+    }
+}
+
+private final class MutableUpdateCheckDate {
+    var value: Date
+
+    init(_ value: Date) {
+        self.value = value
+    }
+}
+
+private final class InMemoryUpdateCheckHistoryStore:
+    UpdateCheckHistoryStoring
+{
+    var lastAutomaticCheckDate: Date?
+    var lastSuccessfulAutomaticCheckOutcome:
+        SuccessfulUpdateCheckOutcome?
+}
+
+@MainActor
+private final class ManualAutomaticUpdateCheckScheduler:
+    AutomaticUpdateCheckScheduling
+{
+    private var action: (@MainActor @Sendable () -> Void)?
+    private(set) var scheduledDelay: TimeInterval?
+
+    var hasScheduledAction: Bool {
+        action != nil
+    }
+
+    func schedule(
+        after delay: TimeInterval,
+        action: @escaping @MainActor @Sendable () -> Void
+    ) {
+        scheduledDelay = delay
+        self.action = action
+    }
+
+    func cancel() {
+        scheduledDelay = nil
+        action = nil
+    }
+
+    func fire() {
+        let scheduledAction = action
+        action = nil
+        scheduledDelay = nil
+        scheduledAction?()
     }
 }
 

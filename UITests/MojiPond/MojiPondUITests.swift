@@ -252,7 +252,7 @@ final class MojiPondUITests: XCTestCase {
         let settingsWindow = application.windows["MojiPond Settings"]
         XCTAssertTrue(settingsWindow.waitForExistence(timeout: 5))
         XCTAssertFalse(
-            application.switches["Check for signed updates"].exists
+            application.checkBoxes["Keep MojiPond up to date"].exists
         )
 
         application.descendants(matching: .any)["Privacy"].click()
@@ -315,6 +315,41 @@ final class MojiPondUITests: XCTestCase {
             application.windows[
                 "MojiPond Library"
             ].waitForExistence(timeout: 5)
+        )
+    }
+
+    func testConfiguredUpdatesExposeKeepUpToDatePreference() {
+        continueAfterFailure = false
+        let application = launch(
+            initialScreen: "settings",
+            appearance: .light,
+            updateScenario: .configured
+        )
+        defer {
+            application.terminate()
+        }
+
+        XCTAssertTrue(
+            application.windows["MojiPond Settings"]
+                .waitForExistence(timeout: 5)
+        )
+        let updateToggle = application.checkBoxes[
+            "Keep MojiPond up to date"
+        ]
+        XCTAssertTrue(updateToggle.waitForExistence(timeout: 2))
+        XCTAssertTrue(
+            application.staticTexts[
+                "Checks quietly each day and shows Update in the menu bar. "
+                    + "You choose when to download and install."
+            ].exists
+        )
+        XCTAssertTrue(application.menuItems["Check for Updates…"].exists)
+
+        let initialValue = String(describing: updateToggle.value)
+        updateToggle.click()
+        XCTAssertNotEqual(
+            String(describing: updateToggle.value),
+            initialValue
         )
     }
 
@@ -619,7 +654,8 @@ final class MojiPondUITests: XCTestCase {
         initialScreen: String,
         appearance: AppUITestAppearance,
         permissionScenario:
-            AppUITestPermissionScenario = .notRequested
+            AppUITestPermissionScenario = .notRequested,
+        updateScenario: AppUITestUpdateScenario = .unconfigured
     ) -> XCUIApplication {
         let application = XCUIApplication()
         application.launchArguments = [
@@ -631,7 +667,9 @@ final class MojiPondUITests: XCTestCase {
             AppUITestArgument.permissionScenario,
             permissionScenario.rawValue,
             AppUITestArgument.appearance,
-            appearance.rawValue
+            appearance.rawValue,
+            AppUITestArgument.updateScenario,
+            updateScenario.rawValue
         ]
         application.launch()
         return application
@@ -660,6 +698,8 @@ private enum AppUITestArgument {
         "--mojipond-ui-test-permissions"
     static let appearance =
         "--mojipond-ui-test-appearance"
+    static let updateScenario =
+        "--mojipond-ui-test-updates"
 }
 
 private enum AppUITestAppearance: String {
@@ -673,4 +713,9 @@ private enum AppUITestPermissionScenario: String {
     case granted
     case grantOnRequest = "grant-on-request"
     case revoked
+}
+
+private enum AppUITestUpdateScenario: String {
+    case unconfigured
+    case configured
 }

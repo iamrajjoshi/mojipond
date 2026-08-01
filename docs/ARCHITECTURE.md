@@ -249,7 +249,11 @@ engine permission to run.
 
 Update checking requires both an HTTPS feed and a bundled trusted public key.
 Manual checks are available from the status menu and About settings;
-automatic checking runs at startup only after the user enables its preference.
+automatic checking runs daily after the user enables its preference. The last
+attempt and a non-trusted successful-outcome hint are persisted. A recent
+result with no actionable update waits for the remaining interval; a previously
+available update is freshly checked on launch. The hint never supplies metadata
+or authorizes a download.
 The checker limits the feed to 1 MiB by default and verifies its Ed25519 or
 P-256 signature before decoding the release metadata.
 

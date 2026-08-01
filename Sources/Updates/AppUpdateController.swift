@@ -112,6 +112,8 @@ struct BundledUpdateConfigurationLoader {
 final class AppUpdateController: ObservableObject {
     private typealias OperationID = UInt64
 
+    static let defaultAutomaticCheckInterval: TimeInterval = 24 * 60 * 60
+
     typealias CheckerFactory = @Sendable (
         SignedUpdateConfiguration
     ) -> any SignedUpdateChecking
@@ -131,6 +133,11 @@ final class AppUpdateController: ObservableObject {
     private let stagerFactory: StagerFactory
     private let nativeInstallerLauncher:
         any NativeUpdateInstallerLaunching
+    private let automaticCheckInterval: TimeInterval
+    private let currentDate: () -> Date
+    private let checkHistoryStore: any UpdateCheckHistoryStoring
+    private let automaticCheckScheduler:
+        any AutomaticUpdateCheckScheduling
     private var checkTask: Task<Void, Never>?
     private var activeCheckKind: UpdateCheckKind?
     private var activeCheckOperationID: OperationID?
@@ -145,6 +152,7 @@ final class AppUpdateController: ObservableObject {
     private var lastAvailableMetadata: VerifiedUpdateMetadata?
     private var lastOperationID: OperationID = 0
     private var installerHandoffCompleted = false
+    private var automaticChecksEnabled = false
 
     init(
         configuration: SignedUpdateConfiguration =
@@ -172,8 +180,20 @@ final class AppUpdateController: ObservableObject {
         },
         nativeInstallerLauncher:
             any NativeUpdateInstallerLaunching =
-                SystemNativeUpdateInstallerLauncher()
+                SystemNativeUpdateInstallerLauncher(),
+        automaticCheckInterval: TimeInterval =
+            AppUpdateController.defaultAutomaticCheckInterval,
+        currentDate: @escaping () -> Date = Date.init,
+        checkHistoryStore: any UpdateCheckHistoryStoring =
+            UserDefaultsUpdateCheckHistoryStore(),
+        automaticCheckScheduler:
+            any AutomaticUpdateCheckScheduling =
+                TaskAutomaticUpdateCheckScheduler()
     ) {
+        precondition(
+            automaticCheckInterval.isFinite
+                && automaticCheckInterval > 0
+        )
         baseConfiguration = configuration
         self.expectedTeamIdentifier = expectedTeamIdentifier
         self.currentVersion = currentVersion
@@ -182,6 +202,10 @@ final class AppUpdateController: ObservableObject {
         self.checkerFactory = checkerFactory
         self.stagerFactory = stagerFactory
         self.nativeInstallerLauncher = nativeInstallerLauncher
+        self.automaticCheckInterval = automaticCheckInterval
+        self.currentDate = currentDate
+        self.checkHistoryStore = checkHistoryStore
+        self.automaticCheckScheduler = automaticCheckScheduler
         installationStatusMessage = nil
         state = configuration.feedURL == nil || configuration.publicKey == nil
             ? .unconfigured
@@ -259,31 +283,44 @@ final class AppUpdateController: ObservableObject {
     }
 
     func start(automaticChecksEnabled: Bool) {
-        guard automaticChecksEnabled else {
-            return
-        }
-        check(
-            kind: .automatic,
-            automaticChecksEnabled: automaticChecksEnabled
+        configureAutomaticChecks(
+            enabled: automaticChecksEnabled
         )
     }
 
     func automaticChecksPreferenceDidChange(enabled: Bool) {
-        if enabled {
-            check(
-                kind: .automatic,
-                automaticChecksEnabled: true
-            )
+        configureAutomaticChecks(enabled: enabled)
+    }
+
+    private func configureAutomaticChecks(enabled: Bool) {
+        automaticChecksEnabled = enabled
+        automaticCheckScheduler.cancel()
+
+        guard enabled else {
+            guard activeCheckKind == .automatic else {
+                return
+            }
+            cancelCheckOperation()
+            restoreAvailableOrIdleState()
             return
         }
-        guard activeCheckKind == .automatic else {
+
+        guard canCheckForUpdates else {
             return
         }
-        cancelCheckOperation()
-        state = canCheckForUpdates ? .idle : .unconfigured
+        checkAutomaticallyIfDue()
     }
 
     func checkManually(automaticChecksEnabled: Bool) {
+        self.automaticChecksEnabled = automaticChecksEnabled
+        if automaticChecksEnabled, canCheckForUpdates {
+            recordAutomaticCheck(at: currentDate())
+            scheduleAutomaticCheck(
+                after: automaticCheckInterval
+            )
+        } else {
+            automaticCheckScheduler.cancel()
+        }
         check(
             kind: .manual,
             automaticChecksEnabled: automaticChecksEnabled
@@ -490,7 +527,9 @@ final class AppUpdateController: ObservableObject {
         }
     }
 
-    func cancel() {
+    /// Cancels the active update operation without changing the user's
+    /// background-check preference or its next scheduled check.
+    func cancelCurrentOperation() {
         cancelCheckOperation()
         cancelStagingOperation()
         cancelRevalidationOperation()
@@ -503,6 +542,7 @@ final class AppUpdateController: ObservableObject {
     /// launched owns a persistent staging handoff; an ordinary quit removes a
     /// merely staged download.
     func prepareForTermination() {
+        automaticCheckScheduler.cancel()
         cancelCheckOperation()
         cancelStagingOperation()
         cancelRevalidationOperation()
@@ -519,6 +559,78 @@ final class AppUpdateController: ObservableObject {
     var canCheckForUpdates: Bool {
         baseConfiguration.feedURL != nil
             && baseConfiguration.publicKey != nil
+    }
+
+    private func checkAutomaticallyIfDue() {
+        let now = currentDate()
+        guard checkHistoryStore.lastSuccessfulAutomaticCheckOutcome
+            == .noActionableUpdate else {
+            performAutomaticCheck(at: now)
+            return
+        }
+        guard let lastCheckDate =
+            checkHistoryStore.lastAutomaticCheckDate else {
+            performAutomaticCheck(at: now)
+            return
+        }
+
+        let elapsed = max(
+            0,
+            now.timeIntervalSince(lastCheckDate)
+        )
+        let remaining = max(
+            0,
+            automaticCheckInterval - elapsed
+        )
+        if remaining > 0 {
+            scheduleAutomaticCheck(after: remaining)
+        } else {
+            performAutomaticCheck(at: now)
+        }
+    }
+
+    private func performAutomaticCheck(at date: Date) {
+        guard automaticChecksEnabled, canCheckForUpdates else {
+            return
+        }
+
+        guard !isBusy, !hasStagedUpdate else {
+            scheduleAutomaticCheck(
+                after: automaticCheckInterval
+            )
+            return
+        }
+
+        recordAutomaticCheck(at: date)
+        check(
+            kind: .automatic,
+            automaticChecksEnabled: true
+        )
+        scheduleAutomaticCheck(after: automaticCheckInterval)
+    }
+
+    private func recordAutomaticCheck(at date: Date) {
+        checkHistoryStore.lastAutomaticCheckDate = date
+    }
+
+    private func scheduleAutomaticCheck(after delay: TimeInterval) {
+        guard automaticChecksEnabled, canCheckForUpdates else {
+            return
+        }
+        automaticCheckScheduler.schedule(after: delay) {
+            [weak self] in
+            guard let self else {
+                return
+            }
+            self.performAutomaticCheck(at: self.currentDate())
+        }
+    }
+
+    private var hasStagedUpdate: Bool {
+        if case .staged = state {
+            return true
+        }
+        return false
     }
 
     private func makeOperationID() -> OperationID {
@@ -645,6 +757,14 @@ final class AppUpdateController: ObservableObject {
         kind: UpdateCheckKind,
         automaticChecksEnabled: Bool
     ) {
+        let verifiedFallback: VerifiedUpdateMetadata?
+        if kind == .automatic,
+           case let .available(metadata) = state {
+            verifiedFallback = metadata
+        } else {
+            verifiedFallback = nil
+        }
+
         cancelCheckOperation()
         cancelStagingOperation()
         cancelRevalidationOperation()
@@ -671,20 +791,32 @@ final class AppUpdateController: ObservableObject {
                 guard self.activeCheckOperationID == operationID else {
                     return
                 }
+                recordSuccessfulAutomaticCheckOutcome(
+                    from: result,
+                    whenEnabled: automaticChecksEnabled
+                )
                 apply(result)
             } catch is CancellationError {
                 guard self.activeCheckOperationID == operationID else {
                     return
                 }
-                state = canCheckForUpdates ? .idle : .unconfigured
+                if let verifiedFallback {
+                    state = .available(verifiedFallback)
+                } else {
+                    state = canCheckForUpdates ? .idle : .unconfigured
+                }
             } catch {
                 guard self.activeCheckOperationID == operationID else {
                     return
                 }
-                state = .failed(
-                    (error as? LocalizedError)?.errorDescription
-                        ?? "The update check failed."
-                )
+                if let verifiedFallback {
+                    state = .available(verifiedFallback)
+                } else {
+                    state = .failed(
+                        (error as? LocalizedError)?.errorDescription
+                            ?? "The update check failed."
+                    )
+                }
             }
         }
     }
@@ -716,6 +848,34 @@ final class AppUpdateController: ObservableObject {
         }
     }
 
+    private func recordSuccessfulAutomaticCheckOutcome(
+        from result: SignedUpdateCheckResult,
+        whenEnabled: Bool
+    ) {
+        guard whenEnabled, case let .verified(metadata) = result else {
+            return
+        }
+        checkHistoryStore.lastSuccessfulAutomaticCheckOutcome =
+            isActionableUpdate(metadata)
+                ? .updateAvailable
+                : .noActionableUpdate
+    }
+
+    private func isActionableUpdate(
+        _ metadata: VerifiedUpdateMetadata
+    ) -> Bool {
+        guard metadata.build > currentBuild else {
+            return false
+        }
+        guard
+            let minimum = metadata.minimumSystemVersion,
+            let required = UpdateSystemVersion(minimum)
+        else {
+            return true
+        }
+        return required <= currentSystemVersion
+    }
+
     private func discardStagedUpdateKeepingAvailability() {
         if let stagedUpdate, let activeStager {
             try? activeStager.discard(stagedUpdate)
@@ -724,6 +884,14 @@ final class AppUpdateController: ObservableObject {
         activeStager = nil
         activeStagerOperationID = nil
         installerHandoffCompleted = false
+    }
+
+    private func restoreAvailableOrIdleState() {
+        if let lastAvailableMetadata {
+            state = .available(lastAvailableMetadata)
+        } else {
+            state = canCheckForUpdates ? .idle : .unconfigured
+        }
     }
 
     private static func disabledSummary(

@@ -269,7 +269,10 @@ created because stapling and recompression both change release bytes.
 ## 8. Signed update metadata
 
 `AppUpdateController` wires manual checks from the status menu and About
-settings, plus one startup check when the user enables automatic checks.
+settings, plus a quiet daily background check when the user enables automatic
+checks. It persists the last attempt and only a scheduling hint about the last
+verified outcome. A known update is freshly authenticated on relaunch; no
+download metadata is restored from mutable preferences.
 `SignedUpdateChecker` authenticates the result before metadata reaches the UI.
 A verified newer build produces a quiet availability status and an optional
 release-notes link.
@@ -454,6 +457,40 @@ MojiPondUpdateFeedURL                 HTTPS feed URL
 MojiPondUpdateSignatureAlgorithm      ed25519 or p256-sha256
 MojiPondUpdatePublicKeyBase64         Base64 raw public-key representation
 MojiPondUpdateTeamIdentifier          10-character Apple Team ID
+```
+
+The project maps those keys to four user-defined build settings. Supply their
+public values to `scripts/build.sh` through the matching environment variables:
+
+```zsh
+export MOJIPOND_UPDATE_FEED_URL="https://updates.example.com/update-feed.json"
+export MOJIPOND_UPDATE_SIGNATURE_ALGORITHM="ed25519"
+export MOJIPOND_UPDATE_PUBLIC_KEY_BASE64="<Base64 raw public key>"
+export MOJIPOND_UPDATE_TEAM_IDENTIFIER="TEAMID1234"
+```
+
+Set all four or none. The build script rejects incomplete configuration,
+non-HTTPS or credential-bearing feed URLs, unsupported algorithms, malformed
+Base64 or wrong-length raw public keys, malformed Team IDs, and a Team ID that
+does not match the finished app's code signature. These four values are public
+trust configuration and may be retained with release records. The private
+update-signing key is separate and must never be passed to `scripts/build.sh`,
+added to `.env`, embedded in the app, or committed.
+
+Use the `TeamIdentifier=` value from `codesign --display --verbose=4` on the
+signed app. A parenthesized suffix in a certificate's display name is not an
+authoritative substitute.
+
+After archiving, confirm the resolved values in the exact release app before
+notarizing it:
+
+```zsh
+/usr/libexec/PlistBuddy \
+  -c "Print :MojiPondUpdateFeedURL" \
+  -c "Print :MojiPondUpdateSignatureAlgorithm" \
+  -c "Print :MojiPondUpdatePublicKeyBase64" \
+  -c "Print :MojiPondUpdateTeamIdentifier" \
+  "$APP_PATH/Contents/Info.plist"
 ```
 
 Before enabling production checks:
