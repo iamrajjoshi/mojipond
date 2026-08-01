@@ -1,53 +1,21 @@
----
-import BrandMark from "./BrandMark.astro";
----
-
 <footer class="site-footer">
-  <div class="footer-brand">
-    <BrandMark size={32} />
-    <div>
-      <strong>MojiPond</strong>
-      <span>Emoji shortcuts for macOS.</span>
-    </div>
-  </div>
+  <span>MojiPond · macOS 14 or newer</span>
   <nav aria-label="Footer navigation">
     <a href="/privacy/">Privacy</a>
-    <a href="/terms/">Terms</a>
-    <a href="/#faq">FAQ</a>
   </nav>
-  <p>Built for macOS 14 and newer.</p>
 </footer>
 
 <style>
   .site-footer {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 32px;
-    align-items: center;
-    width: var(--content-width);
-    margin: 0 auto;
-    padding: 48px 0;
-    color: var(--ink-muted);
-    font-size: 0.875rem;
-  }
-
-  .footer-brand {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-  }
-
-  .footer-brand div {
-    display: grid;
-  }
-
-  .footer-brand strong {
-    color: var(--ink);
-  }
-
-  nav {
     display: flex;
     gap: 24px;
+    align-items: center;
+    justify-content: space-between;
+    width: var(--content-width);
+    margin: 0 auto;
+    padding: 36px 0 44px;
+    color: var(--ink-muted);
+    font-size: 0.82rem;
   }
 
   a {
@@ -56,23 +24,14 @@ import BrandMark from "./BrandMark.astro";
   }
 
   a:hover {
-    color: var(--ink);
+    color: var(--teal);
   }
 
-  p {
-    grid-column: 1 / -1;
-    margin: 0;
-  }
-
-  @media (max-width: 640px) {
+  @media (max-width: 520px) {
     .site-footer {
-      grid-template-columns: 1fr;
-      gap: 24px;
-    }
-
-    nav {
-      flex-wrap: wrap;
-      gap: 16px 24px;
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 10px;
     }
   }
 </style>
