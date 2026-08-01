@@ -1,0 +1,16 @@
+{
+  "name": "mojipond-workspace",
+  "private": true,
+  "packageManager": "pnpm@10.25.0",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "site:build": "pnpm --filter @mojipond/site build",
+    "site:check": "pnpm --filter @mojipond/site check",
+    "site:dev": "pnpm --filter @mojipond/site dev",
+    "site:format": "pnpm --filter @mojipond/site format",
+    "site:format:check": "pnpm --filter @mojipond/site format:check",
+    "site:test": "pnpm --filter @mojipond/site test"
+  }
+}
