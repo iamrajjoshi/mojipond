@@ -334,18 +334,20 @@ struct SettingsRootView: View {
                 SettingsCard(title: "Updates") {
                     SettingsRow(
                         icon: "arrow.triangle.2.circlepath",
-                        title: "Check for signed updates",
+                        title: "Keep MojiPond up to date",
                         detail:
-                            "Ask before downloading or installing anything."
+                            "Checks quietly each day and shows Update in "
+                                + "the menu bar. You choose when to download "
+                                + "and install."
                     ) {
                         Toggle(
-                            "Check for signed updates",
+                            "Keep MojiPond up to date",
                             isOn: preference(
                                 \.network.allowsUpdateChecks
                             )
                         )
                         .labelsHidden()
-                        .accessibilityLabel("Check for signed updates")
+                        .accessibilityLabel("Keep MojiPond up to date")
                         .toggleStyle(.switch)
                         .tint(PondDesign.lily)
                     }

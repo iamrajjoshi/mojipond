@@ -243,9 +243,10 @@ transactionally.
 ## Signed updates
 
 Update checks remain disabled until the app bundles an HTTPS feed and trusted
-public key. A manual check, or an explicitly enabled startup check, verifies
-the signed metadata before showing a release. Downloading is a separate user
-action.
+public key. A manual check, or explicitly enabled background checks, verifies
+the signed metadata before showing a release. Background checks run daily; a
+previously detected release is checked again on launch before it is shown.
+Downloading is a separate user action.
 
 The downloader caps the ZIP at both its signed byte count and a local safety
 limit, verifies its SHA-256 digest, extracts exactly one `MojiPond.app` in a

@@ -553,7 +553,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case let .available(metadata):
             menu.addItem(
                 withTitle:
-                    "Download & Verify MojiPond \(metadata.version)…",
+                    "Update MojiPond to \(metadata.version)…",
                 action: #selector(downloadAndVerifyUpdate),
                 keyEquivalent: ""
             )

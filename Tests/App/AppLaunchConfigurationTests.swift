@@ -21,6 +21,10 @@ final class AppLaunchConfigurationTests: XCTestCase {
             .notRequested
         )
         XCTAssertNil(configuration.uiTestAppearance)
+        XCTAssertEqual(
+            configuration.uiTestUpdateScenario,
+            .unconfigured
+        )
         XCTAssertNil(configuration.ephemeralRootURL)
         XCTAssertEqual(
             configuration.initialPresentation(
@@ -47,6 +51,10 @@ final class AppLaunchConfigurationTests: XCTestCase {
             .notRequested
         )
         XCTAssertEqual(configuration.uiTestAppearance, .light)
+        XCTAssertEqual(
+            configuration.uiTestUpdateScenario,
+            .unconfigured
+        )
         XCTAssertEqual(
             configuration.ephemeralRootURL,
             URL(
@@ -90,7 +98,9 @@ final class AppLaunchConfigurationTests: XCTestCase {
                 AppLaunchConfiguration.uiTestPermissionArgument,
                 "revoked",
                 AppLaunchConfiguration.uiTestAppearanceArgument,
-                "dark"
+                "dark",
+                AppLaunchConfiguration.uiTestUpdatesArgument,
+                "configured"
             ],
             processIdentifier: 8,
             temporaryDirectory: URL(fileURLWithPath: "/private/tmp")
@@ -103,8 +113,13 @@ final class AppLaunchConfigurationTests: XCTestCase {
             .revoked
         )
         XCTAssertEqual(configuration.uiTestAppearance, .dark)
+        XCTAssertEqual(
+            configuration.uiTestUpdateScenario,
+            .configured
+        )
         let appState = configuration.makeAppState()
         XCTAssertFalse(appState.launchAtLoginEnabled)
+        XCTAssertTrue(appState.updates.canCheckForUpdates)
     }
 
     func testUITestLaunchFallsBackForUnknownScreenAndPermissionState() {
@@ -129,6 +144,10 @@ final class AppLaunchConfigurationTests: XCTestCase {
             .notRequested
         )
         XCTAssertEqual(configuration.uiTestAppearance, .light)
+        XCTAssertEqual(
+            configuration.uiTestUpdateScenario,
+            .unconfigured
+        )
     }
 
     func testCompletedProductionLaunchStaysInMenuBarByDefault() {

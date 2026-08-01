@@ -70,7 +70,10 @@ final class AppStateTests: XCTestCase {
             configuration: configuration,
             checkerFactory: { _ in
                 SuspendingAppStateUpdateChecker()
-            }
+            },
+            checkHistoryStore: AppStateUpdateCheckHistoryStore(),
+            automaticCheckScheduler:
+                AppStateAutomaticUpdateCheckScheduler()
         )
         let state = AppState(
             preferencesStore: PreferencesStoreSpy(initial: .defaults),
@@ -115,6 +118,29 @@ final class AppStateTests: XCTestCase {
             UsageRankingResetNotice.failure
         )
     }
+}
+
+private final class AppStateUpdateCheckHistoryStore:
+    UpdateCheckHistoryStoring
+{
+    var lastAutomaticCheckDate: Date?
+    var lastSuccessfulAutomaticCheckOutcome:
+        SuccessfulUpdateCheckOutcome?
+}
+
+@MainActor
+private final class AppStateAutomaticUpdateCheckScheduler:
+    AutomaticUpdateCheckScheduling
+{
+    func schedule(
+        after delay: TimeInterval,
+        action: @escaping @MainActor @Sendable () -> Void
+    ) {
+        _ = delay
+        _ = action
+    }
+
+    func cancel() {}
 }
 
 private struct SuspendingAppStateUpdateChecker: SignedUpdateChecking {
