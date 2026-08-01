@@ -12,21 +12,16 @@ import BaseLayout from "../layouts/BaseLayout.astro";
     <h1>That shortcut leads nowhere.</h1>
     <p>The page may have moved, or the address was typed wrong.</p>
     <a class="button primary" href="/">Back to MojiPond</a>
-    <div class="ripples" aria-hidden="true">
-      <span></span><span></span><span></span>
-    </div>
   </section>
 </BaseLayout>
 
 <style>
   .not-found {
-    position: relative;
     display: grid;
     min-height: 70vh;
     padding: 96px 20px;
     place-items: center;
     align-content: center;
-    overflow: hidden;
     text-align: center;
   }
 
@@ -38,29 +33,5 @@ import BaseLayout from "../layouts/BaseLayout.astro";
   p:not(.eyebrow) {
     margin-bottom: 28px;
     color: var(--ink-muted);
-  }
-
-  .ripples {
-    position: absolute;
-    right: -100px;
-    bottom: -120px;
-    z-index: -1;
-    width: 420px;
-    height: 280px;
-  }
-
-  .ripples span {
-    position: absolute;
-    inset: 0;
-    border: 1px solid var(--ripple);
-    border-radius: 50%;
-    opacity: 0.35;
-  }
-
-  .ripples span:nth-child(2) {
-    inset: 48px;
-  }
-  .ripples span:nth-child(3) {
-    inset: 96px;
   }
 </style>

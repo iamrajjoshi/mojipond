@@ -1,11 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
-import type { ReleaseManifest } from "../src/lib/releaseManifest";
-
-const availableRelease = {
-  version: "1.2.3",
-  asset: { byteCount: 10_485_760 },
-} satisfies ReleaseManifest;
 
 const expectNoHorizontalOverflow = async (page: Page) => {
   const dimensions = await page.evaluate(() => ({
@@ -17,68 +11,100 @@ const expectNoHorizontalOverflow = async (page: Page) => {
   );
 };
 
-const expectPreviewState = async (page: Page) => {
-  const downloadActions = page.locator("[data-release-download]");
-  await expect(downloadActions).toHaveCount(2);
-  await expect(downloadActions.nth(0)).toBeHidden();
-  await expect(downloadActions.nth(1)).toBeHidden();
-  await expect(page.locator("[data-release-detail]")).toHaveText([
-    "Public build pending Apple signing",
-    "Public build pending Apple signing",
-  ]);
-};
-
-test("home page explains the product without a false download", async ({
-  page,
-}) => {
+test("home page is a full-screen product landing page", async ({ page }) => {
   await page.goto("/");
 
   await expect(page).toHaveTitle(/MojiPond/);
   await expect(
     page.getByRole("heading", {
       level: 1,
-      name: /your emoji, one colon away/i,
+      name: /type :wave:.+get 👋/i,
     }),
   ).toBeVisible();
-  await expect(page.getByText("Native Mac app")).toBeVisible();
-  await expectPreviewState(page);
+  await expect(page.getByRole("link", { name: /try it/i })).toBeVisible();
+  await expect(page.getByText("Mac app in final testing.")).toHaveCount(0);
+  await expect(page.getByText(/Native macOS app/i)).toHaveCount(0);
+  await expect(page.getByText(/typing analytics/i)).toHaveCount(0);
+  await expect(page.getByText(/built-in Unicode catalog/i)).toHaveCount(0);
+
+  const heroBox = await page.locator(".hero").boundingBox();
+  const viewport = page.viewportSize();
+  expect(heroBox).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect(heroBox?.x).toBeLessThanOrEqual(1);
+  expect(heroBox?.width).toBeGreaterThanOrEqual((viewport?.width ?? 0) - 1);
+  expect(heroBox?.height).toBeGreaterThanOrEqual((viewport?.height ?? 0) - 1);
   await expectNoHorizontalOverflow(page);
 });
 
-test("one release check updates every download action", async ({ page }) => {
-  let releaseRequestCount = 0;
-  await page.route("**/releases/release.json", async (route) => {
-    releaseRequestCount += 1;
-    await route.fulfill({
-      json: availableRelease,
-    });
-  });
+test("the demo supports keyboard selection", async ({ page }) => {
+  await page.goto("/#try");
 
-  await page.goto("/");
+  const input = page.getByRole("combobox", { name: "Message" });
+  const listbox = page.getByRole("listbox", { name: "Emoji suggestions" });
+  await expect(input).toHaveValue("That fixed it :wa");
+  await expect(listbox).toBeVisible();
+  await expect(listbox.getByRole("option")).toHaveCount(5);
 
+  await input.focus();
+  await page.keyboard.press("ArrowDown");
   await expect(
-    page.getByRole("link", { name: "Download for macOS" }),
-  ).toHaveCount(2);
-  await expect(page.locator("[data-release-detail]")).toHaveText([
-    "Version 1.2.3 · 10 MB · macOS 14 or newer",
-    "Version 1.2.3 · 10 MB · macOS 14 or newer",
-  ]);
-  expect(releaseRequestCount).toBe(1);
+    listbox.getByRole("option", { name: /:warning:/i }),
+  ).toHaveAttribute("aria-selected", "true");
+
+  await page.keyboard.press("Tab");
+  await expect(input).toHaveValue("That fixed it ⚠️");
+  await expect(listbox).toBeHidden();
 });
 
-test("invalid release metadata keeps the preview state", async ({ page }) => {
-  await page.route("**/releases/release.json", async (route) => {
-    await route.fulfill({
-      json: {
-        version: "latest",
-        asset: { byteCount: "unknown" },
-      },
-    });
-  });
+test("the demo replaces exact shortcuts and recovers after a correction", async ({
+  page,
+}) => {
+  await page.goto("/#try");
 
+  const input = page.getByRole("combobox", { name: "Message" });
+  const listbox = page.getByRole("listbox", { name: "Emoji suggestions" });
+
+  await input.fill("Nice :frog:");
+  await expect(input).toHaveValue("Nice 🐸");
+  await expect(listbox).toBeHidden();
+
+  await input.fill("Nice :fro ");
+  await expect(listbox).toBeHidden();
+  await page.keyboard.press("Backspace");
+  await expect(listbox).toBeVisible();
+  await expect(listbox.getByRole("option", { name: /:frog:/i })).toBeVisible();
+});
+
+test("demo presets open the matching suggestion", async ({ page }) => {
+  await page.goto("/#try");
+
+  await page.getByRole("button", { name: ":sparkles:" }).click();
+  await expect(page.getByRole("combobox", { name: "Message" })).toHaveValue(
+    "That fixed it :spa",
+  );
+  const sparkles = page.getByRole("option", { name: /:sparkles:/i });
+  await expect(sparkles).toHaveAttribute("aria-selected", "true");
+  await sparkles.click();
+  await expect(page.getByRole("combobox", { name: "Message" })).toHaveValue(
+    "That fixed it ✨",
+  );
+  await expect(page.getByRole("combobox", { name: "Message" })).toBeFocused();
+});
+
+test("home page keeps the five practical answers", async ({ page }) => {
   await page.goto("/");
 
-  await expectPreviewState(page);
+  for (const question of [
+    "What happens?",
+    "What happens to animated emoji?",
+    "What ZIP files can I import?",
+    "Why does it need macOS permissions?",
+    "Where does it work?",
+  ]) {
+    await expect(page.getByText(question, { exact: true })).toBeVisible();
+  }
+  await expect(page.locator("#privacy")).toHaveCount(0);
 });
 
 test("home page has no detectable accessibility violations", async ({
@@ -89,38 +115,25 @@ test("home page has no detectable accessibility violations", async ({
   expect(results.violations).toEqual([]);
 });
 
-test("keyboard users can open the first answer", async ({ page }) => {
-  await page.goto("/#faq");
-  const firstAnswer = page.locator("details").first();
-  const firstQuestion = firstAnswer.locator("summary");
-
-  await firstQuestion.focus();
-  await expect(firstQuestion).toBeFocused();
-  await page.keyboard.press("Enter");
-
-  await expect(firstAnswer).toHaveAttribute("open", "");
-  await expect(
-    page.getByText(/Unicode shortcuts work in supported macOS text fields/),
-  ).toBeVisible();
+test("mobile layout stays inside the viewport", async ({ page, isMobile }) => {
+  test.skip(!isMobile, "Mobile layout applies only to the mobile project.");
+  await page.goto("/");
+  await expectNoHorizontalOverflow(page);
 });
 
-test("mobile navigation opens, closes, and does not overflow", async ({
+test("short viewports keep the picker below the hero copy", async ({
   page,
-  isMobile,
 }) => {
-  test.skip(!isMobile, "Mobile navigation applies only to the mobile project.");
+  await page.setViewportSize({ width: 720, height: 450 });
   await page.goto("/");
 
-  const menuButton = page.locator("[data-menu-button]");
-  await menuButton.click();
-  await expect(
-    page.getByRole("navigation", { name: "Mobile navigation" }),
-  ).toBeVisible();
-  await expect(menuButton).toHaveAttribute("aria-expanded", "true");
-
-  await page.keyboard.press("Escape");
-  await expect(menuButton).toHaveAttribute("aria-expanded", "false");
-  await expectNoHorizontalOverflow(page);
+  const copyBox = await page.locator(".hero-copy").boundingBox();
+  const pickerBox = await page.locator(".hero-picker").boundingBox();
+  expect(copyBox).not.toBeNull();
+  expect(pickerBox).not.toBeNull();
+  expect((copyBox?.y ?? 0) + (copyBox?.height ?? 0)).toBeLessThanOrEqual(
+    pickerBox?.y ?? 0,
+  );
 });
 
 test("legal pages and the branded 404 are reachable", async ({ page }) => {
@@ -135,4 +148,11 @@ test("legal pages and the branded 404 are reachable", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "That shortcut leads nowhere." }),
   ).toBeVisible();
+});
+
+test("privacy page describes local Noto filtering", async ({ page }) => {
+  await page.goto("/privacy/");
+
+  await expect(page.getByText(/filters it on your Mac/)).toBeVisible();
+  await expect(page.getByText(/doesn't send your search query/)).toBeVisible();
 });
