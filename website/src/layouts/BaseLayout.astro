@@ -1,7 +1,7 @@
 ---
 import { getImage } from "astro:assets";
-import "@fontsource-variable/newsreader/wght-italic.css";
-import "@fontsource-variable/newsreader/wght.css";
+import "@fontsource-variable/manrope/wght.css";
+import favicon from "../../../Resources/Assets.xcassets/AppIcon.appiconset/icon-32.png";
 import socialImageSource from "../assets/pond-hero-desktop.png";
 import SiteFooter from "../components/SiteFooter.astro";
 import SiteHeader from "../components/SiteHeader.astro";
@@ -29,12 +29,11 @@ const socialImageURL = new URL(socialImage.src, Astro.site);
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width" />
-    <meta name="theme-color" content="#f7f4ec" />
+    <meta name="theme-color" content="#f5f7f0" />
     <meta name="description" content={description} />
     {noindex && <meta name="robots" content="noindex" />}
     <link rel="canonical" href={canonicalURL} />
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="icon" href={favicon.src} type="image/png" sizes="32x32" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="MojiPond" />
     <meta property="og:title" content={title} />

@@ -1,206 +1,57 @@
 ---
-import BrandMark from "./BrandMark.astro";
-
-const navigationItems = [
-  { href: "/#how-it-works", label: "How it works" },
-  { href: "/#packs", label: "Custom packs" },
-  { href: "/#privacy", label: "Privacy" },
-];
+import appIcon from "../../../Resources/Assets.xcassets/AppIcon.appiconset/icon-128.png";
 ---
 
-<header class="site-header" data-site-header>
+<header class="site-header">
   <a class="wordmark" href="/" aria-label="MojiPond home">
-    <BrandMark size={30} />
+    <img src={appIcon.src} width="40" height="40" alt="" />
     <span>MojiPond</span>
   </a>
-
-  <nav class="desktop-nav" aria-label="Main navigation">
-    {navigationItems.map(({ href, label }) => <a href={href}>{label}</a>)}
-  </nav>
-
-  <button
-    class="menu-button"
-    type="button"
-    aria-expanded="false"
-    aria-controls="mobile-navigation"
-    aria-label="Open navigation"
-    data-menu-button
-  >
-    <span></span>
-    <span></span>
-  </button>
-
-  <nav
-    class="mobile-nav"
-    id="mobile-navigation"
-    aria-label="Mobile navigation"
-    hidden
-    data-mobile-nav
-  >
-    {navigationItems.map(({ href, label }) => <a href={href}>{label}</a>)}
-  </nav>
 </header>
-
-<script>
-  const header = document.querySelector("[data-site-header]");
-  const button = header?.querySelector("[data-menu-button]");
-  const menu = header?.querySelector("[data-mobile-nav]");
-
-  if (
-    header instanceof HTMLElement &&
-    button instanceof HTMLButtonElement &&
-    menu instanceof HTMLElement
-  ) {
-    const setMenuOpen = (isOpen: boolean) => {
-      button.setAttribute("aria-expanded", String(isOpen));
-      button.setAttribute(
-        "aria-label",
-        isOpen ? "Close navigation" : "Open navigation",
-      );
-      menu.hidden = !isOpen;
-      header.classList.toggle("menu-open", isOpen);
-    };
-
-    button.addEventListener("click", () => {
-      setMenuOpen(button.getAttribute("aria-expanded") !== "true");
-    });
-
-    menu.querySelectorAll("a").forEach((link) => {
-      link.addEventListener("click", () => setMenuOpen(false));
-    });
-
-    window.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") setMenuOpen(false);
-    });
-  }
-</script>
 
 <style>
   .site-header {
     position: absolute;
-    top: 26px;
-    left: 50%;
+    top: 24px;
+    left: 32px;
     z-index: 30;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    width: min(calc(100% - 80px), 780px);
-    min-height: 58px;
-    padding: 8px 10px 8px 16px;
-    color: var(--navy);
-    background: rgb(255 253 247 / 90%);
-    border: 1px solid rgb(8 47 54 / 10%);
-    border-radius: 999px;
-    box-shadow: 0 16px 42px rgb(13 59 65 / 12%);
-    transform: translateX(-50%);
   }
 
   .wordmark {
     display: inline-flex;
-    gap: 9px;
+    gap: 12px;
+    min-height: 48px;
     align-items: center;
-    color: inherit;
-    font-family: var(--font-display);
-    font-size: 1.08rem;
-    font-weight: 620;
-    letter-spacing: -0.02em;
+    color: var(--deep-water);
+    font-size: 1.125rem;
+    font-weight: 700;
+    letter-spacing: -0.025em;
     text-decoration: none;
   }
 
-  .desktop-nav {
-    display: flex;
-    gap: 2px;
-    align-items: center;
+  img {
+    display: block;
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgb(6 51 61 / 20%);
   }
 
-  .desktop-nav a,
-  .mobile-nav a {
-    color: var(--ink-muted);
-    font-size: 0.84rem;
-    font-weight: 650;
-    text-decoration: none;
-  }
-
-  .desktop-nav a {
-    padding: 10px 13px;
-    border-radius: 999px;
-  }
-
-  .desktop-nav a:hover {
-    color: var(--navy);
-    background: rgb(8 47 54 / 6%);
-  }
-
-  .menu-button,
-  .mobile-nav {
-    display: none;
-  }
-
-  @media (max-width: 700px) {
+  @media (max-width: 520px) {
     .site-header {
-      top: 14px;
-      align-items: flex-start;
-      flex-wrap: wrap;
-      width: calc(100% - 28px);
-      min-height: 54px;
-      padding: 7px 8px 7px 14px;
-      border-radius: 22px;
+      top: 16px;
+      left: 16px;
     }
 
-    .desktop-nav {
-      display: none;
+    .wordmark {
+      gap: 8px;
+      font-size: 1rem;
     }
 
-    .menu-button {
-      display: grid;
-      width: 40px;
-      height: 40px;
-      padding: 0;
-      place-content: center;
-      color: var(--navy);
-      background: transparent;
-      border: 0;
-      border-radius: 50%;
-      cursor: pointer;
-    }
-
-    .menu-button span {
-      display: block;
-      width: 17px;
-      height: 2px;
-      margin: 2px;
-      background: currentColor;
-      border-radius: 2px;
-      transition: transform 180ms ease;
-    }
-
-    .menu-open .menu-button span:first-child {
-      transform: translateY(3px) rotate(45deg);
-    }
-
-    .menu-open .menu-button span:last-child {
-      transform: translateY(-3px) rotate(-45deg);
-    }
-
-    .mobile-nav {
-      display: grid;
-      flex-basis: 100%;
-      gap: 2px;
-      padding: 10px 2px 3px;
-    }
-
-    .mobile-nav[hidden] {
-      display: none;
-    }
-
-    .mobile-nav a {
-      padding: 11px 10px;
-      border-radius: 12px;
-    }
-
-    .mobile-nav a:hover {
-      color: var(--navy);
-      background: rgb(8 47 54 / 6%);
+    img {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
     }
   }
 </style>

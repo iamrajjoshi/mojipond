@@ -22,7 +22,8 @@ pnpm site:test
 ```
 
 The browser tests start an Astro preview server and cover desktop and mobile
-viewports, keyboard use, links, metadata, and automated accessibility checks.
+viewports, the interactive shortcode demo, links, metadata, and automated
+accessibility checks.
 
 ## Release assets
 
@@ -37,10 +38,9 @@ update-feed.json
 release.json
 ```
 
-`update-feed.json` is optional until the offline signing step is complete.
-`release.json` controls whether the site shows a download. With no published
-release, the page accurately reports that the public build is waiting for
-Apple signing.
+`update-feed.json` is optional until the offline signing step is complete. The
+landing page does not advertise a development build. Add a public download only
+after the signed release and its support policy are ready.
 
 Do not add generated `dist/`, `.astro/`, Playwright output, signing material,
 or private release assets to Git.
