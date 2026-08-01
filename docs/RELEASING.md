@@ -1,6 +1,6 @@
 # Releasing MojiPond
 
-MojiPond currently supports two different artifact classes:
+MojiPond defines two artifact classes:
 
 1. **Local development artifacts** — Apple Development signed when one valid
    identity is available, otherwise ad-hoc signed; suitable for this Mac and
@@ -16,6 +16,58 @@ Apple’s current requirements are described in
 [Customizing the notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow),
 and
 [Developer ID certificates](https://developer.apple.com/help/account/certificates/create-developer-id-certificates).
+
+## Automated release path
+
+The repository has three release-related workflows:
+
+- **CI** runs the deterministic app suite, builds Debug and Universal Release
+  configurations, checks shell syntax, and verifies the website.
+- **Release rehearsal** runs every Monday and on demand. It builds and checks
+  an ad-hoc Universal package without Apple credentials. Its seven-day
+  artifact is test evidence, not a public release.
+- **Release** runs only on `main` and only when started manually. It checks the
+  requested version against `project.yml`, imports temporary signing material,
+  builds with the public update feed, verification key, and Team ID, notarizes
+  both public formats, staples the app and DMG, checks their signatures and
+  architecture, then creates one draft GitHub release.
+
+The production job uses the protected `production-release` environment. Add
+these environment secrets after joining the paid Apple Developer Program:
+
+| Name | Value |
+| --- | --- |
+| `DEVELOPER_ID_P12_BASE64` | Base64 of the Developer ID Application certificate and private key exported as PKCS #12 |
+| `DEVELOPER_ID_P12_PASSWORD` | Password used for that PKCS #12 export |
+| `APPLE_NOTARY_KEY_P8_BASE64` | Base64 of a team App Store Connect API private key |
+| `APPLE_NOTARY_KEY_ID` | App Store Connect API key ID |
+| `APPLE_NOTARY_ISSUER_ID` | App Store Connect API issuer ID |
+
+Add these repository variables:
+
+| Name | Value |
+| --- | --- |
+| `APPLE_TEAM_ID` | The ten-character Team ID shown by the release signature |
+| `MOJIPOND_UPDATE_PUBLIC_KEY_BASE64` | Base64 raw Ed25519 public key generated from the offline updater key |
+
+Keep the matching updater private key offline. It does not belong in GitHub
+Actions. After the workflow creates its draft release:
+
+1. Download the final `MojiPond.zip` from the draft.
+2. Generate `update-feed.json` offline with the command in
+   [Generate a signed feed](#generate-a-signed-feed). Use
+   `https://mojipond.com/releases/MojiPond.zip` as the download URL and the
+   final GitHub release URL as the notes URL.
+3. Compare the reported public-key fingerprint, SHA-256, byte count, version,
+   and build with the reviewed release record.
+4. Upload `update-feed.json` to that same draft.
+5. Test the downloaded DMG and updater path on a clean macOS account or second
+   Mac, then publish the draft.
+
+Publishing triggers the Pages workflow. It copies the release assets into the
+public site so anonymous app downloads and update checks do not depend on
+access to the private repository. If any check fails, leave the release as a
+draft and fix the source with a higher build number.
 
 ## 1. Prepare the source
 
@@ -280,9 +332,9 @@ release-notes link.
 Downloading remains a separate explicit action. `VerifiedUpdateStager` accepts
 only signed metadata from the configured feed/key boundary, downloads no more
 than the signed byte count, verifies the exact byte count and SHA-256 digest,
-and stages the ZIP in a private `0700` temporary directory. The shipping app
-still has no production feed or trusted public key configured, so checks and
-staging report that they are disabled.
+and stages the ZIP in a private `0700` temporary directory. The checked-in
+defaults contain no production feed or trusted public key, so unconfigured
+builds report that update checks and staging are disabled.
 
 The verifier accepts an HTTPS JSON envelope:
 
@@ -384,9 +436,9 @@ value when they do not apply. Paths must be absolute, the output directory must
 already exist, and the output is created with mode `0644`. The tool never
 overwrites an existing feed.
 
-Identical inputs produce identical signed payload bytes. CryptoKit may hedge a
-signature with fresh randomness, so separately generated valid envelope files
-are not required to be byte-for-byte identical. Compare the printed payload
+Identical inputs produce identical signed payload bytes. CryptoKit does not
+guarantee identical signature bytes across runs, so separately generated valid
+envelope files need not be byte-for-byte identical. Compare the printed payload
 SHA-256, archive SHA-256 and byte count, verification-key fingerprint, and
 decoded metadata during review instead.
 
@@ -533,8 +585,8 @@ installation path. Its one-executable installer:
 
 Failures after replacement begins terminate the attempted launch, restore the
 backup, and verify the previous build. If the destination parent is not
-writable, the UI instead offers the verified candidate in Finder for honest
-manual replacement. Every other safety failure remains a hard failure.
+writable, the UI instead offers the verified candidate in Finder for manual
+replacement. Every other safety failure remains a hard failure.
 
 ## Release checklist
 

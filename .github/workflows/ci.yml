@@ -2,7 +2,12 @@ name: CI
 
 on:
   push:
+    branches:
+      - main
   pull_request:
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -26,9 +31,12 @@ jobs:
         run: |
           sensitive_files="$(
             git ls-files \
-              | grep -E '(^|/)(\.env($|\.)|[^/]+\.(p8|p12|pem|key|mobileprovision|cer)|[^/]*(private|signing)[_-]?key[^/]*)$' \
-              | grep -v -E '(^|/)\.env\.example$' \
-              || true
+              | awk '
+                  /(^|\/)\.env\.example$/ { next }
+                  /(^|\/)\.env(\..*)?$/ { print; next }
+                  /(^|\/)[^\/]+\.(p8|p12|pem|key|mobileprovision|cer)$/ { print; next }
+                  /(^|\/)[^\/]*(private|signing)[_-]?key[^\/]*$/ { print }
+                '
           )"
           if [[ -n "$sensitive_files" ]]; then
             echo "Potential secret-bearing files are tracked:"
@@ -41,6 +49,12 @@ jobs:
           then
             echo "Private key material must never be committed."
             exit 1
+          else
+            grep_status=$?
+            if (( grep_status != 1 )); then
+              echo "The private-key scan failed with status ${grep_status}." >&2
+              exit "${grep_status}"
+            fi
           fi
 
           if git grep -I -n -E \
@@ -49,6 +63,12 @@ jobs:
           then
             echo "A likely hard-coded release secret was found."
             exit 1
+          else
+            grep_status=$?
+            if (( grep_status != 1 )); then
+              echo "The release-secret scan failed with status ${grep_status}." >&2
+              exit "${grep_status}"
+            fi
           fi
 
       - name: Install pinned XcodeGen
@@ -104,3 +124,72 @@ jobs:
 
       - name: Test signed update feed generator
         run: /usr/bin/xcrun swift scripts/test-update-feed-generator.swift
+
+      - name: Check shell scripts
+        run: /bin/zsh -n scripts/*.sh
+
+      - name: Build Universal Release app
+        run: |
+          xcodebuild \
+            -project MojiPond.xcodeproj \
+            -scheme MojiPond \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath .derived/ci-release \
+            CODE_SIGNING_ALLOWED=NO \
+            ARCHS='arm64 x86_64' \
+            ONLY_ACTIVE_ARCH=NO \
+            build
+          lipo \
+            .derived/ci-release/Build/Products/Release/MojiPond.app/Contents/MacOS/MojiPond \
+            -verify_arch arm64 x86_64
+
+  website-quality:
+    name: Website quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install website dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check formatting and types
+        run: |
+          pnpm site:format:check
+          pnpm site:check
+
+      - name: Audit production dependencies
+        run: pnpm audit --prod --audit-level high
+
+      - name: Build website
+        run: pnpm site:build
+
+      - name: Install Chromium
+        run: pnpm --filter @mojipond/site exec playwright install --with-deps chromium
+
+      - name: Test website in desktop and mobile viewports
+        run: pnpm site:test
+
+      - name: Keep browser diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: website-test-diagnostics
+          path: |
+            website/playwright-report
+            website/test-results
+          if-no-files-found: ignore
+          retention-days: 7
