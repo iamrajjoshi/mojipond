@@ -3,8 +3,9 @@ import AppKit
 import Combine
 import CoreGraphics
 import Foundation
+import IOKit.hid
 
-enum SystemPermission: String, CaseIterable, Sendable {
+enum SystemPermission: String, CaseIterable, Hashable, Sendable {
     case inputMonitoring
     case accessibility
     case eventPosting
@@ -12,23 +13,24 @@ enum SystemPermission: String, CaseIterable, Sendable {
 
 enum SystemPermissionStatus: String, Equatable, Sendable {
     case notRequested
+    case pending
     case denied
     case granted
     case revoked
 
-    var primaryAction: SystemPermissionAction? {
+    var availableActions: [SystemPermissionAction] {
         switch self {
-        case .notRequested:
-            .request
-        case .denied, .revoked:
-            .openSettings
+        case .notRequested, .denied, .revoked:
+            [.request, .openSettings]
+        case .pending:
+            [.openSettings]
         case .granted:
-            nil
+            []
         }
     }
 }
 
-enum SystemPermissionAction: Equatable, Sendable {
+enum SystemPermissionAction: Hashable, Sendable {
     case request
     case openSettings
 }
@@ -80,13 +82,25 @@ struct SystemPermissionSnapshot: Equatable, Sendable {
     var eventPosting: SystemPermissionStatus
 
     subscript(permission: SystemPermission) -> SystemPermissionStatus {
-        switch permission {
-        case .inputMonitoring:
-            inputMonitoring
-        case .accessibility:
-            accessibility
-        case .eventPosting:
-            eventPosting
+        get {
+            switch permission {
+            case .inputMonitoring:
+                inputMonitoring
+            case .accessibility:
+                accessibility
+            case .eventPosting:
+                eventPosting
+            }
+        }
+        set {
+            switch permission {
+            case .inputMonitoring:
+                inputMonitoring = newValue
+            case .accessibility:
+                accessibility = newValue
+            case .eventPosting:
+                eventPosting = newValue
+            }
         }
     }
 }
@@ -96,11 +110,60 @@ protocol SystemPermissionProviding {
     func request(_ permission: SystemPermission) -> Bool
 }
 
+struct MacInputMonitoringPermissionAccess {
+    private let checkCoreGraphics: () -> Bool
+    private let requestCoreGraphics: () -> Bool
+    private let checkIOHID: () -> Bool
+    private let requestIOHID: () -> Bool
+
+    init(
+        checkCoreGraphics: @escaping () -> Bool = {
+            CGPreflightListenEventAccess()
+        },
+        requestCoreGraphics: @escaping () -> Bool = {
+            CGRequestListenEventAccess()
+        },
+        checkIOHID: @escaping () -> Bool = {
+            IOHIDCheckAccess(kIOHIDRequestTypeListenEvent)
+                == kIOHIDAccessTypeGranted
+        },
+        requestIOHID: @escaping () -> Bool = {
+            IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
+        }
+    ) {
+        self.checkCoreGraphics = checkCoreGraphics
+        self.requestCoreGraphics = requestCoreGraphics
+        self.checkIOHID = checkIOHID
+        self.requestIOHID = requestIOHID
+    }
+
+    func isGranted() -> Bool {
+        let coreGraphicsGranted = checkCoreGraphics()
+        let ioHIDGranted = checkIOHID()
+        return coreGraphicsGranted || ioHIDGranted
+    }
+
+    func request() -> Bool {
+        _ = requestIOHID()
+        _ = requestCoreGraphics()
+        return isGranted()
+    }
+}
+
 struct MacSystemPermissionProvider: SystemPermissionProviding {
+    private let inputMonitoring: MacInputMonitoringPermissionAccess
+
+    init(
+        inputMonitoring: MacInputMonitoringPermissionAccess =
+            MacInputMonitoringPermissionAccess()
+    ) {
+        self.inputMonitoring = inputMonitoring
+    }
+
     func isGranted(_ permission: SystemPermission) -> Bool {
         switch permission {
         case .inputMonitoring:
-            CGPreflightListenEventAccess()
+            inputMonitoring.isGranted()
         case .accessibility:
             AXIsProcessTrusted()
         case .eventPosting:
@@ -111,7 +174,7 @@ struct MacSystemPermissionProvider: SystemPermissionProviding {
     func request(_ permission: SystemPermission) -> Bool {
         switch permission {
         case .inputMonitoring:
-            return CGRequestListenEventAccess()
+            return inputMonitoring.request()
         case .accessibility:
             let options = [
                 "AXTrustedCheckOptionPrompt": true
@@ -176,16 +239,27 @@ final class SystemPermissionCenter: ObservableObject {
     private let provider: SystemPermissionProviding
     private let history: PermissionHistoryStoring
     private let notificationCenter: NotificationCenter
+    private let grantObservationInterval: Duration
+    private let grantObservationAttemptLimit: Int
     private var activationObserver: NSObjectProtocol?
+    private var grantObservationTasks:
+        [SystemPermission: Task<Void, Never>] = [:]
 
     init(
         provider: SystemPermissionProviding = MacSystemPermissionProvider(),
         history: PermissionHistoryStoring = UserDefaultsPermissionHistoryStore(),
-        notificationCenter: NotificationCenter = .default
+        notificationCenter: NotificationCenter = .default,
+        grantObservationInterval: Duration = .milliseconds(750),
+        grantObservationAttemptLimit: Int = 40
     ) {
         self.provider = provider
         self.history = history
         self.notificationCenter = notificationCenter
+        self.grantObservationInterval = grantObservationInterval
+        self.grantObservationAttemptLimit = max(
+            1,
+            grantObservationAttemptLimit
+        )
         snapshot = Self.readSnapshot(provider: provider, history: history)
     }
 
@@ -218,6 +292,10 @@ final class SystemPermissionCenter: ObservableObject {
             notificationCenter.removeObserver(activationObserver)
             self.activationObserver = nil
         }
+        for task in grantObservationTasks.values {
+            task.cancel()
+        }
+        grantObservationTasks.removeAll()
     }
 
     /// This is the only path in this type that may ask macOS for consent.
@@ -225,11 +303,51 @@ final class SystemPermissionCenter: ObservableObject {
     func request(_ permission: SystemPermission) -> SystemPermissionStatus {
         history.setRequested(true, for: permission)
         let granted = provider.request(permission)
+            || provider.isGranted(permission)
         if granted {
             history.setEverGranted(true, for: permission)
+            grantObservationTasks[permission]?.cancel()
+            grantObservationTasks[permission] = nil
+            refresh()
+        } else {
+            snapshot[permission] = .pending
+            observeGrant(for: permission)
         }
-        refresh()
         return snapshot[permission]
+    }
+
+    /// Rechecks only while the user is actively resolving a permission.
+    /// Observation stops on grant or after a bounded 30-second window.
+    func observeGrant(for permission: SystemPermission) {
+        guard snapshot[permission] != .granted else {
+            return
+        }
+        grantObservationTasks[permission]?.cancel()
+        let interval = grantObservationInterval
+        let attemptLimit = grantObservationAttemptLimit
+        grantObservationTasks[permission] = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+            for _ in 0 ..< attemptLimit {
+                do {
+                    try await Task.sleep(for: interval)
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled else {
+                    return
+                }
+                if provider.isGranted(permission) {
+                    history.setEverGranted(true, for: permission)
+                    refresh()
+                    grantObservationTasks[permission] = nil
+                    return
+                }
+            }
+            refresh()
+            grantObservationTasks[permission] = nil
+        }
     }
 
     @discardableResult

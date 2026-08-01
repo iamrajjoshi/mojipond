@@ -18,12 +18,21 @@ final class PermissionCenterTests: XCTestCase {
         XCTAssertEqual(provider.preflights, SystemPermission.allCases)
     }
 
-    func testExplicitRequestRecordsDeniedAndGrantedStates() {
+    func testExplicitRequestShowsPendingUntilTheSystemReportsItsDecision() {
         let provider = FakePermissionProvider()
         let history = FakePermissionHistory()
-        let center = SystemPermissionCenter(provider: provider, history: history)
+        let center = SystemPermissionCenter(
+            provider: provider,
+            history: history,
+            grantObservationInterval: .seconds(60)
+        )
 
-        XCTAssertEqual(center.requestInputMonitoring(), .denied)
+        XCTAssertEqual(center.requestInputMonitoring(), .pending)
+        XCTAssertEqual(center.snapshot.inputMonitoring, .pending)
+        provider.granted[.inputMonitoring] = true
+        center.refresh()
+        XCTAssertEqual(center.snapshot.inputMonitoring, .granted)
+
         provider.requestResults[.accessibility] = true
         XCTAssertEqual(center.requestAccessibility(), .granted)
         provider.requestResults[.eventPosting] = true
@@ -50,20 +59,103 @@ final class PermissionCenterTests: XCTestCase {
         XCTAssertEqual(center.snapshot.accessibility, .revoked)
     }
 
-    func testPermissionActionsMatchCurrentStatus() {
+    func testEveryUnresolvedPermissionOffersRequestAndSettings() {
         XCTAssertEqual(
-            SystemPermissionStatus.notRequested.primaryAction,
-            .request
+            SystemPermissionStatus.notRequested.availableActions,
+            [.request, .openSettings]
         )
         XCTAssertEqual(
-            SystemPermissionStatus.denied.primaryAction,
-            .openSettings
+            SystemPermissionStatus.denied.availableActions,
+            [.request, .openSettings]
         )
         XCTAssertEqual(
-            SystemPermissionStatus.revoked.primaryAction,
-            .openSettings
+            SystemPermissionStatus.revoked.availableActions,
+            [.request, .openSettings]
         )
-        XCTAssertNil(SystemPermissionStatus.granted.primaryAction)
+        XCTAssertEqual(
+            SystemPermissionStatus.pending.availableActions,
+            [.openSettings]
+        )
+        XCTAssertTrue(SystemPermissionStatus.granted.availableActions.isEmpty)
+    }
+
+    func testBoundedGrantObservationRefreshesUntilGrantedThenStops() async {
+        let provider = FakePermissionProvider()
+        let center = SystemPermissionCenter(
+            provider: provider,
+            history: FakePermissionHistory(),
+            grantObservationInterval: .milliseconds(5),
+            grantObservationAttemptLimit: 20
+        )
+        provider.resetPreflights()
+
+        XCTAssertEqual(center.requestAccessibility(), .pending)
+        provider.granted[.accessibility] = true
+
+        let granted = await eventually {
+            center.snapshot.accessibility == .granted
+        }
+        XCTAssertTrue(granted)
+        let preflightCountAfterGrant = provider.preflights.count
+        try? await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(provider.preflights.count, preflightCountAfterGrant)
+    }
+
+    func testGrantObservationStopsAfterItsBoundedWindow() async {
+        let provider = FakePermissionProvider()
+        let center = SystemPermissionCenter(
+            provider: provider,
+            history: FakePermissionHistory(),
+            grantObservationInterval: .milliseconds(2),
+            grantObservationAttemptLimit: 3
+        )
+        provider.resetPreflights()
+
+        XCTAssertEqual(center.requestAccessibility(), .pending)
+        let resolved = await eventually {
+            center.snapshot.accessibility == .denied
+        }
+        XCTAssertTrue(resolved)
+
+        let preflightCountAfterTimeout = provider.preflights.count
+        try? await Task.sleep(for: .milliseconds(20))
+        XCTAssertEqual(
+            provider.preflights.count,
+            preflightCountAfterTimeout
+        )
+    }
+
+    func testInputMonitoringRequestUsesIOHIDAndCoreGraphics() {
+        var calls: [String] = []
+        let access = MacInputMonitoringPermissionAccess(
+            checkCoreGraphics: {
+                calls.append("check-core-graphics")
+                return false
+            },
+            requestCoreGraphics: {
+                calls.append("request-core-graphics")
+                return false
+            },
+            checkIOHID: {
+                calls.append("check-iohid")
+                return false
+            },
+            requestIOHID: {
+                calls.append("request-iohid")
+                return false
+            }
+        )
+
+        XCTAssertFalse(access.request())
+        XCTAssertEqual(
+            calls,
+            [
+                "request-iohid",
+                "request-core-graphics",
+                "check-core-graphics",
+                "check-iohid"
+            ]
+        )
     }
 
     func testSettingsOpenerUsesPermissionSpecificAnchorsAndFallback() {

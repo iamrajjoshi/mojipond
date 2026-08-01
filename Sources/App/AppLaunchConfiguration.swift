@@ -14,6 +14,7 @@ struct AppLaunchConfiguration: Equatable {
         case notRequested = "not-requested"
         case denied
         case granted
+        case grantOnRequest = "grant-on-request"
         case revoked
     }
 
@@ -165,16 +166,23 @@ private struct UITestLaunchAtLoginController:
     }
 }
 
-private struct UITestPermissionProvider: SystemPermissionProviding {
+private final class UITestPermissionProvider: SystemPermissionProviding {
     let scenario: AppLaunchConfiguration.UITestPermissionScenario
+    private var grantedPermissions: Set<SystemPermission> = []
+
+    init(scenario: AppLaunchConfiguration.UITestPermissionScenario) {
+        self.scenario = scenario
+    }
 
     func isGranted(_ permission: SystemPermission) -> Bool {
-        _ = permission
-        return scenario == .granted
+        scenario == .granted || grantedPermissions.contains(permission)
     }
 
     func request(_ permission: SystemPermission) -> Bool {
-        isGranted(permission)
+        if scenario == .grantOnRequest {
+            grantedPermissions.insert(permission)
+        }
+        return isGranted(permission)
     }
 }
 
@@ -190,7 +198,7 @@ private final class UITestPermissionHistoryStore: PermissionHistoryStoring {
 
     func hasRequested(_ permission: SystemPermission) -> Bool {
         _ = permission
-        return scenario != .notRequested
+        return scenario != .notRequested && scenario != .grantOnRequest
     }
 
     func wasEverGranted(_ permission: SystemPermission) -> Bool {

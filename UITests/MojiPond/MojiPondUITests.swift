@@ -2,7 +2,7 @@ import XCTest
 
 @MainActor
 final class MojiPondUITests: XCTestCase {
-    func testOnboardingAdvancesWithoutRequestingPermissions() {
+    func testOnboardingKeepsPermissionsAndPracticeOnOneScreen() {
         continueAfterFailure = false
         let application = launch(
             initialScreen: "onboarding",
@@ -13,7 +13,7 @@ final class MojiPondUITests: XCTestCase {
         }
 
         let setupExists = application.staticTexts[
-            "Type :wave: to insert 👋"
+            "Welcome to MojiPond"
         ].waitForExistence(timeout: 5)
         XCTAssertTrue(setupExists)
         XCTAssertTrue(
@@ -30,13 +30,13 @@ final class MojiPondUITests: XCTestCase {
             element: onboardingWindow
         )
 
-        XCTAssertTrue(application.buttons["Use Library Only"].exists)
-        application.buttons["Try It"].click()
-
         let practiceFieldExists = application.descendants(
             matching: .any
         )["onboarding.practiceField"].waitForExistence(timeout: 2)
         XCTAssertTrue(practiceFieldExists)
+        XCTAssertFalse(application.buttons["Try It"].exists)
+        XCTAssertFalse(application.buttons["Back"].exists)
+        XCTAssertFalse(application.buttons["Use Library Only"].exists)
         let privacyWindowExists = application.windows.matching(
             NSPredicate(
                 format: "title CONTAINS[c] %@",
@@ -45,32 +45,11 @@ final class MojiPondUITests: XCTestCase {
         ).firstMatch.exists
         XCTAssertFalse(privacyWindowExists)
         attachScreen(
-            named: "onboarding-practice",
+            named: "onboarding-setup",
             element: onboardingWindow
         )
 
         application.buttons["Open Library"].click()
-        XCTAssertTrue(
-            application.windows[
-                "MojiPond Library"
-            ].waitForExistence(timeout: 5)
-        )
-    }
-
-    func testOnboardingLibraryOnlyActionOpensLibrary() {
-        continueAfterFailure = false
-        let application = launch(
-            initialScreen: "onboarding",
-            appearance: .light
-        )
-        defer {
-            application.terminate()
-        }
-
-        let libraryOnly = application.buttons["Use Library Only"]
-        XCTAssertTrue(libraryOnly.waitForExistence(timeout: 5))
-        libraryOnly.click()
-
         XCTAssertTrue(
             application.windows[
                 "MojiPond Library"
@@ -169,17 +148,17 @@ final class MojiPondUITests: XCTestCase {
         ] = [
             (
                 .denied,
-                expectedStatus: "Not allowed",
+                expectedStatus: "Needs access",
                 screenshotName: "onboarding-permissions-denied"
             ),
             (
                 .granted,
-                expectedStatus: "Allowed",
+                expectedStatus: "Granted",
                 screenshotName: "onboarding-permissions-granted"
             ),
             (
                 .revoked,
-                expectedStatus: "Access removed",
+                expectedStatus: "Needs access",
                 screenshotName: "onboarding-permissions-revoked"
             )
         ]
@@ -191,6 +170,37 @@ final class MojiPondUITests: XCTestCase {
                 screenshotName: scenario.screenshotName
             )
         }
+    }
+
+    func testRequestAccessUpdatesThePermissionCardToGranted() {
+        continueAfterFailure = false
+        let application = launch(
+            initialScreen: "onboarding",
+            appearance: .light,
+            permissionScenario: .grantOnRequest
+        )
+        defer {
+            application.terminate()
+        }
+
+        let request = application.buttons[
+            "Request Accessibility Access"
+        ]
+        XCTAssertTrue(request.waitForExistence(timeout: 5))
+        request.click()
+
+        let granted = application.descendants(matching: .any).matching(
+            NSPredicate(
+                format: "label == %@ AND value == %@",
+                "Accessibility permission",
+                "Granted"
+            )
+        ).firstMatch
+        XCTAssertTrue(granted.waitForExistence(timeout: 2))
+        XCTAssertFalse(request.exists)
+        XCTAssertFalse(
+            application.buttons["Open Accessibility Settings"].exists
+        )
     }
 
     func testRequiredDocumentationSurfaces() {
@@ -402,7 +412,7 @@ final class MojiPondUITests: XCTestCase {
 
         XCTAssertTrue(
             application.staticTexts[
-                "Type :wave: to insert 👋"
+                "Welcome to MojiPond"
             ].waitForExistence(timeout: 5)
         )
         let permissionStatus = application.descendants(
@@ -419,21 +429,21 @@ final class MojiPondUITests: XCTestCase {
             "Expected permission status \(expectedStatus)"
         )
         switch scenario {
-        case .notRequested:
+        case .notRequested, .grantOnRequest:
             XCTAssertTrue(
                 application.buttons[
-                    "Allow Input Monitoring"
+                    "Request Input Monitoring Access"
                 ].exists
             )
-            XCTAssertFalse(
+            XCTAssertTrue(
                 application.buttons[
                     "Open Input Monitoring Settings"
                 ].exists
             )
         case .denied, .revoked:
-            XCTAssertFalse(
+            XCTAssertTrue(
                 application.buttons[
-                    "Allow Input Monitoring"
+                    "Request Input Monitoring Access"
                 ].exists
             )
             XCTAssertTrue(
@@ -540,5 +550,6 @@ private enum AppUITestPermissionScenario: String {
     case notRequested = "not-requested"
     case denied
     case granted
+    case grantOnRequest = "grant-on-request"
     case revoked
 }
