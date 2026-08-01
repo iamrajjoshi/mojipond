@@ -133,10 +133,11 @@ combines match quality, aliases/tags, pack priority, and a local usage snapshot.
 The versioned custom library is owned by a Swift actor. Writes stage assets,
 validate the resulting model, write JSON atomically, and then commit the
 transaction. Imported assets are copied into managed storage so the source
-folder can disappear without breaking the pack. User-created Unicode entries
-store one validated emoji grapheme directly in the library; their shortcode
-and aliases use the same global collision rules as imported content. Unicode
-also participates in pack content digests and portable export.
+folder can disappear without breaking the pack. Custom Unicode entries loaded
+from portable packs store one validated emoji grapheme directly in the
+library; their shortcode and aliases use the same global collision rules as
+imported content. Unicode also participates in pack content digests and
+portable export.
 
 Default locations:
 
@@ -196,11 +197,12 @@ Import preparation produces a preview with rejections, shortcode collisions,
 and duplicate content hashes. Installation occurs only after collision
 decisions are complete. The Library UI exposes individual and apply-all
 collision decisions, then installs or discards the prepared import. It also
-supports attributed empty-pack creation, custom Unicode creation and copying,
-item edits and asset replacement, pack enablement and ordering, portable
-export, and transactional replacement from another ZIP. Custom Unicode entries
-join the same indexed Library and runtime search surfaces as the built-in
-catalog.
+supports copying custom Unicode, item edits and asset replacement, pack
+enablement and ordering, portable export, and transactional replacement from
+another ZIP. Creating empty packs and individual Unicode items remains an
+internal model capability rather than a Library UI workflow. Custom Unicode
+entries join the same indexed Library and runtime search surfaces as the
+built-in catalog.
 
 ## Messages media runtime
 

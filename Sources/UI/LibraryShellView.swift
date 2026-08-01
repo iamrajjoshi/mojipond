@@ -5,12 +5,9 @@ struct LibraryShellView: View {
     @StateObject private var viewModel: LibraryViewModel
 
     @State private var showsImportSource = false
-    @State private var showsNewPack = false
     @State private var showsBuiltInDetails = false
     @State private var selectedItem: LibraryDisplayItem?
     @State private var packDetails: PackDetailSelection?
-    @State private var unicodeItemDestination:
-        UnicodeItemDestination?
     @State private var isDropTargeted = false
     @FocusState private var focusedSidebarScope: LibraryScope?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -92,9 +89,6 @@ struct LibraryShellView: View {
         .sheet(isPresented: importPreviewPresented) {
             LibraryImportPreviewView(viewModel: viewModel)
         }
-        .sheet(isPresented: $showsNewPack) {
-            LibraryNewPackView(viewModel: viewModel)
-        }
         .sheet(item: $selectedItem) { item in
             LibraryItemDetailView(
                 viewModel: viewModel,
@@ -106,13 +100,6 @@ struct LibraryShellView: View {
             LibraryPackDetailView(
                 viewModel: viewModel,
                 packID: selection.id
-            )
-        }
-        .sheet(item: $unicodeItemDestination) { destination in
-            LibraryAddUnicodeItemView(
-                viewModel: viewModel,
-                packID: destination.id,
-                packName: destination.packName
             )
         }
         .sheet(isPresented: $showsBuiltInDetails) {
@@ -209,17 +196,6 @@ struct LibraryShellView: View {
                         sidebarPackRow(pack)
                     }
 
-                    Button {
-                        showsNewPack = true
-                    } label: {
-                        Label("New Empty Pack…", systemImage: "plus")
-                    }
-                    .buttonStyle(.plain)
-                    .keyboardShortcut("n", modifiers: [.command, .shift])
-                    .foregroundStyle(PondDesign.pond)
-                    .padding(.horizontal, 11)
-                    .frame(height: 34)
-
                     Text("Drop a ZIP anywhere in this window.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -314,12 +290,6 @@ struct LibraryShellView: View {
             }
             Button("Pack Details…") {
                 packDetails = PackDetailSelection(id: pack.id)
-            }
-            Button("Add Unicode Emoji…") {
-                unicodeItemDestination = UnicodeItemDestination(
-                    id: pack.id,
-                    packName: pack.name
-                )
             }
             Divider()
             Button("Move Up") {
@@ -491,16 +461,6 @@ struct LibraryShellView: View {
                         )
                     )
                     .toggleStyle(.switch)
-                    Button(
-                        "Add Unicode Emoji",
-                        systemImage: "text.badge.plus"
-                    ) {
-                        unicodeItemDestination =
-                            UnicodeItemDestination(
-                                id: pack.id,
-                                packName: pack.name
-                            )
-                    }
                     Button("Pack Details", systemImage: "info.circle") {
                         packDetails = PackDetailSelection(id: pack.id)
                     }
@@ -568,17 +528,7 @@ struct LibraryShellView: View {
                 } description: {
                     Text(emptyDescription)
                 } actions: {
-                    if viewModel.searchText.isEmpty {
-                        if let pack = viewModel.selectedPack {
-                            Button("Add Unicode Emoji") {
-                                unicodeItemDestination =
-                                    UnicodeItemDestination(
-                                        id: pack.id,
-                                        packName: pack.name
-                                    )
-                            }
-                        }
-                    } else {
+                    if !viewModel.searchText.isEmpty {
                         Button("Clear Search") {
                             viewModel.searchText = ""
                         }
@@ -766,7 +716,7 @@ struct LibraryShellView: View {
             return "No emoji are available to alias. Clear the filters or import a ZIP pack."
         }
         if case .pack = viewModel.scope {
-            return "This pack is empty. Add Unicode emoji here, or review a replacement ZIP in Pack Details."
+            return "This pack is empty. Review a replacement ZIP in Pack Details."
         }
         return "Change the filters or import a custom ZIP pack."
     }
@@ -826,9 +776,4 @@ struct LibraryShellView: View {
 
 private struct PackDetailSelection: Identifiable {
     let id: UUID
-}
-
-private struct UnicodeItemDestination: Identifiable {
-    let id: UUID
-    let packName: String
 }
