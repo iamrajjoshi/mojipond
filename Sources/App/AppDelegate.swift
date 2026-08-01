@@ -404,6 +404,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 glyph: "✨",
                 shortcode: "sparkles",
                 name: "Sparkles"
+            ),
+            RuntimeSuggestionRow(
+                id: "ui-test.duck",
+                glyph: "🦆",
+                shortcode: "duck",
+                name: "Duck"
             )
         ]
         let snapshot = RuntimeSuggestionPanelSnapshot(

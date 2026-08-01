@@ -100,8 +100,24 @@ final class RuntimeVoiceOverAnnouncementTests: XCTestCase {
             selectedIndex: 0,
             query: "wa"
         )
-        let noSuggestions = RuntimeSuggestionPanelSnapshot(
+        let sixSuggestions = RuntimeSuggestionPanelSnapshot(
             revision: 3,
+            transactionID: ParserTransactionID(rawValue: 1),
+            mode: .suggestions,
+            rows: Array(repeating: row, count: 6),
+            selectedIndex: 0,
+            query: "wa"
+        )
+        let overflowingSuggestions = RuntimeSuggestionPanelSnapshot(
+            revision: 4,
+            transactionID: ParserTransactionID(rawValue: 1),
+            mode: .suggestions,
+            rows: Array(repeating: row, count: 7),
+            selectedIndex: 0,
+            query: "wa"
+        )
+        let noSuggestions = RuntimeSuggestionPanelSnapshot(
+            revision: 5,
             transactionID: ParserTransactionID(rawValue: 1),
             mode: .suggestions,
             rows: [],
@@ -109,7 +125,7 @@ final class RuntimeVoiceOverAnnouncementTests: XCTestCase {
             query: "zzzz"
         )
         let browser = RuntimeSuggestionPanelSnapshot(
-            revision: 4,
+            revision: 6,
             transactionID: ParserTransactionID(rawValue: 2),
             mode: .browser,
             rows: [row],
@@ -121,19 +137,38 @@ final class RuntimeVoiceOverAnnouncementTests: XCTestCase {
             RuntimeSuggestionPanelController.preferredSize(
                 for: oneSuggestion
             ),
-            CGSize(width: 380, height: 128)
+            CGSize(width: 380, height: 69)
         )
         XCTAssertEqual(
             RuntimeSuggestionPanelController.preferredSize(
                 for: fiveSuggestions
             ),
-            CGSize(width: 380, height: 320)
+            CGSize(width: 380, height: 237)
+        )
+        XCTAssertEqual(
+            RuntimeSuggestionPanelController.preferredSize(
+                for: sixSuggestions
+            ),
+            CGSize(width: 380, height: 279)
+        )
+        XCTAssertEqual(
+            RuntimeSuggestionPanelController.preferredSize(
+                for: overflowingSuggestions
+            ),
+            CGSize(width: 380, height: 279)
+        )
+        XCTAssertEqual(overflowingSuggestions.visibleRows.count, 6)
+        XCTAssertEqual(
+            RuntimeVoiceOverAnnouncement.suggestions(
+                overflowingSuggestions
+            ),
+            "6 emoji suggestions. Selected Waving hand, colon wave colon."
         )
         XCTAssertEqual(
             RuntimeSuggestionPanelController.preferredSize(
                 for: noSuggestions
             ),
-            CGSize(width: 380, height: 128)
+            CGSize(width: 380, height: 69)
         )
         XCTAssertEqual(
             RuntimeSuggestionPanelController.preferredSize(
