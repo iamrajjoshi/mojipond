@@ -332,9 +332,8 @@ private func runAlgorithmFixture(
         firstPayload == secondPayload,
         "Identical inputs must produce identical signed payload bytes."
     )
-    // CryptoKit may hedge either signature algorithm with fresh randomness.
-    // The canonical payload bytes are deterministic; each envelope is then
-    // independently validated instead of comparing signature bytes.
+    // CryptoKit does not guarantee identical signature bytes across runs.
+    // The payload is deterministic, so validate each envelope independently.
 
     let originalOutput = try Data(contentsOf: firstOutputURL)
     let overwriteResult = try runGenerator(firstArguments)

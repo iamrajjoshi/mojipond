@@ -726,7 +726,7 @@ struct LibraryLoadingView: View {
         VStack(spacing: 12) {
             ProgressView()
                 .controlSize(.large)
-            Text("Gathering your emoji…")
+            Text("Loading emoji…")
                 .font(.headline)
             Text("Loading the built-in catalog and installed packs.")
                 .font(.callout)

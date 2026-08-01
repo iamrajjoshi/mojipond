@@ -835,8 +835,8 @@ final class LibraryViewModel: ObservableObject {
                 kind: .information,
                 title: "Copied \(item.displayName)",
                 message: item.unicode == nil
-                    ? "Original image bytes are on the clipboard."
-                    : "Unicode emoji is on the clipboard."
+                    ? "Original image copied to the clipboard."
+                    : "Unicode emoji copied to the clipboard."
             )
         } catch is CancellationError {
             return

@@ -409,12 +409,12 @@ struct LibraryItemDetailView: View {
 
     private var personalAliasFields: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Add words you want to use for this emoji. Separate multiple aliases with commas.")
+            Text("Add alternate shortcodes for this emoji, separated by commas.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            TextField("for example: hello_pond, frog_friend", text: $customAliasesDraft)
+            TextField("hello_pond, frog_friend", text: $customAliasesDraft)
                 .labelsHidden()
                 .font(.body.monospaced())
                 .accessibilityLabel("Aliases, separated by commas")

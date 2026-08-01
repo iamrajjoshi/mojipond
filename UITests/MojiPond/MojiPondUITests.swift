@@ -380,8 +380,8 @@ final class MojiPondUITests: XCTestCase {
         XCTAssertTrue(updateToggle.waitForExistence(timeout: 2))
         XCTAssertTrue(
             application.staticTexts[
-                "Checks quietly each day and shows Update in the menu bar. "
-                    + "You choose when to download and install."
+                "Checks once per day and adds Update to the menu bar. "
+                    + "Downloads and installs require your approval."
             ].exists
         )
         XCTAssertTrue(application.menuItems["Check for Updates…"].exists)

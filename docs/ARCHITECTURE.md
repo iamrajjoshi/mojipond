@@ -1,14 +1,15 @@
 # MojiPond architecture
 
-MojiPond is a single native macOS application. It deliberately separates the
-global event callback, text validation, UI, persistence, import, network, and
-update-verification boundaries so that uncertain state results in no action.
+MojiPond is a single native macOS application. Separate boundaries handle the
+global event callback, text validation, UI, persistence, imports, networking,
+and update verification. If MojiPond cannot validate the current state, it
+does nothing.
 
 The current direct-distribution target is not App Sandbox-enabled. Global
 event monitoring, Accessibility control, and user-selected pack imports are
 instead bounded by explicit TCC consent, strict target revalidation, and the
-validation layers described below. Hardened Runtime is enabled for a real
-signed Release. Ad-hoc local signatures can retain the runtime flag, but only
+validation layers described below. Release builds enable Hardened Runtime.
+Ad-hoc local signatures can retain the runtime flag, but only
 Developer ID release builds can provide the identity, Team ID, trusted
 timestamp, notarization, and Gatekeeper posture required for public
 distribution.
@@ -28,7 +29,7 @@ serial autocomplete worker
   └─ transaction/revision ownership
         │
         ▼
-safety and Accessibility capture
+target validation and Accessibility capture
   ├─ permission preflight
   ├─ secure-input / secure-field check
   ├─ app and optional browser-domain exclusion
@@ -69,7 +70,7 @@ token range, and token content.
 | `Sources/Media` | Noto client, direct HTTPS downloads, and bounded disk-cache primitives |
 | `Sources/MediaCommands` | Messages-only `/sticker` parser, state machine, result grid, offline catalog, and asset resolution |
 | `Sources/Updates` | Signed-feed verification, explicit bounded asset download, hostile ZIP inspection, Developer ID and Gatekeeper validation, private staging, and a locked one-executable installer with atomic replacement, readiness acknowledgement, and rollback |
-| `Sources/UI` | SwiftUI onboarding, settings, Library, ZIP-only import workflow, editors, previews, and shared visual language |
+| `Sources/UI` | SwiftUI onboarding, settings, Library, ZIP-only import workflow, editors, previews, shared controls, and styling |
 
 ## Brand assets
 
@@ -98,8 +99,8 @@ The runtime does nothing when any of these cannot be established:
   still matches the text immediately before the caret.
 
 Browser-domain exclusions are limited to known Safari and Chromium address-bar
-Accessibility shapes. Failure to identify a host does not invent one. App
-exclusions still apply independently.
+Accessibility shapes. If MojiPond cannot identify a host, it leaves the host
+unknown. App exclusions still apply independently.
 
 ## Insertion and clipboard ownership
 
@@ -178,7 +179,7 @@ Portable schema version 2 gives each entry a typed content choice: exactly one
 of a relative `file` path or a validated `unicode` grapheme. The reader still
 accepts schema-version-1 file-only packs. Mixed and Unicode-only packs pass
 through the same collision, transactional install, append, replace, digest,
-and export model; Unicode-only exports do not invent an empty asset directory.
+and export model; Unicode-only exports omit an empty asset directory.
 
 Selected ZIPs are copied into a fresh app-private `0700` staging directory
 through a bounded `O_NOFOLLOW` file descriptor, then locked read-only.
@@ -252,10 +253,10 @@ engines.
 Update checking requires both an HTTPS feed and a bundled trusted public key.
 Manual checks are available from the status menu and About settings;
 automatic checking runs daily after the user enables its preference. The last
-attempt and a non-trusted successful-outcome hint are persisted. A recent
-result with no actionable update waits for the remaining interval; a previously
-available update is freshly checked on launch. The hint never supplies metadata
-or authorizes a download.
+attempt and an untrusted scheduling hint from the last successful result are
+persisted. If a recent check found no actionable update, MojiPond waits for the
+remaining interval. A previously available update is checked again on launch.
+The hint never supplies metadata or authorizes a download.
 The checker limits the feed to 1 MiB by default and verifies its Ed25519 or
 P-256 signature before decoding the release metadata.
 
