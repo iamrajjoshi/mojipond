@@ -1,15 +1,7 @@
----
-interface Props {
-  compact?: boolean;
-}
-
-const { compact = false } = Astro.props;
----
-
-<div class:list={["release-action", { compact }]} data-release-action>
-  <a class="button primary" href="#how-it-works" data-release-fallback
-    >See the picker</a
-  >
+<div class="release-action" data-release-action>
+  <span class="release-pending" data-release-fallback>
+    Mac app in final testing.
+  </span>
   <a
     class="button primary"
     href="/releases/MojiPond.dmg"
@@ -17,11 +9,9 @@ const { compact = false } = Astro.props;
     hidden
     data-release-download
   >
-    Download for macOS
+    Download for Mac
   </a>
-  <span class="release-detail" data-release-detail>
-    Public build pending Apple signing
-  </span>
+  <span class="release-detail" hidden data-release-detail></span>
 </div>
 
 <script>
@@ -33,7 +23,8 @@ const { compact = false } = Astro.props;
   };
 
   const revealRelease = async () => {
-    const actions = document.querySelectorAll("[data-release-action]");
+    const action = document.querySelector("[data-release-action]");
+    if (!(action instanceof HTMLElement)) return;
 
     try {
       const response = await fetch("/releases/release.json", {
@@ -42,9 +33,7 @@ const { compact = false } = Astro.props;
       });
       if (!response.ok) {
         if (response.status !== 404) {
-          console.warn(
-            `Release metadata request failed with HTTP ${response.status}; keeping the preview state.`,
-          );
+          console.warn(`Release metadata request failed: ${response.status}`);
         }
         return;
       }
@@ -52,36 +41,27 @@ const { compact = false } = Astro.props;
       const payload: unknown = await response.json();
       const release = parseReleaseManifest(payload);
       if (!release) {
-        console.warn(
-          "Release metadata has an invalid shape; keeping the preview state.",
-        );
+        console.warn("Release metadata has an invalid shape.");
         return;
       }
 
-      const sizeText = ` · ${formatBytes(release.asset.byteCount)}`;
-      const releaseDetail = `Version ${release.version}${sizeText} · macOS 14 or newer`;
+      const fallback = action.querySelector("[data-release-fallback]");
+      const download = action.querySelector("[data-release-download]");
+      const detail = action.querySelector("[data-release-detail]");
+      if (
+        !(fallback instanceof HTMLSpanElement) ||
+        !(download instanceof HTMLAnchorElement) ||
+        !(detail instanceof HTMLSpanElement)
+      ) {
+        return;
+      }
 
-      actions.forEach((action) => {
-        const fallback = action.querySelector("[data-release-fallback]");
-        const download = action.querySelector("[data-release-download]");
-        const detail = action.querySelector("[data-release-detail]");
-        if (
-          !(fallback instanceof HTMLAnchorElement) ||
-          !(download instanceof HTMLAnchorElement) ||
-          !(detail instanceof HTMLSpanElement)
-        ) {
-          return;
-        }
-
-        fallback.setAttribute("hidden", "");
-        download.removeAttribute("hidden");
-        detail.textContent = releaseDetail;
-      });
+      fallback.setAttribute("hidden", "");
+      download.removeAttribute("hidden");
+      detail.textContent = `Version ${release.version} · ${formatBytes(release.asset.byteCount)} · macOS 14 or newer`;
+      detail.removeAttribute("hidden");
     } catch (error) {
-      console.warn(
-        "Release metadata could not be loaded; keeping the preview state.",
-        error,
-      );
+      console.warn("Release metadata could not be loaded.", error);
     }
   };
 
@@ -96,13 +76,10 @@ const { compact = false } = Astro.props;
     align-items: center;
   }
 
+  .release-pending,
   .release-detail {
     color: var(--ink-muted);
-    font-size: 0.875rem;
-    font-weight: 600;
-  }
-
-  .compact .release-detail {
-    flex-basis: 100%;
+    font-size: 0.88rem;
+    font-weight: 650;
   }
 </style>
