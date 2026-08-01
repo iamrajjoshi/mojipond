@@ -238,8 +238,7 @@ struct SettingsRootView: View {
                 PermissionSettingsRow(
                     title: "Input Monitoring",
                     detail:
-                        "Observes global key events for one bounded shortcode. "
-                        + "Unrelated keys are discarded; typing is not saved.",
+                        "Notices when you type an emoji shortcut.",
                     status: permissions.snapshot.inputMonitoring,
                     request: { permissions.requestInputMonitoring() },
                     openSettings: {
@@ -249,25 +248,11 @@ struct SettingsRootView: View {
                 PermissionSettingsRow(
                     title: "Accessibility",
                     detail:
-                        "Reads bounded text and caret position to show "
-                        + "suggestions and replace your shortcode. Message "
-                        + "text is not saved.",
+                        "Finds the active text field and inserts the emoji you choose.",
                     status: permissions.snapshot.accessibility,
                     request: { permissions.requestAccessibility() },
                     openSettings: {
                         openPermissionSettings(.accessibility)
-                    }
-                )
-                PermissionSettingsRow(
-                    title: "Send & Media Pasting",
-                    detail:
-                        "Optional. Pastes custom images in Messages and "
-                        + "preserves Return after insertion. macOS lists "
-                        + "this access under Accessibility.",
-                    status: permissions.snapshot.eventPosting,
-                    request: { permissions.requestEventPosting() },
-                    openSettings: {
-                        openPermissionSettings(.eventPosting)
                     }
                 )
                 if let permissionNavigationError {
@@ -583,10 +568,15 @@ struct SettingsRootView: View {
     }
 
     private func openPermissionSettings(_ permission: SystemPermission) {
-        permissionNavigationError =
-            permissionSettingsOpener.openSettings(for: permission)
-                ? nil
-                : "Could not open System Settings. Open Privacy & Security manually."
+        let opened = permissionSettingsOpener.openSettings(
+            for: permission
+        )
+        permissionNavigationError = opened
+            ? nil
+            : "Could not open System Settings. Open Privacy & Security manually."
+        if opened {
+            permissions.observeGrant(for: permission)
+        }
     }
 
     private func addDomainExclusion() {
@@ -630,15 +620,15 @@ private struct PermissionSettingsRow: View {
             }
             Spacer()
             PermissionStatusView(permissionName: title, status: status)
-            switch status.primaryAction {
-            case .request:
-                Button("Allow", action: request)
-                    .accessibilityLabel("Allow \(title)")
-            case .openSettings:
-                Button("Open Settings", action: openSettings)
-                    .accessibilityLabel("Open \(title) Settings")
-            case nil:
-                EmptyView()
+            ForEach(status.availableActions, id: \.self) { action in
+                switch action {
+                case .request:
+                    Button("Request Access", action: request)
+                        .accessibilityLabel("Request \(title) Access")
+                case .openSettings:
+                    Button("Open Settings", action: openSettings)
+                        .accessibilityLabel("Open \(title) Settings")
+                }
             }
         }
     }
