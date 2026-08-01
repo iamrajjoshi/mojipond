@@ -199,6 +199,7 @@ struct ShortcodeParser: Sendable {
             let shouldConsume = handleNavigation(
                 key,
                 modifiers: modifiers,
+                at: date,
                 actions: &actions
             )
             return transition(from: originalState, actions: actions, shouldConsume: shouldConsume)
@@ -396,9 +397,10 @@ struct ShortcodeParser: Sendable {
     private mutating func handleNavigation(
         _ key: ParserNavigationKey,
         modifiers: ParserModifiers,
+        at date: Date,
         actions: inout [ShortcodeParserAction]
     ) -> Bool {
-        guard case let .collecting(session) = state else {
+        guard case var .collecting(session) = state else {
             return false
         }
         if modifiers.containsNavigationModifier {
@@ -412,6 +414,8 @@ struct ShortcodeParser: Sendable {
 
         switch key {
         case .arrowUp, .arrowDown:
+            session.lastInputAt = date
+            state = .collecting(session)
             actions.append(.moveSelection(transactionID: session.transactionID, direction: key))
             return true
 
@@ -477,8 +481,10 @@ struct ShortcodeParser: Sendable {
         at date: Date,
         actions: inout [ShortcodeParserAction]
     ) -> Bool {
-        guard case let .collecting(session) = state,
-              date.timeIntervalSince(session.lastInputAt) >= configuration.preferences.parserTimeout else {
+        let timeout = configuration.preferences.parserTimeout
+        guard timeout > 0,
+              case let .collecting(session) = state,
+              date.timeIntervalSince(session.lastInputAt) >= timeout else {
             return false
         }
         reset(.timeout, actions: &actions)

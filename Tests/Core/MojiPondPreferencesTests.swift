@@ -13,6 +13,7 @@ final class MojiPondPreferencesTests: XCTestCase {
         XCTAssertFalse(preferences.shortcode.showsSuggestionsOnBareTrigger)
         XCTAssertTrue(preferences.shortcode.replacesOnExactClosingTrigger)
         XCTAssertTrue(preferences.shortcode.opensBrowserOnDoubleTrigger)
+        XCTAssertEqual(preferences.shortcode.parserTimeout, 0)
         XCTAssertNil(preferences.defaultSkinTone)
         XCTAssertFalse(preferences.network.allowsStickerSearch)
         XCTAssertFalse(preferences.network.allowsUpdateChecks)
@@ -81,8 +82,13 @@ final class MojiPondPreferencesTests: XCTestCase {
         }
     }
 
-    func testTimeoutAndParserMaximumAreBounded() {
-        XCTAssertEqual(ShortcodePreferences(parserTimeout: 0).parserTimeout, 0.1)
+    func testPositiveTimeoutAndParserMaximumAreBounded() {
+        XCTAssertEqual(ShortcodePreferences(parserTimeout: 0).parserTimeout, 0)
+        XCTAssertEqual(
+            ShortcodePreferences(parserTimeout: 0.01).parserTimeout,
+            0.1
+        )
+        XCTAssertEqual(ShortcodePreferences(parserTimeout: 2).parserTimeout, 2)
         XCTAssertEqual(
             ShortcodeParserConfiguration(maximumTokenLength: 10_000).maximumTokenLength,
             Shortcode.maximumLength

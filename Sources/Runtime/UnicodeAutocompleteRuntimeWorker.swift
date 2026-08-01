@@ -1564,7 +1564,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
     }
 
     private func handle(_ actions: [ShortcodeParserAction]) {
-        for action in actions {
+        for (index, action) in actions.enumerated() {
             switch action {
             case let .began(session):
                 begin(session)
@@ -1627,7 +1627,18 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                 )
 
             case let .reset(transactionID, _):
-                clear(transactionID: transactionID)
+                let beginsFreshSession = actions
+                    .dropFirst(index + 1)
+                    .contains { laterAction in
+                        if case .began = laterAction {
+                            return true
+                        }
+                        return false
+                    }
+                clear(
+                    transactionID: transactionID,
+                    preservingFreshSession: beginsFreshSession
+                )
             }
         }
     }
@@ -1693,19 +1704,6 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         armShortcodeInactivityTimeout(for: &transaction)
         activeTransaction = transaction
 
-        guard !transaction.results.isEmpty else {
-            guard
-                interceptionGate.isEventRevisionCurrent(
-                    processingEventRevision
-                )
-            else {
-                return
-            }
-            hideSurface(
-                preservingExactCommitPrediction: true
-            )
-            return
-        }
         retainSurfacePresentationDuringRefresh()
         scheduleCapture(
             transactionID: transactionID,
@@ -1850,11 +1848,13 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         for transaction: inout ActiveTransaction
     ) {
         transaction.activityRevision &+= 1
+        let timeout = configuration.preferences.shortcode.parserTimeout
+        guard timeout > 0 else {
+            return
+        }
         let transactionID = transaction.transactionID
         let activityRevision = transaction.activityRevision
-        let timeoutMilliseconds = Int(
-            configuration.preferences.shortcode.parserTimeout * 1_000
-        )
+        let timeoutMilliseconds = Int(timeout * 1_000)
         queue.asyncAfter(
             deadline: .now() + .milliseconds(timeoutMilliseconds)
         ) { [weak self] in
@@ -2838,9 +2838,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
     private func present(_ transaction: ActiveTransaction) {
         guard
             transaction.visibleMode != .hidden,
-            let caretBounds = transaction.caretBounds,
-            !transaction.results.isEmpty
-                || transaction.visibleMode == .browser
+            let caretBounds = transaction.caretBounds
         else {
             hideSurface()
             return
@@ -2874,8 +2872,13 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             return
         }
         let gate = interceptionGate
-        let acceptsTab = configuration.preferences.shortcode.acceptsTab
-        let acceptsReturn = configuration.preferences.shortcode.acceptsReturn
+        let hasSelection = transaction.results.indices.contains(
+            transaction.selectedIndex
+        )
+        let acceptsTab = hasSelection
+            && configuration.preferences.shortcode.acceptsTab
+        let acceptsReturn = hasSelection
+            && configuration.preferences.shortcode.acceptsReturn
         suggestionPresentationTask?.cancel()
         suggestionPresentationTask = Task { @MainActor [weak self] in
             guard !Task.isCancelled else {
@@ -2982,7 +2985,10 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         }
     }
 
-    private func clear(transactionID: ParserTransactionID) {
+    private func clear(
+        transactionID: ParserTransactionID,
+        preservingFreshSession: Bool = false
+    ) {
         guard activeTransaction?.transactionID == transactionID else {
             return
         }
@@ -2994,7 +3000,10 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         }
         cancelPendingSend()
         activeTransaction = nil
-        hideSurface()
+        hideSurface(
+            preservingInterceptionMode: preservingFreshSession,
+            preservingExactCommitPrediction: preservingFreshSession
+        )
     }
 
     private func cancelCurrentTransaction(reason: ParserResetReason) {

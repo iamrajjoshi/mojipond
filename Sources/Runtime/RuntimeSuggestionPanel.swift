@@ -292,10 +292,6 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
             return false
 
         case let .show(snapshot, caretBounds):
-            guard !snapshot.rows.isEmpty || snapshot.mode == .browser else {
-                panel.orderOut(nil)
-                return false
-            }
             suggestionModel.snapshot = snapshot
             panel.title = snapshot.mode == .browser
                 ? "MojiPond Emoji Browser"
@@ -363,16 +359,20 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
     ) -> CGSize {
         switch snapshot.mode {
         case .hidden, .committing:
-            CGSize(width: 380, height: 1)
+            return CGSize(width: 380, height: 1)
         case .suggestions:
-            CGSize(width: 380, height: 282)
+            let visibleRowCount = min(max(snapshot.rows.count, 1), 5)
+            return CGSize(
+                width: 380,
+                height: CGFloat(visibleRowCount * 48 + 80)
+            )
         case .browser:
-            CGSize(
+            return CGSize(
                 width: 440,
                 height: CGFloat(min(max(snapshot.rows.count, 1), 8) * 44 + 48)
             )
         case .media:
-            CGSize(width: 440, height: 1)
+            return CGSize(width: 440, height: 1)
         }
     }
 }
@@ -411,6 +411,22 @@ struct RuntimeSuggestionPanelView: View {
                 }
                 .padding(.horizontal, 12)
                 .frame(height: 42)
+            } else {
+                HStack(spacing: 8) {
+                    Image(systemName: "water.waves")
+                        .foregroundStyle(PondDesign.pond)
+                    Text("MojiPond")
+                        .font(.subheadline.weight(.semibold))
+                    if let query = snapshot.query, !query.isEmpty {
+                        Text(":\(query)")
+                            .font(.subheadline.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                }
+                .padding(.horizontal, 12)
+                .frame(height: 36)
             }
 
             if snapshot.mode == .browser {
@@ -434,7 +450,6 @@ struct RuntimeSuggestionPanelView: View {
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     rows
-                    Spacer(minLength: 0)
                     Divider()
                     Text("↑↓ choose  ·  tab or ↩ insert  ·  esc close")
                         .font(.caption2)
@@ -446,7 +461,6 @@ struct RuntimeSuggestionPanelView: View {
                         .padding(.horizontal, 12)
                         .frame(height: 30)
                 }
-                .frame(height: 270, alignment: .top)
             }
         }
         .padding(.vertical, 6)
@@ -464,9 +478,13 @@ struct RuntimeSuggestionPanelView: View {
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(
-                    .primary.opacity(
-                        contrast == .increased ? 0.5 : 0.12
-                    ),
+                    snapshot.mode == .browser
+                        ? Color.primary.opacity(
+                            contrast == .increased ? 0.5 : 0.12
+                        )
+                        : PondDesign.pond.opacity(
+                            contrast == .increased ? 0.9 : 0.42
+                        ),
                     lineWidth: contrast == .increased ? 2 : 1
                 )
         }
@@ -483,7 +501,7 @@ struct RuntimeSuggestionPanelView: View {
         if snapshot.rows.isEmpty {
             Text("No matching emoji")
                 .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, minHeight: 44)
+                .frame(maxWidth: .infinity, minHeight: 48)
         } else {
             let selectedID = snapshot.selectedRow?.id
             ForEach(snapshot.rows) { row in

@@ -52,6 +52,9 @@ struct UserDefaultsPreferencesStore: PreferencesPersisting {
                 <= MojiPondPreferences.currentSchemaVersion else {
                 return .defaults
             }
+            if decoded.schemaVersion < 3 {
+                decoded.shortcode.parserTimeout = 0
+            }
             decoded.schemaVersion = MojiPondPreferences.currentSchemaVersion
             save(decoded)
             return decoded

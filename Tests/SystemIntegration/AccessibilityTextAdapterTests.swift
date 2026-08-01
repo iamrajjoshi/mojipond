@@ -62,6 +62,61 @@ final class AccessibilityTextAdapterTests: XCTestCase {
         )
     }
 
+    func testShortcodeTokenRangeRequiresWordBoundaries() {
+        XCTAssertNil(
+            AccessibilityTextAdapter.shortcodeTokenRange(
+                in: "hello:f",
+                selection: NSRange(location: 7, length: 0)
+            )
+        )
+        XCTAssertNil(
+            AccessibilityTextAdapter.shortcodeTokenRange(
+                in: "hello :fworld",
+                selection: NSRange(location: 8, length: 0)
+            )
+        )
+
+        for text in [":f", "hello :f", "hello (:f"] {
+            let selection = NSRange(
+                location: text.utf16.count,
+                length: 0
+            )
+            XCTAssertNotNil(
+                AccessibilityTextAdapter.shortcodeTokenRange(
+                    in: text,
+                    selection: selection
+                ),
+                "Expected a token at a valid boundary in \(text)"
+            )
+        }
+    }
+
+    func testShortcodeTokenRangeTreatsDoubleTriggerAsOneToken() {
+        XCTAssertEqual(
+            AccessibilityTextAdapter.shortcodeTokenRange(
+                in: "::",
+                selection: NSRange(location: 2, length: 0)
+            ),
+            NSRange(location: 0, length: 2)
+        )
+    }
+
+    func testContextRejectsTokenWhenCaretIsInsideFollowingWord() throws {
+        let system = FakeAccessibilityTextSystem()
+        system.text = "hello :fworld"
+        system.selection = NSRange(location: 8, length: 0)
+        let adapter = AccessibilityTextAdapter(system: system)
+
+        let context = try adapter.context(for: adapter.focusedTarget())
+
+        XCTAssertNil(context.tokenRange)
+        XCTAssertEqual(context.textFragment, "hello :f")
+        XCTAssertEqual(
+            context.textFragmentRange,
+            NSRange(location: 0, length: 8)
+        )
+    }
+
     func testDirectReplacementRevalidatesAndDoesNotUseClipboard() throws {
         let system = FakeAccessibilityTextSystem()
         system.text = "Hello :frog:"

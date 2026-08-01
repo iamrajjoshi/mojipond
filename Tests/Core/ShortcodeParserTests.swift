@@ -307,6 +307,58 @@ final class ShortcodeParserTests: XCTestCase {
         XCTAssertEqual(parser.state.session?.transactionID.rawValue, 8)
     }
 
+    func testZeroTimeoutKeepsSessionAliveUntilExplicitlyCancelled() {
+        var parser = ShortcodeParser()
+        parser.handle(.character(":"), at: start)
+        parser.handle(.character("f"), at: start)
+
+        let timeout = parser.handle(
+            .timeout,
+            at: start.addingTimeInterval(60)
+        )
+
+        XCTAssertTrue(timeout.actions.isEmpty)
+        XCTAssertEqual(timeout.currentState.session?.query, "f")
+    }
+
+    func testNavigationRefreshesPositiveTimeoutActivity() {
+        let preferences = ShortcodePreferences(parserTimeout: 1)
+        var parser = ShortcodeParser(
+            configuration: ShortcodeParserConfiguration(
+                preferences: preferences
+            )
+        )
+        parser.handle(.character(":"), at: start)
+        parser.handle(.character("f"), at: start)
+
+        let navigation = parser.handle(
+            .navigation(.arrowDown),
+            at: start.addingTimeInterval(0.75)
+        )
+        XCTAssertTrue(navigation.shouldConsumeEvent)
+
+        let beforeRefreshedDeadline = parser.handle(
+            .timeout,
+            at: start.addingTimeInterval(1.5)
+        )
+        XCTAssertTrue(beforeRefreshedDeadline.actions.isEmpty)
+        XCTAssertEqual(beforeRefreshedDeadline.currentState.session?.query, "f")
+
+        let afterRefreshedDeadline = parser.handle(
+            .timeout,
+            at: start.addingTimeInterval(1.75)
+        )
+        XCTAssertEqual(
+            afterRefreshedDeadline.actions,
+            [
+                .reset(
+                    transactionID: ParserTransactionID(rawValue: 1),
+                    reason: .timeout
+                )
+            ]
+        )
+    }
+
     func testTriggerTypedAfterTimeoutStartsFreshTransactionInSameTransition() {
         let preferences = ShortcodePreferences(parserTimeout: 1)
         var parser = ShortcodeParser(

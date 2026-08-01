@@ -35,7 +35,7 @@ struct ShortcodePreferences: Codable, Equatable, Sendable {
         showsSuggestionsOnBareTrigger: Bool = false,
         replacesOnExactClosingTrigger: Bool = true,
         opensBrowserOnDoubleTrigger: Bool = true,
-        parserTimeout: TimeInterval = 3
+        parserTimeout: TimeInterval = 0
     ) {
         self.trigger = trigger
         self.acceptsTab = acceptsTab
@@ -43,7 +43,9 @@ struct ShortcodePreferences: Codable, Equatable, Sendable {
         self.showsSuggestionsOnBareTrigger = showsSuggestionsOnBareTrigger
         self.replacesOnExactClosingTrigger = replacesOnExactClosingTrigger
         self.opensBrowserOnDoubleTrigger = opensBrowserOnDoubleTrigger
-        self.parserTimeout = max(0.1, parserTimeout)
+        self.parserTimeout = parserTimeout > 0
+            ? max(0.1, parserTimeout)
+            : 0
     }
 }
 
@@ -201,7 +203,7 @@ struct ExclusionPreferences: Codable, Equatable, Sendable {
 }
 
 struct MojiPondPreferences: Codable, Equatable, Sendable {
-    static let currentSchemaVersion = 2
+    static let currentSchemaVersion = 3
 
     var schemaVersion: Int
     var activationMode: GlobalActivationMode

@@ -24,6 +24,7 @@ final class PreferencesStoreTests: XCTestCase {
         var expected = MojiPondPreferences.defaults
         expected.shortcode.trigger = .semicolon
         expected.shortcode.showsSuggestionsOnBareTrigger = true
+        expected.shortcode.parserTimeout = 12
         expected.network.allowsStickerSearch = true
         expected.exclusions.domains = [
             DomainExclusion(domain: "example.com")!
@@ -97,6 +98,32 @@ final class PreferencesStoreTests: XCTestCase {
         )
         XCTAssertFalse(persistedText.contains("allowsGitHubImports"))
         XCTAssertFalse(persistedText.contains("allowsGIFSearch"))
+    }
+
+    func testVersionTwoDocumentMigratesTimeoutToPersistentDefault() throws {
+        var stored = MojiPondPreferences.defaults
+        stored.schemaVersion = 2
+        stored.shortcode.parserTimeout = 3
+        defaults.set(
+            try JSONEncoder().encode(stored),
+            forKey: UserDefaultsPreferencesStore.storageKey
+        )
+
+        let migrated = makeStore().load()
+
+        XCTAssertEqual(
+            migrated.schemaVersion,
+            MojiPondPreferences.currentSchemaVersion
+        )
+        XCTAssertEqual(migrated.shortcode.parserTimeout, 0)
+        let persistedData = try XCTUnwrap(
+            defaults.data(forKey: UserDefaultsPreferencesStore.storageKey)
+        )
+        let persisted = try JSONDecoder().decode(
+            MojiPondPreferences.self,
+            from: persistedData
+        )
+        XCTAssertEqual(persisted, migrated)
     }
 
     func testLegacyGiphyDataCleanupRemovesDefaultsAndCredential() {
