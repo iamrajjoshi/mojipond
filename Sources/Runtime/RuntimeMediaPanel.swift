@@ -14,9 +14,23 @@ enum RuntimeMediaPanelState: Equatable, Sendable {
     case rateLimited
     case failed(MediaCommandFailure)
     case resolving
+
+    var allowsResultSelection: Bool {
+        switch self {
+        case .results, .offline:
+            true
+        case .idle, .loading, .empty, .cancelled, .rateLimited,
+             .failed, .resolving:
+            false
+        }
+    }
+
+    var capturesBusySelectionKeys: Bool {
+        self == .resolving
+    }
 }
 
-enum RuntimeMediaPreviewPlayback: Equatable, Sendable {
+enum RuntimeMediaPreviewPlayback: Equatable, Hashable, Sendable {
     case animated
     case staticFrame
 
@@ -156,6 +170,47 @@ struct RuntimeMediaPanelSnapshot: Equatable, Sendable {
         selectedIndex: nil,
         attributions: []
     )
+
+    var canActivateSelection: Bool {
+        !items.isEmpty && state.allowsResultSelection
+    }
+
+    var capturesSelectionKeys: Bool {
+        canActivateSelection
+            || (!items.isEmpty && state.capturesBusySelectionKeys)
+    }
+
+    var interactionHint: String {
+        if state == .resolving {
+            return "preparing  ·  esc cancel"
+        }
+        if canActivateSelection {
+            return "arrows choose  ·  ↩ insert  ·  esc close"
+        }
+        if state == .cancelled {
+            return "closing…"
+        }
+        if state == .idle {
+            return "type to search  ·  esc close"
+        }
+        return "type to refine  ·  esc close"
+    }
+
+    var interactionAccessibilityLabel: String {
+        if state == .resolving {
+            return "Preparing media, Escape cancels"
+        }
+        if canActivateSelection {
+            return "Arrow keys choose, Return inserts, Escape closes"
+        }
+        if state == .cancelled {
+            return "Closing media search"
+        }
+        if state == .idle {
+            return "Type to search, Escape closes"
+        }
+        return "Type to refine the search, Escape closes"
+    }
 }
 
 enum RuntimeMediaPanelUpdate: Equatable, Sendable {
@@ -194,14 +249,33 @@ struct RuntimeMediaPanelView: View {
         model.snapshot
     }
 
+    private static let columnCount = 4
+    private static let maximumVisibleGridRows = 3
+    private static let gridRowHeight: CGFloat = 103
+    private static let gridSpacing: CGFloat = 8
+    private static let gridChromeHeight: CGFloat = 105
+
     static func preferredSize(
         for snapshot: RuntimeMediaPanelSnapshot
     ) -> CGSize {
         let hasGrid = !snapshot.items.isEmpty
         return CGSize(
             width: 500,
-            height: hasGrid ? 430 : 146
+            height: hasGrid
+                ? gridChromeHeight + gridHeight(
+                    itemCount: snapshot.items.count
+                )
+                : 146
         )
+    }
+
+    static func gridHeight(itemCount: Int) -> CGFloat {
+        let rowCount = min(
+            max((itemCount + columnCount - 1) / columnCount, 1),
+            maximumVisibleGridRows
+        )
+        return CGFloat(rowCount) * gridRowHeight
+            + CGFloat(max(rowCount - 1, 0)) * gridSpacing
     }
 
     var body: some View {
@@ -231,19 +305,10 @@ struct RuntimeMediaPanelView: View {
                 style: .continuous
             )
                 .fill(
-                    reduceTransparency
-                        ? AnyShapeStyle(PondDesign.surface)
-                        : AnyShapeStyle(.regularMaterial)
+                    PondDesign.surface.opacity(
+                        reduceTransparency ? 1 : 0.97
+                    )
                 )
-                .overlay {
-                    if !reduceTransparency {
-                        RoundedRectangle(
-                            cornerRadius: PondDesign.cornerRadius,
-                            style: .continuous
-                        )
-                        .fill(PondDesign.surface.opacity(0.76))
-                    }
-                }
         }
         .clipShape(
             RoundedRectangle(
@@ -264,7 +329,6 @@ struct RuntimeMediaPanelView: View {
                 )
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("MojiPond media search")
     }
 
     private var header: some View {
@@ -275,13 +339,13 @@ struct RuntimeMediaPanelView: View {
                 .font(.headline.monospaced())
             statusBadge
             Spacer()
-            Text("arrows choose  ·  ↩ insert  ·  esc close")
+            Text(snapshot.interactionHint)
                 .font(.caption2)
                 .foregroundStyle(
                     PondDesign.onDeepWater.opacity(0.72)
                 )
                 .accessibilityLabel(
-                    "Arrow keys choose, Return inserts, Escape closes"
+                    snapshot.interactionAccessibilityLabel
                 )
         }
         .foregroundStyle(PondDesign.onDeepWater)
@@ -323,7 +387,7 @@ struct RuntimeMediaPanelView: View {
                 LazyVGrid(
                     columns: Array(
                         repeating: GridItem(.flexible(), spacing: 8),
-                        count: 4
+                        count: Self.columnCount
                     ),
                     spacing: 8
                 ) {
@@ -336,7 +400,11 @@ struct RuntimeMediaPanelView: View {
                     }
                 }
             }
-            .frame(height: 326)
+            .frame(
+                height: Self.gridHeight(
+                    itemCount: snapshot.items.count
+                )
+            )
             .scrollIndicators(.visible)
             .onAppear {
                 scrollToSelection(using: proxy)
@@ -397,7 +465,7 @@ struct RuntimeMediaPanelView: View {
             )
         case let .failed(failure):
             Label(
-                failureMessage(failure),
+                failure.runtimePresentationMessage,
                 systemImage: "exclamationmark.triangle"
             )
         case .resolving:
@@ -428,8 +496,11 @@ struct RuntimeMediaPanelView: View {
         }
     }
 
-    private func failureMessage(_ failure: MediaCommandFailure) -> String {
-        switch failure {
+}
+
+extension MediaCommandFailure {
+    var runtimePresentationMessage: String {
+        switch self {
         case .invalidQuery:
             "Enter a shorter search term."
         case .providerUnavailable:
@@ -512,22 +583,9 @@ private struct RuntimeMediaCell: View {
                 style: .continuous
             )
             .stroke(
-                PondDesign.ripple.opacity(isSelected ? 0.72 : 0.18),
+                PondDesign.ripple.opacity(0.18),
                 lineWidth: 1
             )
-        }
-        .overlay(alignment: .topTrailing) {
-            if isSelected {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.caption.weight(.semibold))
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(
-                        PondDesign.onDeepWater,
-                        PondDesign.lotus
-                    )
-                    .padding(8)
-                    .accessibilityHidden(true)
-            }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
@@ -590,7 +648,7 @@ private extension View {
     }
 }
 
-private struct RuntimeAnimatedMediaPreview: NSViewRepresentable {
+struct RuntimeAnimatedMediaPreview: NSViewRepresentable {
     let url: URL
     let provider: RemoteMediaProvider
     let animates: Bool
@@ -646,11 +704,17 @@ private struct RuntimeAnimatedMediaPreview: NSViewRepresentable {
 
     @MainActor
     final class Coordinator {
+        typealias SourceLoader = @MainActor (
+            URL,
+            RemoteMediaProvider
+        ) async throws -> Data
+
         private enum PreviewError: Error {
             case unavailable
         }
 
-        private static let maximumPreviewBytes = 4 * 1_024 * 1_024
+        nonisolated private static let maximumPreviewBytes =
+            4 * 1_024 * 1_024
         private static let session =
             RuntimeMediaNetworkPolicy.nonCachingSession()
         private static let responseLoader = BoundedHTTPSResponseLoader(
@@ -659,8 +723,18 @@ private struct RuntimeAnimatedMediaPreview: NSViewRepresentable {
         private var representedURL: URL?
         private var representedProvider: RemoteMediaProvider?
         private var representedAnimation = false
-        private var task: Task<Void, Never>?
-        private var generation: UInt64 = 0
+        private let sourceLoader: SourceLoader
+        private var sourceTask: Task<Void, Never>?
+        private var renderTask: Task<Void, Never>?
+        private var sourceGeneration: UInt64 = 0
+        private var renderGeneration: UInt64 = 0
+        private var validatedSourceData: Data?
+        private var preparedDataByPlayback:
+            [RuntimeMediaPreviewPlayback: Data] = [:]
+
+        init(sourceLoader: @escaping SourceLoader = Coordinator.loadSource) {
+            self.sourceLoader = sourceLoader
+        }
 
         func load(
             _ url: URL,
@@ -671,123 +745,83 @@ private struct RuntimeAnimatedMediaPreview: NSViewRepresentable {
                 RuntimeMediaPreviewLoadState
             ) -> Void
         ) {
-            guard
-                representedURL != url
-                    || representedProvider != provider
-                    || representedAnimation != animates
-            else {
+            let sourceChanged = representedURL != url
+                || representedProvider != provider
+            guard sourceChanged || representedAnimation != animates else {
                 return
             }
+
+            if !sourceChanged {
+                representedAnimation = animates
+                renderDesiredPlayback(
+                    into: imageView,
+                    stateChanged: stateChanged
+                )
+                return
+            }
+
             representedURL = url
             representedProvider = provider
             representedAnimation = animates
-            task?.cancel()
-            generation &+= 1
-            let requestGeneration = generation
+            sourceTask?.cancel()
+            renderTask?.cancel()
+            sourceGeneration &+= 1
+            renderGeneration &+= 1
+            let requestGeneration = sourceGeneration
+            validatedSourceData = nil
+            preparedDataByPlayback.removeAll(keepingCapacity: true)
             imageView.image = nil
             imageView.animates = false
+            stateChanged(.loading)
 
-            task = Task { @MainActor [weak self, weak imageView] in
+            let sourceLoader = sourceLoader
+            sourceTask = Task { @MainActor [weak self, weak imageView] in
                 guard let self else {
                     return
                 }
-                stateChanged(.loading)
                 let data: Data
                 do {
-                    if url.isFileURL {
-                        let values = try url.resourceValues(
-                            forKeys: [
-                                .isRegularFileKey,
-                                .isSymbolicLinkKey,
-                                .fileSizeKey
-                            ]
-                        )
-                        guard
-                            values.isRegularFile == true,
-                            values.isSymbolicLink != true,
-                            let fileSize = values.fileSize,
-                            fileSize > 0,
-                            fileSize <= Self.maximumPreviewBytes
-                        else {
-                            throw PreviewError.unavailable
-                        }
-                        data = try Data(
-                            contentsOf: url,
-                            options: [.mappedIfSafe]
-                        )
-                    } else {
-                        guard RemoteMediaURLPolicy.allows(
-                            url,
-                            for: provider
-                        ) else {
-                            throw PreviewError.unavailable
-                        }
-                        let request =
-                            RuntimeMediaNetworkPolicy.nonCachingRequest(
-                                for: url
-                            )
-                        let loaded = try await Self.responseLoader.load(
-                            request,
-                            maximumBytes: Self.maximumPreviewBytes,
-                            redirectPolicy: .sameHost
-                        )
-                        let response = loaded.response
-                        guard
-                            (200 ..< 300).contains(response.statusCode),
-                            response.mimeType?.hasPrefix("image/") == true
-                        else {
-                            throw PreviewError.unavailable
-                        }
-                        data = loaded.data
-                    }
+                    data = try await sourceLoader(url, provider)
                     try Task.checkCancellation()
-                    var limits = AssetValidationLimits.default
-                    limits.maximumFileBytes = Int64(
-                        Self.maximumPreviewBytes
-                    )
-                    limits.maximumPixelWidth = 2_048
-                    limits.maximumPixelHeight = 2_048
-                    limits.maximumPixelsPerFrame = 4_194_304
-                    limits.maximumFrameCount = 90
-                    limits.maximumTotalAnimationPixels = 24_000_000
-                    limits.maximumAnimationDurationSeconds = 30
-                    let playback: RuntimeMediaPreviewPlayback =
-                        animates ? .animated : .staticFrame
-                    let preparedData = await Task.detached(
+                    let validatedData = await Task.detached(
                         priority: .utility
                     ) { () -> Data? in
                         RuntimeMediaPreviewPolicy.prepareImageData(
                             data,
-                            playback: playback,
-                            limits: limits
+                            playback: .animated,
+                            limits: Self.validationLimits
                         )
                     }.value
                     guard
-                        let preparedData,
-                        !preparedData.isEmpty,
-                        let image = NSImage(data: preparedData)
+                        let validatedData,
+                        !validatedData.isEmpty
                     else {
                         throw PreviewError.unavailable
                     }
                     guard
                         !Task.isCancelled,
-                        generation == requestGeneration,
+                        sourceGeneration == requestGeneration,
                         let imageView
                     else {
                         return
                     }
-                    imageView.animates = animates
-                    imageView.image = image
-                    stateChanged(.loaded)
+                    validatedSourceData = validatedData
+                    preparedDataByPlayback[.animated] = validatedData
+                    sourceTask = nil
+                    renderDesiredPlayback(
+                        into: imageView,
+                        stateChanged: stateChanged
+                    )
                 } catch is CancellationError {
                     return
                 } catch {
                     guard
                         !Task.isCancelled,
-                        generation == requestGeneration
+                        sourceGeneration == requestGeneration
                     else {
                         return
                     }
+                    sourceTask = nil
                     imageView?.animates = false
                     imageView?.image = nil
                     stateChanged(.failed)
@@ -796,12 +830,157 @@ private struct RuntimeAnimatedMediaPreview: NSViewRepresentable {
         }
 
         func cancel() {
-            task?.cancel()
-            task = nil
-            generation &+= 1
+            sourceTask?.cancel()
+            sourceTask = nil
+            renderTask?.cancel()
+            renderTask = nil
+            sourceGeneration &+= 1
+            renderGeneration &+= 1
             representedURL = nil
             representedProvider = nil
             representedAnimation = false
+            validatedSourceData = nil
+            preparedDataByPlayback.removeAll(keepingCapacity: false)
+        }
+
+        private func renderDesiredPlayback(
+            into imageView: NSImageView,
+            stateChanged: @escaping @MainActor (
+                RuntimeMediaPreviewLoadState
+            ) -> Void
+        ) {
+            let playback = RuntimeMediaPreviewPolicy.playback(
+                isSelected: representedAnimation,
+                reduceMotion: false
+            )
+            imageView.animates = playback.animates
+            renderTask?.cancel()
+            renderTask = nil
+            renderGeneration &+= 1
+            let requestGeneration = renderGeneration
+
+            if let preparedData = preparedDataByPlayback[playback] {
+                apply(
+                    preparedData,
+                    playback: playback,
+                    to: imageView,
+                    stateChanged: stateChanged
+                )
+                return
+            }
+            guard let validatedSourceData else {
+                return
+            }
+
+            renderTask = Task { @MainActor [weak self, weak imageView] in
+                let preparedData = await Task.detached(
+                    priority: .utility
+                ) { () -> Data? in
+                    RuntimeMediaPreviewPolicy.prepareImageData(
+                        validatedSourceData,
+                        playback: playback,
+                        limits: Self.validationLimits
+                    )
+                }.value
+                guard
+                    let self,
+                    !Task.isCancelled,
+                    renderGeneration == requestGeneration,
+                    let imageView
+                else {
+                    return
+                }
+                let displayData = preparedData ?? validatedSourceData
+                preparedDataByPlayback[playback] = displayData
+                renderTask = nil
+                apply(
+                    displayData,
+                    playback: playback,
+                    to: imageView,
+                    stateChanged: stateChanged
+                )
+            }
+        }
+
+        private func apply(
+            _ data: Data,
+            playback: RuntimeMediaPreviewPlayback,
+            to imageView: NSImageView,
+            stateChanged: @escaping @MainActor (
+                RuntimeMediaPreviewLoadState
+            ) -> Void
+        ) {
+            guard let image = NSImage(data: data) else {
+                imageView.animates = false
+                imageView.image = nil
+                stateChanged(.failed)
+                return
+            }
+            imageView.animates = playback.animates
+            imageView.image = image
+            stateChanged(.loaded)
+        }
+
+        nonisolated private static var validationLimits:
+            AssetValidationLimits
+        {
+            var limits = AssetValidationLimits.default
+            limits.maximumFileBytes = Int64(maximumPreviewBytes)
+            limits.maximumPixelWidth = 2_048
+            limits.maximumPixelHeight = 2_048
+            limits.maximumPixelsPerFrame = 4_194_304
+            limits.maximumFrameCount = 90
+            limits.maximumTotalAnimationPixels = 24_000_000
+            limits.maximumAnimationDurationSeconds = 30
+            return limits
+        }
+
+        private static func loadSource(
+            _ url: URL,
+            provider: RemoteMediaProvider
+        ) async throws -> Data {
+            if url.isFileURL {
+                let values = try url.resourceValues(
+                    forKeys: [
+                        .isRegularFileKey,
+                        .isSymbolicLinkKey,
+                        .fileSizeKey
+                    ]
+                )
+                guard
+                    values.isRegularFile == true,
+                    values.isSymbolicLink != true,
+                    let fileSize = values.fileSize,
+                    fileSize > 0,
+                    fileSize <= maximumPreviewBytes
+                else {
+                    throw PreviewError.unavailable
+                }
+                return try Data(
+                    contentsOf: url,
+                    options: [.mappedIfSafe]
+                )
+            }
+
+            guard RemoteMediaURLPolicy.allows(url, for: provider) else {
+                throw PreviewError.unavailable
+            }
+            let request = RuntimeMediaNetworkPolicy.nonCachingRequest(
+                for: url
+            )
+            let loaded = try await responseLoader.load(
+                request,
+                maximumBytes: maximumPreviewBytes,
+                redirectPolicy: .sameHost
+            )
+            let response = loaded.response
+            guard
+                (200 ..< 300).contains(response.statusCode),
+                response.mimeType?.hasPrefix("image/") == true
+            else {
+                throw PreviewError.unavailable
+            }
+            return loaded.data
         }
     }
 }

@@ -1507,6 +1507,18 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
             await coordinator.resolveCount() == 1
         }
         XCTAssertTrue(resolveStarted)
+        let didShowResolving = await eventually {
+            harness.presenter.latestMedia?.state == .resolving
+        }
+        XCTAssertTrue(didShowResolving)
+
+        harness.worker.enqueue(
+            keySnapshot(keyCode: RuntimeKeyboardKeyCode.returnKey)
+        )
+        try? await Task.sleep(for: .milliseconds(30))
+        let resolveCountAfterRepeatedReturn = await coordinator.resolveCount()
+        XCTAssertEqual(resolveCountAfterRepeatedReturn, 1)
+
         harness.worker.enqueue(
             keySnapshot(keyCode: RuntimeKeyboardKeyCode.escape)
         )

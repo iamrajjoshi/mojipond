@@ -40,7 +40,7 @@ without ranged access are left untouched.
 | --- | --- |
 | Input Monitoring | Global key events for shortcode parsing and suggestion navigation |
 | Accessibility | Focused-control safety checks, bounded text context, caret placement, exact replacement, and configured browser exclusions |
-| Event Posting | Tagged Command-V for image insertion and Return after a confirmed shortcode replacement |
+| Event Posting (shown as Image emoji in Messages) | Tagged Command-V for custom-image insertion and Return after a confirmed shortcode replacement; optional for Unicode emoji |
 
 Permission checks are preflight-only during normal startup. A system prompt is
 requested only after an explicit Allow action in onboarding or settings.
@@ -55,10 +55,11 @@ MojiPond does not request Screen Recording, Full Disk Access, Contacts,
 Microphone, Camera, or access to the Messages database.
 
 The current app is not App Sandbox-enabled. That does not bypass TCC:
-Input Monitoring, Accessibility, and Event Posting still require explicit
-macOS approval. It does mean the validation and fail-closed boundaries in this
-document are part of the app’s security model rather than sandbox-enforced file
-or network restrictions.
+Input Monitoring and Accessibility require explicit macOS approval for typing
+shortcuts. Event Posting requires separate approval for custom-image insertion
+in Messages and for replaying Return after an accepted replacement. The
+validation and fail-closed boundaries in this document are part of the app’s
+security model rather than sandbox-enforced file or network restrictions.
 
 ## Stored data
 

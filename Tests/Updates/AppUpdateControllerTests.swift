@@ -384,6 +384,35 @@ final class AppUpdateControllerTests: XCTestCase {
         controller.automaticChecksPreferenceDidChange(enabled: false)
     }
 
+    func testCancelCurrentOperationKeepsKnownUpdateAvailable()
+        async throws
+    {
+        let fixture = try await makeVerifiedUpdateFixture()
+        let refreshChecker = SuspendedUpdateChecker()
+        let checkerSequence = UpdateCheckerSequence([
+            ImmediateUpdateChecker(
+                result: .verified(fixture.metadata)
+            ),
+            refreshChecker,
+        ])
+        let controller = AppUpdateController(
+            configuration: fixture.configuration,
+            currentVersion: "0.1.0",
+            currentBuild: 1,
+            checkerFactory: { _ in checkerSequence.next() }
+        )
+
+        controller.checkManually(automaticChecksEnabled: false)
+        await waitForCheckToFinish(controller)
+        XCTAssertEqual(controller.state, .available(fixture.metadata))
+
+        controller.checkManually(automaticChecksEnabled: false)
+        await refreshChecker.waitUntilStarted()
+        controller.cancelCurrentOperation()
+
+        XCTAssertEqual(controller.state, .available(fixture.metadata))
+    }
+
     func testScheduledCheckRefreshesAnAvailableUpdate()
         async throws
     {
@@ -809,7 +838,7 @@ final class AppUpdateControllerTests: XCTestCase {
                 expectedState = .available(fixture.metadata)
             } else {
                 controller.cancelCurrentOperation()
-                expectedState = .idle
+                expectedState = .available(fixture.metadata)
             }
             XCTAssertEqual(
                 controller.state,

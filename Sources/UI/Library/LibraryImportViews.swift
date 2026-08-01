@@ -1,78 +1,4 @@
-import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
-
-struct LibraryImportSourceView: View {
-    @ObservedObject var viewModel: LibraryViewModel
-    let didSubmit: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack(alignment: .top, spacing: 14) {
-                PondMark(size: 46)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Import a ZIP pack")
-                        .font(.title2.weight(.semibold))
-                    Text("Every import is reviewed before files are copied into MojiPond.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            PondCard {
-                HStack(spacing: 16) {
-                    Image(systemName: "doc.zipper")
-                        .font(.system(size: 30))
-                        .foregroundStyle(PondDesign.pond)
-                        .frame(width: 40)
-                        .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("ZIP archive")
-                            .font(.headline)
-                        Text(
-                            "Choose a ZIP containing a portable pack or supported images. "
-                                + "MojiPond safety-checks the archive and shows a preview before install."
-                        )
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button("Choose ZIP…", action: chooseZIP)
-                        .buttonStyle(.borderedProminent)
-                        .keyboardShortcut(.defaultAction)
-                }
-            }
-            .frame(maxWidth: .infinity, minHeight: 150, alignment: .topLeading)
-
-            HStack {
-                Label(
-                    "The archive is inspected locally. Importing it does not contact the network.",
-                    systemImage: "lock.shield"
-                )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("Cancel", action: didSubmit)
-                    .keyboardShortcut(.cancelAction)
-            }
-        }
-        .padding(24)
-        .frame(width: 680)
-    }
-
-    private func chooseZIP() {
-        let panel = NSOpenPanel()
-        panel.title = "Choose an emoji ZIP archive"
-        panel.prompt = "Review"
-        panel.canChooseDirectories = false
-        panel.allowedContentTypes = [.zip]
-        guard panel.runModal() == .OK, let url = panel.url else {
-            return
-        }
-        viewModel.prepareImport(.zipArchive(url))
-        didSubmit()
-    }
-}
 
 struct LibraryImportPreviewView: View {
     @ObservedObject var viewModel: LibraryViewModel
@@ -112,7 +38,7 @@ struct LibraryImportPreviewView: View {
                     issuesPreview(session)
                         .tabItem {
                             Label(
-                                "Issues (\(session.preview.rejections.count))",
+                                "Issues (\(issueCount(session)))",
                                 systemImage: "exclamationmark.triangle"
                             )
                         }
@@ -124,7 +50,12 @@ struct LibraryImportPreviewView: View {
                 Divider()
                 footer(session)
             }
-            .frame(minWidth: 780, idealWidth: 900, minHeight: 600, idealHeight: 700)
+            .frame(
+                minWidth: 760,
+                idealWidth: 860,
+                minHeight: 560,
+                idealHeight: 640
+            )
             .overlay {
                 if viewModel.isInstallingImport {
                     ZStack {
@@ -136,6 +67,11 @@ struct LibraryImportPreviewView: View {
                 }
             }
             .interactiveDismissDisabled(viewModel.isInstallingImport)
+            .onAppear {
+                if viewModel.unresolvedConflictCount > 0 {
+                    selectedTab = .conflicts
+                }
+            }
         } else {
             ProgressView()
                 .frame(width: 420, height: 260)
@@ -167,7 +103,11 @@ struct LibraryImportPreviewView: View {
                 VStack(alignment: .trailing, spacing: 3) {
                     Text("\(viewModel.unresolvedConflictCount)")
                         .font(.title3.monospacedDigit().weight(.semibold))
-                    Text("decisions left")
+                    Text(
+                        viewModel.unresolvedConflictCount == 1
+                            ? "decision left"
+                            : "decisions left"
+                    )
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -180,7 +120,7 @@ struct LibraryImportPreviewView: View {
     private func itemPreview(_ session: LibraryImportSession) -> some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Accepted emoji")
+                Text("Valid emoji")
                     .font(.headline)
                 Spacer()
                 Text("Source name → shortcode")
@@ -250,7 +190,7 @@ struct LibraryImportPreviewView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Shortcode conflicts")
                         .font(.headline)
-                    Text("Nothing is replaced unless you choose it explicitly.")
+                    Text("Choose what happens to each duplicate shortcode.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -363,6 +303,17 @@ struct LibraryImportPreviewView: View {
                 isAnimated: displayItem?.isAnimated ?? false
             )
         case let .reserved(owner):
+            let displayItem = switch owner.source {
+            case .builtIn:
+                viewModel.allDisplayItems.first {
+                    $0.id == "builtin-\(owner.itemID)"
+                }
+            case .customAlias:
+                viewModel.allDisplayItems.first {
+                    $0.id == "builtin-\(owner.itemID)"
+                        || $0.id == "custom-\(owner.itemID)"
+                }
+            }
             let heading = switch owner.source {
             case .builtIn:
                 "Protected · \(owner.packName)"
@@ -376,9 +327,9 @@ struct LibraryImportPreviewView: View {
                 detail: owner.isAlias
                     ? "\(owner.itemName) currently claims this as an alias"
                     : "\(owner.itemName) currently owns this shortcode",
-                url: nil,
-                unicode: nil,
-                isAnimated: false
+                url: displayItem?.assetURL,
+                unicode: displayItem?.unicode,
+                isAnimated: displayItem?.isAnimated ?? false
             )
         case let .incoming(candidateID, claim):
             guard
@@ -415,7 +366,7 @@ struct LibraryImportPreviewView: View {
                 if !session.duplicateContent.isEmpty {
                     previewSection(
                         title: "Duplicate content",
-                        subtitle: "These files share the same SHA-256 content. They are shown for review but are not silently removed."
+                        subtitle: "These items use identical image data. Review them before installing."
                     ) {
                         ForEach(Array(session.duplicateContent.enumerated()), id: \.offset) { _, group in
                             Label(
@@ -453,7 +404,7 @@ struct LibraryImportPreviewView: View {
                 if session.preview.ignoredFileCount > 0 {
                     previewSection(
                         title: "Ignored files",
-                        subtitle: "Unsupported or unrelated files are left untouched."
+                        subtitle: "Unsupported or unrelated files won't be installed."
                     ) {
                         Text("\(session.preview.ignoredFileCount.formatted()) files ignored")
                             .font(.callout)
@@ -527,11 +478,47 @@ struct LibraryImportPreviewView: View {
     }
 
     private func summary(_ session: LibraryImportSession) -> String {
-        let bytes = ByteCountFormatter.string(
-            fromByteCount: session.preview.totalByteCount,
-            countStyle: .file
-        )
-        return "\(session.preview.items.count.formatted()) accepted · \(bytes) · \(session.preview.rejections.count.formatted()) rejected · \(session.preview.ignoredFileCount.formatted()) ignored"
+        var parts = [
+            countLabel(
+                session.preview.items.count,
+                singular: "valid emoji",
+                plural: "valid emoji"
+            )
+        ]
+        if session.preview.totalByteCount > 0 {
+            parts.append(
+                ByteCountFormatter.string(
+                    fromByteCount: session.preview.totalByteCount,
+                    countStyle: .file
+                )
+            )
+        }
+        if !session.preview.rejections.isEmpty {
+            parts.append(
+                countLabel(
+                    session.preview.rejections.count,
+                    singular: "rejected file"
+                )
+            )
+        }
+        if session.preview.ignoredFileCount > 0 {
+            parts.append(
+                countLabel(
+                    session.preview.ignoredFileCount,
+                    singular: "ignored file"
+                )
+            )
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func countLabel(
+        _ count: Int,
+        singular: String,
+        plural: String? = nil
+    ) -> String {
+        let noun = count == 1 ? singular : plural ?? "\(singular)s"
+        return "\(count.formatted()) \(noun)"
     }
 
     private func reviewTitle(_ session: LibraryImportSession) -> String {
@@ -572,7 +559,7 @@ struct LibraryImportPreviewView: View {
             return "Copies the reviewed emoji into MojiPond"
         }
         if session.preview.items.isEmpty {
-            return "The ZIP has no accepted emoji"
+            return "The ZIP has no valid emoji"
         }
         return "Resolve all shortcode conflicts first"
     }
@@ -580,7 +567,22 @@ struct LibraryImportPreviewView: View {
     private func duplicateSummary(_ group: ImportDuplicateContentGroup) -> String {
         let incoming = group.incomingItemIDs.count
         let existing = group.existingItems.count
-        return "\(incoming) incoming and \(existing) installed item(s) share \(group.sha256.prefix(10))…"
+        let incomingLabel = countLabel(
+            incoming,
+            singular: "incoming item"
+        )
+        let installedLabel = countLabel(
+            existing,
+            singular: "installed item"
+        )
+        return "\(incomingLabel) and \(installedLabel) share \(group.sha256.prefix(10))…"
+    }
+
+    private func issueCount(_ session: LibraryImportSession) -> String {
+        let count = session.duplicateContent.count
+            + session.preview.rejections.count
+            + session.preview.ignoredFileCount
+        return count.formatted()
     }
 
     private func previewSection<Content: View>(

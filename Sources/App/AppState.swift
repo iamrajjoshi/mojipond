@@ -67,6 +67,7 @@ final class AppState: ObservableObject {
     @Published private(set) var runtimeState: MojiPondRuntimeState = .stopped
     @Published private(set) var runtimeNotice: String?
     @Published private(set) var runtimeDenialNotice: String?
+    @Published private(set) var usageRankingResetNotice: String?
 
     init(
         permissions: SystemPermissionCenter = SystemPermissionCenter(),
@@ -169,6 +170,10 @@ final class AppState: ObservableObject {
 
     func setRuntimeDenialNotice(_ notice: String?) {
         runtimeDenialNotice = notice
+    }
+
+    func setUsageRankingResetNotice(_ notice: String?) {
+        usageRankingResetNotice = notice
     }
 
     func finishOnboarding() {

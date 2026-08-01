@@ -9,7 +9,10 @@ struct LibraryItemDetailView: View {
 
     @State private var draft: LibraryItemDraft?
     @State private var customAliasesDraft: String
+    @State private var savedCustomAliasesDraft: String
+    @State private var aliasSaveConfirmation: String?
     @State private var isSaving = false
+    @State private var showsAliasDiscardConfirmation = false
     @Environment(\.dismiss) private var dismiss
 
     init(
@@ -29,16 +32,16 @@ struct LibraryItemDetailView: View {
         } else {
             _draft = State(initialValue: nil)
         }
-        _customAliasesDraft = State(
-            initialValue: viewModel.customAliases(for: item)
-                .joined(separator: ", ")
-        )
+        let customAliases = viewModel.customAliases(for: item)
+            .joined(separator: ", ")
+        _customAliasesDraft = State(initialValue: customAliases)
+        _savedCustomAliasesDraft = State(initialValue: customAliases)
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: 18) {
-                LibraryEmojiArtwork(item: item, size: 88)
+            HStack(alignment: .top, spacing: 16) {
+                LibraryEmojiArtwork(item: item, size: 72)
                 VStack(alignment: .leading, spacing: 5) {
                     Text(item.displayName)
                         .font(.title2.weight(.semibold))
@@ -73,7 +76,7 @@ struct LibraryItemDetailView: View {
                         : "Add \(item.displayName) to Favorites"
                 )
             }
-            .padding(24)
+            .padding(20)
 
             Divider()
 
@@ -85,7 +88,7 @@ struct LibraryItemDetailView: View {
                 builtInDetails
             }
         }
-        .frame(width: 610, height: 570)
+        .frame(width: 560, height: 520)
         .overlay {
             if isSaving {
                 ProgressView()
@@ -93,24 +96,24 @@ struct LibraryItemDetailView: View {
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
             }
         }
+        .confirmationDialog(
+            "Discard unsaved alias changes?",
+            isPresented: $showsAliasDiscardConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Discard Changes", role: .destructive) {
+                dismiss()
+            }
+            Button("Keep Editing", role: .cancel) {}
+        } message: {
+            Text("Your saved aliases won’t change.")
+        }
     }
 
     private var personalAliasEditor: some View {
         Form {
             Section("Your aliases") {
-                TextField(
-                    "Aliases, separated by commas",
-                    text: $customAliasesDraft
-                )
-                .font(.body.monospaced())
-                .accessibilityIdentifier("library.personalAliases")
-                .accessibilityHint(
-                    "Adds local aliases without changing the emoji pack."
-                )
-                Button("Save Aliases") {
-                    savePersonalAliases()
-                }
-                .buttonStyle(.borderedProminent)
+                personalAliasFields
             }
 
             if let notice = viewModel.notice {
@@ -129,9 +132,6 @@ struct LibraryItemDetailView: View {
                             }
                         }
                         Spacer()
-                        Button("Dismiss") {
-                            viewModel.dismissNotice()
-                        }
                     }
                 }
             }
@@ -152,6 +152,7 @@ struct LibraryItemDetailView: View {
             }
         }
         .formStyle(.grouped)
+        .disabled(isSaving)
         .onAppear {
             viewModel.dismissNotice()
         }
@@ -165,11 +166,11 @@ struct LibraryItemDetailView: View {
                 .keyboardShortcut("c", modifiers: .command)
                 Spacer()
                 Button("Done") {
-                    dismiss()
+                    finishAliasEditing()
                 }
                 .keyboardShortcut(.cancelAction)
             }
-            .padding(18)
+            .padding(14)
             .background(.bar)
         }
     }
@@ -237,6 +238,7 @@ struct LibraryItemDetailView: View {
             }
         }
         .formStyle(.grouped)
+        .disabled(isSaving)
         .safeAreaInset(edge: .bottom) {
             HStack {
                 Button("Remove Emoji…", role: .destructive) {
@@ -299,17 +301,18 @@ struct LibraryItemDetailView: View {
             }
 
             Section("Your aliases") {
-                TextField(
-                    "Aliases, separated by commas",
-                    text: $customAliasesDraft
-                )
-                .font(.body.monospaced())
-                .accessibilityIdentifier("library.personalAliases")
-                .accessibilityHint(
-                    "Adds local aliases without changing the bundled dataset."
-                )
-                Button("Save Aliases") {
-                    savePersonalAliases()
+                personalAliasFields
+            }
+
+            if let notice = viewModel.notice {
+                Section {
+                    Label(
+                        notice.message.isEmpty
+                            ? notice.title
+                            : "\(notice.title): \(notice.message)",
+                        systemImage: noticeSymbol(for: notice.kind)
+                    )
+                    .foregroundStyle(noticeTint(for: notice.kind))
                 }
             }
 
@@ -353,6 +356,7 @@ struct LibraryItemDetailView: View {
             }
         }
         .formStyle(.grouped)
+        .disabled(isSaving)
         .safeAreaInset(edge: .bottom) {
             HStack {
                 Button("Copy Emoji") {
@@ -363,7 +367,7 @@ struct LibraryItemDetailView: View {
                 .keyboardShortcut("c", modifiers: .command)
                 Spacer()
                 Button("Done") {
-                    dismiss()
+                    finishAliasEditing()
                 }
                 .keyboardShortcut(.defaultAction)
             }
@@ -373,6 +377,13 @@ struct LibraryItemDetailView: View {
     }
 
     private func savePersonalAliases() {
+        guard
+            !isSaving,
+            customAliasesDraft != savedCustomAliasesDraft
+        else {
+            return
+        }
+        aliasSaveConfirmation = nil
         isSaving = true
         Task {
             await viewModel.setCustomAliases(
@@ -380,6 +391,71 @@ struct LibraryItemDetailView: View {
                 for: item
             )
             isSaving = false
+            if viewModel.notice?.kind == .information {
+                savedCustomAliasesDraft = customAliasesDraft
+                aliasSaveConfirmation = "Saved"
+                viewModel.dismissNotice()
+            }
+        }
+    }
+
+    private func finishAliasEditing() {
+        if customAliasesDraft == savedCustomAliasesDraft {
+            dismiss()
+        } else {
+            showsAliasDiscardConfirmation = true
+        }
+    }
+
+    private var personalAliasFields: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Add words you want to use for this emoji. Separate multiple aliases with commas.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            TextField("for example: hello_pond, frog_friend", text: $customAliasesDraft)
+                .labelsHidden()
+                .font(.body.monospaced())
+                .accessibilityLabel("Aliases, separated by commas")
+                .accessibilityIdentifier("library.personalAliases")
+                .accessibilityHint(
+                    "Adds local aliases without changing the emoji pack."
+                )
+                .onSubmit(savePersonalAliases)
+                .onChange(of: customAliasesDraft) { _, _ in
+                    aliasSaveConfirmation = nil
+                }
+
+            HStack {
+                if let aliasSaveConfirmation {
+                    Label(
+                        aliasSaveConfirmation,
+                        systemImage: "checkmark.circle.fill"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(PondDesign.lily)
+                    .accessibilityIdentifier(
+                        "library.personalAliasesSaved"
+                    )
+                }
+                Spacer()
+                Button {
+                    savePersonalAliases()
+                } label: {
+                    if isSaving {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Text("Save Aliases")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(
+                    isSaving
+                        || customAliasesDraft == savedCustomAliasesDraft
+                )
+            }
         }
     }
 
@@ -488,7 +564,7 @@ struct LibraryPackDetailView: View {
                     )
                     .toggleStyle(.switch)
                 }
-                .padding(24)
+                .padding(20)
 
                 Divider()
 
@@ -496,7 +572,6 @@ struct LibraryPackDetailView: View {
                     Section("Pack") {
                         LabeledContent("Emoji", value: pack.items.count.formatted())
                         LabeledContent("Version", value: pack.manifest.version)
-                        LabeledContent("Pack ID", value: pack.manifest.packID.rawValue)
                         if let description = pack.manifest.description {
                             LabeledContent("Description", value: description)
                         }
@@ -526,24 +601,42 @@ struct LibraryPackDetailView: View {
                                 time: .shortened
                             )
                         )
-                        if let revision = pack.updateMetadata.sourceRevision {
-                            LabeledContent("Revision", value: revision)
+                        DisclosureGroup("Technical Details") {
+                            LabeledContent(
+                                "Pack ID",
+                                value: pack.manifest.packID.rawValue
+                            )
+                            if let revision = pack.updateMetadata.sourceRevision {
+                                LabeledContent("Revision", value: revision)
+                            }
                         }
                     }
 
                     Section("Actions") {
-                        Button("Export Portable Pack…") {
+                        Button("Export Pack…") {
                             export(pack)
                         }
-                        Button("Reveal Managed Files in Finder") {
+                        Button("Show Pack Files") {
                             reveal(pack)
                         }
-                        Button("Replace Contents from ZIP…") {
+                        Button("Replace from ZIP…") {
                             chooseReplacementZIP(for: pack)
                         }
                         .help(
                             "Review one ZIP archive before replacing this pack."
                         )
+                    }
+
+                    if let notice = viewModel.notice {
+                        Section {
+                            Label(
+                                notice.message.isEmpty
+                                    ? notice.title
+                                    : "\(notice.title): \(notice.message)",
+                                systemImage: noticeSymbol(for: notice.kind)
+                            )
+                            .foregroundStyle(noticeTint(for: notice.kind))
+                        }
                     }
                 }
                 .formStyle(.grouped)
@@ -573,9 +666,9 @@ struct LibraryPackDetailView: View {
                     }
                     .keyboardShortcut(.defaultAction)
                 }
-                .padding(18)
+                .padding(14)
             }
-            .frame(width: 660, height: 680)
+            .frame(width: 600, height: 600)
         } else {
             ContentUnavailableView(
                 "Pack removed",
@@ -590,7 +683,8 @@ struct LibraryPackDetailView: View {
         let panel = NSSavePanel()
         panel.title = "Export \(pack.name)"
         panel.prompt = "Export"
-        panel.nameFieldStringValue = "\(safeFilename(pack.name)).mojipondpack"
+        panel.nameFieldStringValue =
+            "\(safeFilename(pack.name)).mojipondpack"
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let destination = panel.url else {
             return
@@ -636,6 +730,22 @@ struct LibraryPackDetailView: View {
         let safe = components.joined(separator: "-")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return safe.isEmpty ? "Emoji Pack" : safe
+    }
+
+    private func noticeSymbol(for kind: LibraryNotice.Kind) -> String {
+        switch kind {
+        case .information: "checkmark.circle.fill"
+        case .warning: "exclamationmark.triangle.fill"
+        case .error: "xmark.octagon.fill"
+        }
+    }
+
+    private func noticeTint(for kind: LibraryNotice.Kind) -> Color {
+        switch kind {
+        case .information: PondDesign.lily
+        case .warning: PondDesign.warningForeground
+        case .error: PondDesign.errorForeground
+        }
     }
 }
 

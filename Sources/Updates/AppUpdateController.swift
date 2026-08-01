@@ -535,7 +535,7 @@ final class AppUpdateController: ObservableObject {
         cancelRevalidationOperation()
         discardStagedUpdateKeepingAvailability()
         installationStatusMessage = nil
-        state = canCheckForUpdates ? .idle : .unconfigured
+        restoreAvailableOrIdleState()
     }
 
     /// Stops background work. Only a candidate process that was successfully

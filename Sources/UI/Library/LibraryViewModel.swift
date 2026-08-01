@@ -290,18 +290,23 @@ final class LibraryViewModel: ObservableObject {
     var selectedScopeSubtitle: String {
         switch scope {
         case .all:
-            return "\(allDisplayItems.count.formatted()) emoji across \(packs.count + 1) sources"
+            let sourceCount = packs.count + 1
+            let sourceNoun = sourceCount == 1 ? "source" : "sources"
+            return "\(allDisplayItems.count.formatted()) emoji across \(sourceCount) \(sourceNoun)"
         case .favorites:
             return "\(usageSnapshot.favoriteItemIDs.count.formatted()) favorite emoji"
         case .aliases:
             let count = personalAliasCount
             let noun = count == 1 ? "personal alias" : "personal aliases"
-            return "\(count.formatted()) \(noun) · Choose an emoji to add or edit aliases"
+            return count == 0
+                ? "Choose an emoji to add an alias"
+                : "\(count.formatted()) \(noun) · Choose an emoji to edit"
         case .builtIn:
             return builtInPack?.packDescription
                 ?? "Unicode emoji and familiar GitHub-style aliases"
         case .custom:
-            return "\(customDisplayItems.count.formatted()) emoji in \(packs.count) installed packs"
+            let packNoun = packs.count == 1 ? "pack" : "packs"
+            return "\(customDisplayItems.count.formatted()) emoji in \(packs.count) installed \(packNoun)"
         case .pack:
             guard let pack = selectedPack else {
                 return "This pack is no longer installed."

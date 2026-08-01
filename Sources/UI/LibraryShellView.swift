@@ -1,10 +1,11 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct LibraryShellView: View {
     @ObservedObject var appState: AppState
     @StateObject private var viewModel: LibraryViewModel
 
-    @State private var showsImportSource = false
     @State private var showsBuiltInDetails = false
     @State private var selectedItem: LibraryDisplayItem?
     @State private var packDetails: PackDetailSelection?
@@ -52,7 +53,7 @@ struct LibraryShellView: View {
                 isDropTargeted = targeted
             }
         }
-        .frame(minWidth: 840, minHeight: 560)
+        .frame(minWidth: 780, minHeight: 520)
         .tint(PondDesign.pond)
         .background {
             PondWindowBackdrop()
@@ -77,13 +78,6 @@ struct LibraryShellView: View {
         .task {
             if viewModel.loadState == .idle {
                 await viewModel.reload()
-            }
-        }
-        .sheet(isPresented: $showsImportSource) {
-            LibraryImportSourceView(
-                viewModel: viewModel
-            ) {
-                showsImportSource = false
             }
         }
         .sheet(isPresented: importPreviewPresented) {
@@ -136,10 +130,6 @@ struct LibraryShellView: View {
                         .foregroundStyle(PondDesign.pond)
                 }
                 Spacer()
-                Circle()
-                    .fill(PondDesign.lotus)
-                    .frame(width: 7, height: 7)
-                    .accessibilityHidden(true)
             }
             .padding(.horizontal, 16)
             .padding(.top, 18)
@@ -189,20 +179,14 @@ struct LibraryShellView: View {
                         }
                     )
 
-                    sidebarSectionTitle("Packs")
-                        .padding(.top, 12)
+                    if !viewModel.packs.isEmpty {
+                        sidebarSectionTitle("Packs")
+                            .padding(.top, 12)
 
-                    ForEach(viewModel.packs) { pack in
-                        sidebarPackRow(pack)
+                        ForEach(viewModel.packs) { pack in
+                            sidebarPackRow(pack)
+                        }
                     }
-
-                    Text("Drop a ZIP anywhere in this window.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 11)
-                        .padding(.top, 12)
-                        .padding(.bottom, 18)
                 }
                 .padding(.horizontal, 10)
                 .padding(.top, 12)
@@ -404,10 +388,6 @@ struct LibraryShellView: View {
                 partialBanner(message)
             }
 
-            if viewModel.scope == .aliases {
-                aliasesGuide
-            }
-
             content
 
             if let undoMessage = viewModel.undoMessage {
@@ -427,22 +407,33 @@ struct LibraryShellView: View {
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .layoutPriority(1)
+                        .accessibilityLabel(
+                            viewModel.selectedScopeSubtitle
+                        )
                 }
                 Spacer()
 
-                Button {
-                    showsImportSource = true
-                } label: {
-                    Label(
-                        "Import ZIP",
-                        systemImage: "square.and.arrow.down"
+                VStack(alignment: .trailing, spacing: 3) {
+                    Button {
+                        chooseZIP()
+                    } label: {
+                        Label(
+                            "Import ZIP",
+                            systemImage: "square.and.arrow.down"
+                        )
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut("i", modifiers: .command)
+                    .accessibilityHint(
+                        "Choose one local ZIP archive, or drop a ZIP anywhere in the Library"
                     )
+
+                    Text("or drop a ZIP anywhere")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut("i", modifiers: .command)
-                .accessibilityHint(
-                    "Choose one local ZIP archive"
-                )
 
                 if case .builtIn = viewModel.scope {
                     Button("Source & License", systemImage: "info.circle") {
@@ -528,9 +519,9 @@ struct LibraryShellView: View {
                 } description: {
                     Text(emptyDescription)
                 } actions: {
-                    if !viewModel.searchText.isEmpty {
-                        Button("Clear Search") {
-                            viewModel.searchText = ""
+                    if hasActiveFilters {
+                        Button("Clear Filters") {
+                            clearFilters()
                         }
                     }
                 }
@@ -640,32 +631,6 @@ struct LibraryShellView: View {
         }
     }
 
-    private var aliasesGuide: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "tag")
-                .foregroundStyle(PondDesign.pond)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Add or edit aliases")
-                    .font(.callout.weight(.semibold))
-                Text(
-                    "Choose any emoji below, then edit its aliases in the details."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 8)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(PondDesign.pond.opacity(0.08))
-        .overlay(alignment: .bottom) {
-            Divider()
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("library.aliasesGuide")
-    }
-
     private func undoBar(_ message: String) -> some View {
         HStack {
             Text(message)
@@ -693,18 +658,16 @@ struct LibraryShellView: View {
     }
 
     private var emptyTitle: String {
-        viewModel.searchText.isEmpty
-            ? "No emoji in this view"
-            : "No matching emoji"
+        hasActiveFilters ? "No matching emoji" : "No emoji in this view"
     }
 
     private var emptyIcon: String {
-        viewModel.searchText.isEmpty ? "water.waves" : "magnifyingglass"
+        hasActiveFilters ? "magnifyingglass" : "water.waves"
     }
 
     private var emptyDescription: String {
-        if !viewModel.searchText.isEmpty {
-            return "Try a different shortcode, name, tag, pack, category, or content type."
+        if hasActiveFilters {
+            return "Try another search, or clear the current filters."
         }
         if case .custom = viewModel.scope {
             return "Import a ZIP pack to add custom emoji."
@@ -719,6 +682,32 @@ struct LibraryShellView: View {
             return "This pack is empty. Review a replacement ZIP in Pack Details."
         }
         return "Change the filters or import a custom ZIP pack."
+    }
+
+    private var hasActiveFilters: Bool {
+        !viewModel.searchText.isEmpty
+            || viewModel.categoryFilter != nil
+            || viewModel.contentFilter != .all
+    }
+
+    private func clearFilters() {
+        viewModel.searchText = ""
+        viewModel.categoryFilter = nil
+        viewModel.contentFilter = .all
+    }
+
+    private func chooseZIP() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose an emoji ZIP"
+        panel.prompt = "Review"
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.zip]
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+        viewModel.prepareImport(.zipArchive(url))
     }
 
     private var importProgressOverlay: some View {

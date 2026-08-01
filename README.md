@@ -74,12 +74,10 @@ brew install xcodegen
 
 ## Build and install
 
-The verified pre-release is on the implementation branch and has not been
-merged into `main`. For a fresh authenticated checkout:
+For a fresh authenticated checkout:
 
 ```sh
 git clone \
-  --branch raj--mojipond--mvp \
   https://github.com/iamrajjoshi/mojipond.git
 cd mojipond
 ```
@@ -161,10 +159,11 @@ only after you press an Allow button.
 | --- | --- | --- |
 | Input Monitoring | Receives keyboard events while another app is active | Global autocomplete |
 | Accessibility | Identifies the focused editable control, reads a bounded token near the caret, positions suggestions, and replaces the validated token | Global autocomplete |
-| Event Posting | Sends tagged Command-V and Return events after validating the target | Image insertion and send-after-insertion |
+| Image emoji in Messages (Event Posting) | Sends tagged Command-V and Return events after validating the target | Custom-image insertion and send-after-insertion |
 
-Unicode insertion does not require Event Posting when the target supports
-direct Accessibility replacement. MojiPond does not request Screen Recording,
+This third permission is optional. Unicode insertion does not need Event
+Posting when the target supports direct Accessibility replacement. MojiPond
+does not request Screen Recording,
 Full Disk Access, Contacts, or access to the Messages database.
 
 Apple explains these controls in
@@ -216,8 +215,8 @@ custom emoji in a grid or list. From the Library you can:
 - Resolve each collision by keeping the existing item, replacing it, renaming
   the import, or dropping an alias; the same choice can be applied to all
   matching conflicts.
-- Enable, disable, reorder, inspect, edit, and remove imported packs; add or
-  replace image assets; export a portable pack; and reveal managed files.
+- Enable, disable, reorder, inspect, export, and remove imported packs; replace
+  a pack from another ZIP; and reveal its managed files.
 - Search imported items by shortcode, alias, name, tag, or category, then copy
   their value directly from the Library detail view.
 
@@ -316,7 +315,8 @@ passed through.
 
 ### An image cannot be pasted
 
-Image insertion needs Event Posting access. When MojiPond cannot
+Custom-image insertion needs the optional **Image emoji in Messages** access.
+When MojiPond cannot
 snapshot the clipboard safely, validate the target, or post the paste command,
 the insertion engine leaves the token and clipboard unchanged and records a
 copy-fallback notice. If the selected original passed validation, open the

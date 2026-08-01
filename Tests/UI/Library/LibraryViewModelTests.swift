@@ -164,6 +164,11 @@ final class LibraryViewModelTests: XCTestCase {
 
         await viewModel.setCustomAliases("salute, hi-wave", for: wave)
         await viewModel.setCustomAliases("toad", for: customFrog)
+        viewModel.scope = .custom
+        XCTAssertEqual(
+            viewModel.selectedScopeSubtitle,
+            "1 emoji in 1 installed pack"
+        )
         viewModel.scope = .aliases
 
         XCTAssertEqual(viewModel.personalAliasCount, 3)
@@ -171,7 +176,7 @@ final class LibraryViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedScopeTitle, "Aliases")
         XCTAssertEqual(
             viewModel.selectedScopeSubtitle,
-            "3 personal aliases · Choose an emoji to add or edit aliases"
+            "3 personal aliases · Choose an emoji to edit"
         )
 
         let aliasCategories = viewModel.availableCategories
@@ -203,7 +208,7 @@ final class LibraryViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.personalAliasCount, 1)
         XCTAssertEqual(
             viewModel.selectedScopeSubtitle,
-            "1 personal alias · Choose an emoji to add or edit aliases"
+            "1 personal alias · Choose an emoji to edit"
         )
     }
 
