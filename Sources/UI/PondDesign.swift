@@ -2,9 +2,12 @@ import AppKit
 import SwiftUI
 
 enum PondDesign {
-    static let cornerRadius: CGFloat = 10
-    static let compactCornerRadius: CGFloat = 8
-    static let contentPadding: CGFloat = 16
+    static let cornerRadius: CGFloat = 14
+    static let compactCornerRadius: CGFloat = 9
+    static let contentPadding: CGFloat = 20
+    static let sectionSpacing: CGFloat = 18
+    static let rowSpacing: CGFloat = 12
+    static let separator = Color(nsColor: .separatorColor)
     static let windowTop = Color(nsColor: windowTopColor)
     static let windowBottom = Color(nsColor: windowBottomColor)
     static let surface = Color(nsColor: surfaceColor)
@@ -29,15 +32,15 @@ enum PondDesign {
     static let windowTopColor = adaptiveColor(
         name: "MojiPondWindowTop",
         light: NSColor(
-            srgbRed: 0.93,
-            green: 0.97,
-            blue: 0.97,
+            srgbRed: 0.965,
+            green: 0.976,
+            blue: 0.972,
             alpha: 1
         ),
         dark: NSColor(
-            srgbRed: 0.035,
-            green: 0.075,
-            blue: 0.085,
+            srgbRed: 0.045,
+            green: 0.055,
+            blue: 0.057,
             alpha: 1
         ),
         highContrastLight: NSColor.white,
@@ -52,15 +55,15 @@ enum PondDesign {
     static let windowBottomColor = adaptiveColor(
         name: "MojiPondWindowBottom",
         light: NSColor(
-            srgbRed: 0.985,
-            green: 0.99,
-            blue: 0.985,
+            srgbRed: 0.94,
+            green: 0.955,
+            blue: 0.949,
             alpha: 1
         ),
         dark: NSColor(
-            srgbRed: 0.055,
-            green: 0.065,
-            blue: 0.07,
+            srgbRed: 0.032,
+            green: 0.039,
+            blue: 0.041,
             alpha: 1
         ),
         highContrastLight: NSColor.white,
@@ -70,15 +73,15 @@ enum PondDesign {
     static let surfaceColor = adaptiveColor(
         name: "MojiPondSurface",
         light: NSColor(
-            srgbRed: 0.985,
+            srgbRed: 0.992,
             green: 0.995,
-            blue: 0.99,
+            blue: 0.993,
             alpha: 1
         ),
         dark: NSColor(
-            srgbRed: 0.075,
-            green: 0.105,
-            blue: 0.11,
+            srgbRed: 0.078,
+            green: 0.088,
+            blue: 0.09,
             alpha: 1
         ),
         highContrastLight: NSColor.white,
@@ -95,8 +98,8 @@ enum PondDesign {
         light: NSColor.white,
         dark: NSColor(
             srgbRed: 0.105,
-            green: 0.135,
-            blue: 0.14,
+            green: 0.116,
+            blue: 0.118,
             alpha: 1
         ),
         highContrastLight: NSColor.white,
@@ -111,15 +114,15 @@ enum PondDesign {
     static let sidebarSurfaceColor = adaptiveColor(
         name: "MojiPondSidebarSurface",
         light: NSColor(
-            srgbRed: 0.89,
-            green: 0.95,
-            blue: 0.95,
+            srgbRed: 0.925,
+            green: 0.948,
+            blue: 0.943,
             alpha: 1
         ),
         dark: NSColor(
-            srgbRed: 0.025,
-            green: 0.09,
-            blue: 0.105,
+            srgbRed: 0.028,
+            green: 0.055,
+            blue: 0.058,
             alpha: 1
         ),
         highContrastLight: NSColor(
@@ -140,13 +143,13 @@ enum PondDesign {
         name: "MojiPondDeepWater",
         light: NSColor(
             srgbRed: 0.025,
-            green: 0.20,
-            blue: 0.24,
+            green: 0.19,
+            blue: 0.21,
             alpha: 1
         ),
         dark: NSColor(
             srgbRed: 0.02,
-            green: 0.14,
+            green: 0.15,
             blue: 0.17,
             alpha: 1
         ),
@@ -180,15 +183,15 @@ enum PondDesign {
     static let rippleColor = adaptiveColor(
         name: "MojiPondRipple",
         light: NSColor(
-            srgbRed: 0.13,
-            green: 0.56,
-            blue: 0.64,
+            srgbRed: 0.14,
+            green: 0.48,
+            blue: 0.50,
             alpha: 1
         ),
         dark: NSColor(
-            srgbRed: 0.33,
-            green: 0.78,
-            blue: 0.84,
+            srgbRed: 0.38,
+            green: 0.74,
+            blue: 0.77,
             alpha: 1
         ),
         highContrastLight: NSColor(
@@ -236,15 +239,15 @@ enum PondDesign {
     private static let pondColor = adaptiveColor(
         name: "MojiPondPond",
         light: NSColor(
-            srgbRed: 0.05,
-            green: 0.34,
-            blue: 0.43,
+            srgbRed: 0.02,
+            green: 0.30,
+            blue: 0.33,
             alpha: 1
         ),
         dark: NSColor(
-            srgbRed: 0.45,
-            green: 0.82,
-            blue: 0.91,
+            srgbRed: 0.42,
+            green: 0.80,
+            blue: 0.82,
             alpha: 1
         ),
         highContrastLight: NSColor(
@@ -440,7 +443,7 @@ struct PondCard<Content: View>: View {
 
     var body: some View {
         content
-            .padding(14)
+            .padding(16)
             .background(
                 PondDesign.surface,
                 in: RoundedRectangle(
@@ -450,53 +453,43 @@ struct PondCard<Content: View>: View {
             .overlay {
                 RoundedRectangle(cornerRadius: PondDesign.cornerRadius)
                     .stroke(
-                        PondDesign.ripple.opacity(
-                            contrast == .increased ? 1 : 0.2
+                        PondDesign.separator.opacity(
+                            contrast == .increased ? 1 : 0.65
                         ),
                         lineWidth: contrast == .increased ? 2 : 1
                     )
             }
             .shadow(
-                color: Color.black.opacity(contrast == .increased ? 0 : 0.035),
-                radius: 7,
-                y: 2
+                color: Color.black.opacity(contrast == .increased ? 0 : 0.025),
+                radius: 3,
+                y: 1
             )
     }
 }
 
 struct PondWindowBackdrop: View {
     var body: some View {
-        GeometryReader { proxy in
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        PondDesign.windowTop,
-                        PondDesign.windowBottom
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+        ZStack {
+            Color(nsColor: .windowBackgroundColor)
 
-                ZStack {
-                    ForEach([150.0, 245.0, 350.0], id: \.self) { size in
-                        Circle()
-                            .stroke(
-                                PondDesign.ripple.opacity(0.055),
-                                lineWidth: 1
-                            )
-                            .frame(width: size, height: size)
-                    }
-                }
-                .position(
-                    x: proxy.size.width - 36,
-                    y: 30
-                )
+            LinearGradient(
+                colors: [
+                    PondDesign.windowTop.opacity(0.9),
+                    PondDesign.windowBottom.opacity(0.72)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
 
-                Circle()
-                    .fill(PondDesign.lotus.opacity(0.03))
-                    .frame(width: 190, height: 190)
-                    .position(x: 18, y: proxy.size.height - 12)
-            }
+            RadialGradient(
+                colors: [
+                    PondDesign.ripple.opacity(0.045),
+                    .clear
+                ],
+                center: .topTrailing,
+                startRadius: 16,
+                endRadius: 520
+            )
         }
         .accessibilityHidden(true)
     }
@@ -508,25 +501,25 @@ struct PondPageHeader: View {
     let detail: String
 
     var body: some View {
-        HStack(alignment: .center, spacing: 11) {
+        HStack(alignment: .top, spacing: 12) {
             Image(systemName: icon)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(PondDesign.onDeepWater)
-                .frame(width: 34, height: 34)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(PondDesign.pond)
+                .frame(width: 30, height: 30)
                 .background(
-                    PondDesign.deepWater,
-                    in: RoundedRectangle(
-                        cornerRadius: PondDesign.compactCornerRadius
-                    )
+                    PondDesign.pond.opacity(0.09),
+                    in: Circle()
                 )
                 .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.title3.weight(.semibold))
+                    .font(.title2.weight(.semibold))
+                    .fontDesign(.rounded)
                 Text(detail)
-                    .font(.caption)
+                    .font(.callout)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -583,9 +576,15 @@ private struct PondFloatingPanelModifier: ViewModifier {
                     cornerRadius: backgroundCornerRadius,
                     style: .continuous
                 )
+                .fill(.ultraThickMaterial)
+
+                RoundedRectangle(
+                    cornerRadius: backgroundCornerRadius,
+                    style: .continuous
+                )
                 .fill(
                     PondDesign.surface.opacity(
-                        reduceTransparency ? 1 : 0.97
+                        reduceTransparency ? 1 : 0.9
                     )
                 )
             }
@@ -601,8 +600,8 @@ private struct PondFloatingPanelModifier: ViewModifier {
                     style: .continuous
                 )
                 .strokeBorder(
-                    PondDesign.ripple.opacity(
-                        contrast == .increased ? 1 : 0.58
+                    PondDesign.separator.opacity(
+                        contrast == .increased ? 1 : 0.9
                     ),
                     lineWidth: contrast == .increased ? 2 : 1
                 )
@@ -632,7 +631,7 @@ struct PondMark: View {
             .interpolation(.high)
             .aspectRatio(contentMode: .fit)
         .frame(width: size, height: size)
-        .shadow(color: PondDesign.pond.opacity(0.16), radius: 8, y: 3)
+        .shadow(color: Color.black.opacity(0.12), radius: 5, y: 2)
         .accessibilityHidden(true)
     }
 }

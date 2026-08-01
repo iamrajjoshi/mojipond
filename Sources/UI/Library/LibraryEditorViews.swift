@@ -8,11 +8,13 @@ struct LibraryItemDetailView: View {
     let showsPersonalAliasEditor: Bool
 
     @State private var draft: LibraryItemDraft?
+    @State private var savedDraft: LibraryItemDraft?
     @State private var customAliasesDraft: String
     @State private var savedCustomAliasesDraft: String
     @State private var aliasSaveConfirmation: String?
     @State private var isSaving = false
     @State private var showsAliasDiscardConfirmation = false
+    @State private var showsCustomDiscardConfirmation = false
     @Environment(\.dismiss) private var dismiss
 
     init(
@@ -28,9 +30,15 @@ struct LibraryItemDetailView: View {
                packID: packID,
                itemID: Self.itemID(from: item.id)
            ) {
-            _draft = State(initialValue: LibraryItemDraft(packID: packID, item: libraryItem))
+            let initialDraft = LibraryItemDraft(
+                packID: packID,
+                item: libraryItem
+            )
+            _draft = State(initialValue: initialDraft)
+            _savedDraft = State(initialValue: initialDraft)
         } else {
             _draft = State(initialValue: nil)
+            _savedDraft = State(initialValue: nil)
         }
         let customAliases = viewModel.customAliases(for: item)
             .joined(separator: ", ")
@@ -41,7 +49,7 @@ struct LibraryItemDetailView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(alignment: .top, spacing: 16) {
-                LibraryEmojiArtwork(item: item, size: 72)
+                LibraryEmojiArtwork(item: item, size: 64)
                 VStack(alignment: .leading, spacing: 5) {
                     Text(item.displayName)
                         .font(.title2.weight(.semibold))
@@ -76,7 +84,7 @@ struct LibraryItemDetailView: View {
                         : "Add \(item.displayName) to Favorites"
                 )
             }
-            .padding(20)
+            .padding(18)
 
             Divider()
 
@@ -88,7 +96,12 @@ struct LibraryItemDetailView: View {
                 builtInDetails
             }
         }
-        .frame(width: 560, height: 520)
+        .frame(
+            width: 540,
+            height: showsPersonalAliasEditor
+                ? 480
+                : draft == nil ? 460 : 500
+        )
         .overlay {
             if isSaving {
                 ProgressView()
@@ -107,6 +120,18 @@ struct LibraryItemDetailView: View {
             Button("Keep Editing", role: .cancel) {}
         } message: {
             Text("Your saved aliases won’t change.")
+        }
+        .confirmationDialog(
+            "Discard unsaved emoji changes?",
+            isPresented: $showsCustomDiscardConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Discard Changes", role: .destructive) {
+                dismiss()
+            }
+            Button("Keep Editing", role: .cancel) {}
+        } message: {
+            Text("The saved shortcode and details won’t change.")
         }
     }
 
@@ -260,7 +285,7 @@ struct LibraryItemDetailView: View {
                 .keyboardShortcut("c", modifiers: .command)
                 Spacer()
                 Button("Cancel") {
-                    dismiss()
+                    finishCustomEditing()
                 }
                 .keyboardShortcut(.cancelAction)
                 Button("Save") {
@@ -374,6 +399,14 @@ struct LibraryItemDetailView: View {
             .padding(18)
             .background(.bar)
         }
+    }
+
+    private func finishCustomEditing() {
+        guard draft != savedDraft else {
+            dismiss()
+            return
+        }
+        showsCustomDiscardConfirmation = true
     }
 
     private func savePersonalAliases() {

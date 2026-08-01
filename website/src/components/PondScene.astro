@@ -1,29 +1,39 @@
 ---
 import { getImage } from "astro:assets";
-import desktopSource from "../assets/pond-hero-desktop.png";
-import mobileSource from "../assets/pond-hero-mobile.png";
+import desktopSource from "../assets/pond-hero-desktop-4k.png";
+import mobileSource from "../assets/pond-hero-mobile-retina.png";
 
 const desktop = await getImage({
   src: desktopSource,
   format: "webp",
-  quality: 86,
+  quality: 90,
+  widths: [1280, 1920, 2560, 3840],
 });
 const mobile = await getImage({
   src: mobileSource,
   format: "webp",
-  quality: 86,
+  quality: 90,
+  widths: [640, 1000, 1440, 2160],
 });
 ---
 
 <picture class="pond-scene" aria-hidden="true">
-  <source media="(max-width: 700px)" srcset={mobile.src} />
+  <source
+    media="(max-width: 700px)"
+    srcset={mobile.srcSet.attribute}
+    sizes="100vw"
+    type="image/webp"
+  />
+  <source srcset={desktop.srcSet.attribute} sizes="100vw" type="image/webp" />
   <img
     src={desktop.src}
     alt=""
     width={desktop.attributes.width}
     height={desktop.attributes.height}
+    sizes="100vw"
     loading="eager"
     fetchpriority="high"
+    decoding="async"
   />
 </picture>
 

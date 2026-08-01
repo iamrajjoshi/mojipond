@@ -51,6 +51,7 @@ struct OnboardingView: View {
     let onFinish: () -> Void
 
     @State private var practiceText = ""
+    @State private var practiceSelectionIndex = 0
     @State private var practiceFeedback: String?
     @State private var permissionNavigationError: String?
     @State private var practiceIndex: EmojiSearchIndex?
@@ -117,97 +118,40 @@ struct OnboardingView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            PondMark(size: 30)
+            PondMark(size: 28)
             Text("MojiPond")
                 .font(.headline)
             Spacer()
-            Text("SETUP")
-                .font(.caption)
-                .fontWeight(.semibold)
-                .tracking(1.1)
-                .foregroundStyle(PondDesign.onDeepWater.opacity(0.78))
+            Text("Setup")
+                .font(.callout)
+                .foregroundStyle(.secondary)
         }
-        .foregroundStyle(PondDesign.onDeepWater)
         .padding(.horizontal, 20)
-        .frame(height: 50)
-        .background(PondDesign.deepWater)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(PondDesign.ripple.opacity(0.5))
-                .frame(height: 1)
-        }
+        .frame(height: 52)
+        .background(.bar)
     }
 
     private var setupContent: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: PondDesign.sectionSpacing) {
                 PondPageHeader(
-                    icon: "keyboard",
-                    title: "Set up typing shortcuts",
+                    icon: "face.smiling",
+                    title: "Type emoji by name",
                     detail:
-                        "Allow both permissions, then try \(triggerText)wave\(triggerText)."
+                        "Try \(triggerText)wave\(triggerText) below. Then grant access to use shortcuts in other apps."
                 )
-
-                if !appState.isInstalledInApplications {
-                    Label {
-                        Text(
-                            "Move MojiPond to Applications and open that copy before allowing access."
-                        )
-                    } icon: {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(PondDesign.warningForeground)
-                    }
-                    .padding(10)
-                    .background(
-                        PondDesign.warningBackground,
-                        in: RoundedRectangle(cornerRadius: 10)
-                    )
-                }
-
-                PermissionCard(
-                    icon: "accessibility",
-                    title: "Accessibility",
-                    detail:
-                        "Finds the text field and inserts your choice.",
-                    status: permissions.snapshot.accessibility,
-                    requestEnabled: canRequestPermissions,
-                    request: { permissions.requestAccessibility() },
-                    openSettings: {
-                        openPermissionSettings(.accessibility)
-                    }
-                )
-
-                PermissionCard(
-                    icon: "keyboard",
-                    title: "Input Monitoring",
-                    detail:
-                        "Notices when you start an emoji shortcut.",
-                    status: permissions.snapshot.inputMonitoring,
-                    requestEnabled: canRequestPermissions,
-                    request: { permissions.requestInputMonitoring() },
-                    openSettings: {
-                        openPermissionSettings(.inputMonitoring)
-                    }
-                )
-
-                if let permissionNavigationError {
-                    Label(
-                        permissionNavigationError,
-                        systemImage: "exclamationmark.triangle"
-                    )
-                    .font(.callout)
-                    .foregroundStyle(PondDesign.warningForeground)
-                }
 
                 PondCard {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Try it")
-                            .font(.headline)
-                        Text(
-                            "Type \(triggerText)wave\(triggerText). This practice field works before access is allowed."
-                        )
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text("Try it")
+                                .font(.headline)
+                                .fontDesign(.rounded)
+                            Spacer()
+                            Text("No access needed")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
 
                         Group {
                             if practiceCatalogAvailability == .available {
@@ -220,27 +164,109 @@ struct OnboardingView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
+                if !appState.isInstalledInApplications {
+                    Label {
+                        Text(
+                            "Move MojiPond to Applications, then open that copy before granting access."
+                        )
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(PondDesign.warningForeground)
+                    }
+                    .padding(10)
+                    .background(
+                        PondDesign.warningBackground,
+                        in: RoundedRectangle(cornerRadius: 10)
+                    )
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Use it anywhere")
+                        .font(.headline)
+                        .fontDesign(.rounded)
+                    Text(
+                        "MojiPond needs two macOS permissions to notice a shortcut and replace it."
+                    )
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                    VStack(spacing: 0) {
+                        PermissionCard(
+                            icon: "keyboard",
+                            title: "Input Monitoring",
+                            detail: "Notices when you start a shortcut.",
+                            status: permissions.snapshot.inputMonitoring,
+                            requestEnabled: canRequestPermissions,
+                            request: { permissions.requestInputMonitoring() },
+                            openSettings: {
+                                openPermissionSettings(.inputMonitoring)
+                            }
+                        )
+
+                        Divider()
+                            .padding(.leading, 46)
+
+                        PermissionCard(
+                            icon: "accessibility",
+                            title: "Accessibility",
+                            detail: "Places the picker and inserts your choice.",
+                            status: permissions.snapshot.accessibility,
+                            requestEnabled: canRequestPermissions,
+                            request: { permissions.requestAccessibility() },
+                            openSettings: {
+                                openPermissionSettings(.accessibility)
+                            }
+                        )
+                    }
+                    .background(
+                        PondDesign.surface,
+                        in: RoundedRectangle(
+                            cornerRadius: PondDesign.cornerRadius,
+                            style: .continuous
+                        )
+                    )
+                    .overlay {
+                        RoundedRectangle(
+                            cornerRadius: PondDesign.cornerRadius,
+                            style: .continuous
+                        )
+                        .stroke(PondDesign.separator.opacity(0.65))
+                    }
+                }
+
+                if let permissionNavigationError {
+                    Label(
+                        permissionNavigationError,
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .font(.callout)
+                    .foregroundStyle(PondDesign.warningForeground)
+                }
+
                 Label(
-                    "Shortcuts stay on this Mac. Nothing you type is uploaded.",
+                    "Shortcut matching stays on this Mac. MojiPond does not save what you type.",
                     systemImage: "lock.shield"
                 )
                 .font(.callout)
                 .foregroundStyle(.secondary)
             }
-            .padding(20)
+            .frame(maxWidth: 640)
+            .padding(24)
+            .frame(maxWidth: .infinity)
         }
     }
 
     private var practiceEditor: some View {
         VStack(spacing: 8) {
-            TextField(
-                "Type \(triggerText)wave\(triggerText) here",
-                text: $practiceText
+            PracticeShortcutField(
+                text: $practiceText,
+                placeholder: "Type \(triggerText)wave\(triggerText) here",
+                onMove: movePracticeSelection,
+                onSubmit: acceptFirstPracticeSuggestion
             )
-            .textFieldStyle(.roundedBorder)
-            .font(.title3)
-            .onSubmit(acceptFirstPracticeSuggestion)
+            .frame(height: 28)
             .onChange(of: practiceText) { _, _ in
+                practiceSelectionIndex = 0
                 replaceExactPracticeTokenIfNeeded()
             }
             .accessibilityIdentifier("onboarding.practiceField")
@@ -263,7 +289,7 @@ struct OnboardingView: View {
                                 )
                                 .fontDesign(.monospaced)
                                 Spacer()
-                                if index == 0 {
+                                if index == practiceSelectionIndex {
                                     Text("Return")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
@@ -271,11 +297,16 @@ struct OnboardingView: View {
                             }
                             .padding(.horizontal, 10)
                             .frame(height: 38)
+                            .background(
+                                index == practiceSelectionIndex
+                                    ? PondDesign.pond.opacity(0.09)
+                                    : Color.clear
+                            )
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityHint(
-                            index == 0
+                            index == practiceSelectionIndex
                                 ? "Press Return to insert"
                                 : "Select to insert"
                         )
@@ -440,10 +471,29 @@ struct OnboardingView: View {
     }
 
     private func acceptFirstPracticeSuggestion() {
-        guard let result = practiceSuggestions.first else {
+        let suggestions = practiceSuggestions
+        guard suggestions.indices.contains(practiceSelectionIndex) else {
             return
         }
-        acceptPracticeResult(result)
+        acceptPracticeResult(suggestions[practiceSelectionIndex])
+    }
+
+    private func movePracticeSelection(_ direction: MoveCommandDirection) {
+        let suggestions = practiceSuggestions
+        guard !suggestions.isEmpty else {
+            return
+        }
+        switch direction {
+        case .up:
+            practiceSelectionIndex = max(0, practiceSelectionIndex - 1)
+        case .down:
+            practiceSelectionIndex = min(
+                suggestions.index(before: suggestions.endIndex),
+                practiceSelectionIndex + 1
+            )
+        default:
+            break
+        }
     }
 
     private func acceptPracticeResult(_ result: EmojiSearchResult) {
@@ -462,6 +512,73 @@ struct OnboardingView: View {
             return nil
         }
         return content.value
+    }
+}
+
+private struct PracticeShortcutField: NSViewRepresentable {
+    @Binding var text: String
+    let placeholder: String
+    let onMove: (MoveCommandDirection) -> Void
+    let onSubmit: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeNSView(context: Context) -> NSTextField {
+        let field = NSTextField()
+        field.delegate = context.coordinator
+        field.placeholderString = placeholder
+        field.font = NSFont.systemFont(ofSize: 17)
+        field.isBezeled = true
+        field.bezelStyle = .roundedBezel
+        field.drawsBackground = true
+        field.focusRingType = .default
+        field.setAccessibilityIdentifier("onboarding.practiceField")
+        return field
+    }
+
+    func updateNSView(_ field: NSTextField, context: Context) {
+        context.coordinator.parent = self
+        field.placeholderString = placeholder
+        if field.stringValue != text {
+            field.stringValue = text
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var parent: PracticeShortcutField
+
+        init(parent: PracticeShortcutField) {
+            self.parent = parent
+        }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSTextField else {
+                return
+            }
+            parent.text = field.stringValue
+        }
+
+        func control(
+            _ control: NSControl,
+            textView: NSTextView,
+            doCommandBy commandSelector: Selector
+        ) -> Bool {
+            switch commandSelector {
+            case #selector(NSResponder.moveUp(_:)):
+                parent.onMove(.up)
+                return true
+            case #selector(NSResponder.moveDown(_:)):
+                parent.onMove(.down)
+                return true
+            case #selector(NSResponder.insertNewline(_:)):
+                parent.onSubmit()
+                return true
+            default:
+                return false
+            }
+        }
     }
 }
 
@@ -513,22 +630,8 @@ private struct PermissionCard: View {
 
             permissionAction
         }
-        .padding(12)
-        .background(
-            status == .granted
-                ? PondDesign.lily.opacity(0.045)
-                : PondDesign.surface,
-            in: RoundedRectangle(cornerRadius: PondDesign.cornerRadius)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: PondDesign.cornerRadius)
-                .stroke(
-                    status == .granted
-                        ? PondDesign.lily.opacity(0.25)
-                        : PondDesign.ripple.opacity(0.18),
-                    lineWidth: 1
-                )
-        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
     }
 
     @ViewBuilder

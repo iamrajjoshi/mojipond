@@ -34,6 +34,14 @@ test("home page is a full-screen product landing page", async ({ page }) => {
   expect(heroBox?.x).toBeLessThanOrEqual(1);
   expect(heroBox?.width).toBeGreaterThanOrEqual((viewport?.width ?? 0) - 1);
   expect(heroBox?.height).toBeGreaterThanOrEqual((viewport?.height ?? 0) - 1);
+
+  await expect(page.locator(".pond-scene source").last()).toHaveAttribute(
+    "srcset",
+    /3840w/,
+  );
+  await expect(
+    page.locator('.pond-scene source[media="(max-width: 700px)"]'),
+  ).toHaveAttribute("srcset", /2160w/);
   await expectNoHorizontalOverflow(page);
 });
 

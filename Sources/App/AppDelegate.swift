@@ -358,7 +358,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .titled,
             .closable
         ]
-        window.setContentSize(NSSize(width: 760, height: 560))
+        window.setContentSize(NSSize(width: 740, height: 520))
         window.center()
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
@@ -387,8 +387,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .miniaturizable,
             .resizable
         ]
-        window.setContentSize(NSSize(width: 860, height: 640))
-        window.minSize = NSSize(width: 760, height: 560)
+        window.setContentSize(NSSize(width: 800, height: 540))
+        window.minSize = NSSize(width: 720, height: 480)
         window.center()
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
