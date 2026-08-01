@@ -47,20 +47,6 @@ enum SkinToneResolver {
         )
     }
 
-    static func resolve(
-        item: EmojiItem,
-        explicitTone: EmojiSkinTone? = nil,
-        preferences: MojiPondPreferences,
-        usage: EmojiUsageSnapshot = EmojiUsageSnapshot()
-    ) -> ResolvedUnicodeEmoji? {
-        resolve(
-            item: item,
-            explicitTone: explicitTone,
-            defaultTone: preferences.defaultSkinTone,
-            usage: usage
-        )
-    }
-
     private static func mostUsedTone(
         for itemID: EmojiItem.ID,
         content: UnicodeEmojiContent,

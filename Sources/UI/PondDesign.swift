@@ -16,10 +16,6 @@ enum PondDesign {
     static let lotus = Color(nsColor: lotusColor)
     static let pond = Color(nsColor: pondColor)
     static let lily = Color(nsColor: lilyColor)
-    static let selectionBackground = Color(
-        nsColor: selectionBackgroundColor
-    )
-    static let selectionForeground = Color.white
     static let warningForeground = Color(
         nsColor: warningForegroundColor
     )
@@ -570,6 +566,60 @@ struct PondInteractiveButtonStyle: ButtonStyle {
                 reduceMotion ? nil : .easeOut(duration: 0.1),
                 value: configuration.isPressed
             )
+    }
+}
+
+private struct PondFloatingPanelModifier: ViewModifier {
+    let backgroundCornerRadius: CGFloat
+
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityReduceTransparency)
+    private var reduceTransparency
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                RoundedRectangle(
+                    cornerRadius: backgroundCornerRadius,
+                    style: .continuous
+                )
+                .fill(
+                    PondDesign.surface.opacity(
+                        reduceTransparency ? 1 : 0.97
+                    )
+                )
+            }
+            .clipShape(
+                RoundedRectangle(
+                    cornerRadius: PondDesign.cornerRadius,
+                    style: .continuous
+                )
+            )
+            .overlay {
+                RoundedRectangle(
+                    cornerRadius: PondDesign.cornerRadius,
+                    style: .continuous
+                )
+                .strokeBorder(
+                    PondDesign.ripple.opacity(
+                        contrast == .increased ? 1 : 0.58
+                    ),
+                    lineWidth: contrast == .increased ? 2 : 1
+                )
+            }
+            .accessibilityElement(children: .contain)
+    }
+}
+
+extension View {
+    func pondFloatingPanel(
+        backgroundCornerRadius: CGFloat = PondDesign.cornerRadius
+    ) -> some View {
+        modifier(
+            PondFloatingPanelModifier(
+                backgroundCornerRadius: backgroundCornerRadius
+            )
+        )
     }
 }
 

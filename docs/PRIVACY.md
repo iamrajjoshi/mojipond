@@ -1,8 +1,8 @@
 # Privacy
 
-MojiPond is designed as a local utility with narrowly separated, opt-in network
-features. This document describes the current source implementation; it is not
-a substitute for macOS’s own permission dialogs.
+MojiPond processes autocomplete locally. Online sticker search and update
+checks are separate opt-in features. This document describes the current source
+implementation; it does not replace macOS’s permission dialogs.
 
 ## What MojiPond observes
 
@@ -112,7 +112,7 @@ after insertion. Escape revokes that pending send.
 The insertion engine exposes a non-mutating copy-fallback result. When it
 includes an already-validated media payload, MojiPond shows **Copy Media
 Instead** in its status menu. That explicit action replaces the clipboard
-permanently because the user then owns the manual paste.
+permanently so the user can paste the copied media manually.
 
 ## Network features
 

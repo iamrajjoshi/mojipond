@@ -304,12 +304,3 @@ private enum UpdateSignatureVerifier {
         }
     }
 }
-
-private enum HTTPSURLValidator {
-    static func isSecure(_ url: URL) -> Bool {
-        url.scheme?.lowercased(with: Locale(identifier: "en_US_POSIX")) == "https"
-            && !(url.host?.isEmpty ?? true)
-            && url.user == nil
-            && url.password == nil
-    }
-}

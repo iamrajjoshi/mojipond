@@ -29,7 +29,7 @@ private enum SettingsDestination: String, CaseIterable, Identifiable {
     var detail: String {
         switch self {
         case .general:
-            "Choose when MojiPond runs and goes online."
+            "Control autocomplete, launch at login, sticker search, and updates."
         case .shortcuts:
             "Set the trigger, insertion keys, and skin tone."
         case .library:
@@ -339,9 +339,9 @@ struct SettingsRootView: View {
                         icon: "arrow.triangle.2.circlepath",
                         title: "Keep MojiPond up to date",
                         detail:
-                            "Checks quietly each day and shows Update in "
-                                + "the menu bar. You choose when to download "
-                                + "and install."
+                            "Checks once per day and adds Update to the "
+                                + "menu bar. Downloads and installs require "
+                                + "your approval."
                     ) {
                         Toggle(
                             "Keep MojiPond up to date",

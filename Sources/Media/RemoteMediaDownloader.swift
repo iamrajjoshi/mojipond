@@ -1,13 +1,6 @@
-import CryptoKit
 import Foundation
 
 actor RemoteMediaDownloader {
-    struct Download: Sendable {
-        let data: Data
-        let contentType: String
-        let suggestedFilename: String
-    }
-
     private let responseLoader: BoundedHTTPSResponseLoader
     private let maximumBytes: Int
 
@@ -16,7 +9,7 @@ actor RemoteMediaDownloader {
         self.maximumBytes = maximumBytes
     }
 
-    func download(_ item: RemoteMediaItem) async throws -> Download {
+    func download(_ item: RemoteMediaItem) async throws -> MediaDownload {
         guard RemoteMediaURLPolicy.allows(
             item.originalURL,
             for: item.provider
@@ -81,10 +74,10 @@ actor RemoteMediaDownloader {
             throw RemoteMediaError.unsafeImage
         }
 
-        let digest = SHA256.hash(data: Data(item.originalURL.absoluteString.utf8))
-            .map { String(format: "%02x", $0) }
-            .joined()
-        return Download(
+        let digest = ContentHasher.sha256(
+            of: Data(item.originalURL.absoluteString.utf8)
+        ).sha256
+        return MediaDownload(
             data: data,
             contentType: contentType ?? "application/octet-stream",
             suggestedFilename: "\(digest).\(fileExtension)"

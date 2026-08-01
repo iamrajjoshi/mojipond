@@ -1,0 +1,108 @@
+---
+interface Props {
+  compact?: boolean;
+}
+
+const { compact = false } = Astro.props;
+---
+
+<div class:list={["release-action", { compact }]} data-release-action>
+  <a class="button primary" href="#how-it-works" data-release-fallback
+    >See the picker</a
+  >
+  <a
+    class="button primary"
+    href="/releases/MojiPond.dmg"
+    download
+    hidden
+    data-release-download
+  >
+    Download for macOS
+  </a>
+  <span class="release-detail" data-release-detail>
+    Public build pending Apple signing
+  </span>
+</div>
+
+<script>
+  import { parseReleaseManifest } from "../lib/releaseManifest";
+
+  const formatBytes = (value: number) => {
+    const megabytes = value / 1_048_576;
+    return `${megabytes.toFixed(megabytes >= 10 ? 0 : 1)} MB`;
+  };
+
+  const revealRelease = async () => {
+    const actions = document.querySelectorAll("[data-release-action]");
+
+    try {
+      const response = await fetch("/releases/release.json", {
+        cache: "no-store",
+        credentials: "omit",
+      });
+      if (!response.ok) {
+        if (response.status !== 404) {
+          console.warn(
+            `Release metadata request failed with HTTP ${response.status}; keeping the preview state.`,
+          );
+        }
+        return;
+      }
+
+      const payload: unknown = await response.json();
+      const release = parseReleaseManifest(payload);
+      if (!release) {
+        console.warn(
+          "Release metadata has an invalid shape; keeping the preview state.",
+        );
+        return;
+      }
+
+      const sizeText = ` · ${formatBytes(release.asset.byteCount)}`;
+      const releaseDetail = `Version ${release.version}${sizeText} · macOS 14 or newer`;
+
+      actions.forEach((action) => {
+        const fallback = action.querySelector("[data-release-fallback]");
+        const download = action.querySelector("[data-release-download]");
+        const detail = action.querySelector("[data-release-detail]");
+        if (
+          !(fallback instanceof HTMLAnchorElement) ||
+          !(download instanceof HTMLAnchorElement) ||
+          !(detail instanceof HTMLSpanElement)
+        ) {
+          return;
+        }
+
+        fallback.setAttribute("hidden", "");
+        download.removeAttribute("hidden");
+        detail.textContent = releaseDetail;
+      });
+    } catch (error) {
+      console.warn(
+        "Release metadata could not be loaded; keeping the preview state.",
+        error,
+      );
+    }
+  };
+
+  void revealRelease();
+</script>
+
+<style>
+  .release-action {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 16px;
+    align-items: center;
+  }
+
+  .release-detail {
+    color: var(--ink-muted);
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+
+  .compact .release-detail {
+    flex-basis: 100%;
+  }
+</style>

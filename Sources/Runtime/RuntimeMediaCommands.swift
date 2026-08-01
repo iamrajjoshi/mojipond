@@ -61,7 +61,7 @@ protocol RuntimeMediaCommandCoordinating: Sendable {
     func cancel() async -> MediaCommandSearchState
     func resolve(
         _ result: MediaCommandResult
-    ) async throws -> MediaCommandDownload
+    ) async throws -> MediaDownload
 }
 
 extension MediaCommandCoordinator: RuntimeMediaCommandCoordinating {}
@@ -109,7 +109,7 @@ enum RuntimeMediaPayloadBuilder {
     static let maximumBytes = 25 * 1_024 * 1_024
 
     static func payload(
-        for download: MediaCommandDownload,
+        for download: MediaDownload,
         maximumBytes: Int = maximumBytes
     ) throws -> PasteboardItemPayload {
         let uniformType = try validatedUniformType(
@@ -118,13 +118,12 @@ enum RuntimeMediaPayloadBuilder {
         )
         return .image(
             originalData: download.data,
-            type: uniformType,
-            includeCompatibilityFallbacks: true
+            type: uniformType
         )
     }
 
     static func validatedUniformType(
-        for download: MediaCommandDownload,
+        for download: MediaDownload,
         maximumBytes: Int = maximumBytes
     ) throws -> UTType {
         guard !download.data.isEmpty else {

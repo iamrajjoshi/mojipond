@@ -26,19 +26,20 @@ enum RemoteMediaURLPolicy {
     }
 }
 
-struct RemoteMediaDimensions: Codable, Equatable, Sendable {
-    let width: Int
-    let height: Int
-}
-
 struct RemoteMediaItem: Identifiable, Codable, Equatable, Sendable {
     let id: String
     let provider: RemoteMediaProvider
     let title: String
     let previewURL: URL
     let originalURL: URL
-    let dimensions: RemoteMediaDimensions?
+    let dimensions: MediaDimensions?
     let attribution: String
+}
+
+struct MediaDownload: Equatable, Sendable {
+    let data: Data
+    let contentType: String
+    let suggestedFilename: String
 }
 
 enum RemoteMediaError: Error, Equatable, LocalizedError, Sendable {

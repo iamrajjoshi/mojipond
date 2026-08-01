@@ -523,7 +523,7 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
 
     private func postAnnouncement(
         _ announcement: String,
-        from element: Any
+        from element: NSPanel
     ) {
         NSAccessibility.post(
             element: element,
@@ -580,9 +580,6 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
 
 struct RuntimeSuggestionPanelView: View {
     @ObservedObject fileprivate var model: RuntimeSuggestionPanelModel
-    @Environment(\.colorSchemeContrast) private var contrast
-    @Environment(\.accessibilityReduceTransparency)
-    private var reduceTransparency
 
     private var snapshot: RuntimeSuggestionPanelSnapshot {
         model.snapshot
@@ -708,33 +705,7 @@ struct RuntimeSuggestionPanelView: View {
                     .background(PondDesign.raisedSurface)
             }
         }
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(
-                    PondDesign.surface.opacity(
-                        reduceTransparency ? 1 : 0.97
-                    )
-                )
-        }
-        .clipShape(
-            RoundedRectangle(
-                cornerRadius: PondDesign.cornerRadius,
-                style: .continuous
-            )
-        )
-        .overlay {
-            RoundedRectangle(
-                cornerRadius: PondDesign.cornerRadius,
-                style: .continuous
-            )
-                .strokeBorder(
-                    PondDesign.ripple.opacity(
-                        contrast == .increased ? 1 : 0.58
-                    ),
-                    lineWidth: contrast == .increased ? 2 : 1
-                )
-        }
-        .accessibilityElement(children: .contain)
+        .pondFloatingPanel(backgroundCornerRadius: 12)
     }
 
     private var commitProgress: some View {

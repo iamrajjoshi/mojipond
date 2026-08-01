@@ -593,8 +593,8 @@ struct LibraryNoticeBanner: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: symbolName)
-                .foregroundStyle(tint)
+            Image(systemName: notice.kind.symbolName)
+                .foregroundStyle(notice.kind.tint)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(notice.title)
@@ -614,14 +614,16 @@ struct LibraryNoticeBanner: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(tint.opacity(0.1))
+        .background(notice.kind.tint.opacity(0.1))
         .overlay(alignment: .bottom) {
             Divider()
         }
     }
+}
 
-    private var symbolName: String {
-        switch notice.kind {
+extension LibraryNotice.Kind {
+    var symbolName: String {
+        switch self {
         case .information:
             "checkmark.circle.fill"
         case .warning:
@@ -631,8 +633,8 @@ struct LibraryNoticeBanner: View {
         }
     }
 
-    private var tint: Color {
-        switch notice.kind {
+    var tint: Color {
+        switch self {
         case .information:
             PondDesign.lily
         case .warning:
@@ -640,6 +642,50 @@ struct LibraryNoticeBanner: View {
         case .error:
             PondDesign.errorForeground
         }
+    }
+}
+
+struct LibraryPackMoveButtons: View {
+    @ObservedObject var viewModel: LibraryViewModel
+    let packID: UUID
+
+    var body: some View {
+        Button("Move Up") {
+            Task {
+                await viewModel.movePack(packID, by: -1)
+            }
+        }
+        .disabled(!viewModel.canMovePack(packID, by: -1))
+
+        Button("Move Down") {
+            Task {
+                await viewModel.movePack(packID, by: 1)
+            }
+        }
+        .disabled(!viewModel.canMovePack(packID, by: 1))
+    }
+}
+
+struct LibraryPackEnabledToggle: View {
+    @ObservedObject var viewModel: LibraryViewModel
+    let pack: EmojiPack
+
+    var body: some View {
+        Toggle(
+            "Enabled",
+            isOn: Binding(
+                get: { pack.isEnabled },
+                set: { enabled in
+                    Task {
+                        await viewModel.setPackEnabled(
+                            pack.id,
+                            isEnabled: enabled
+                        )
+                    }
+                }
+            )
+        )
+        .toggleStyle(.switch)
     }
 }
 
@@ -656,7 +702,7 @@ struct LibraryDropOverlay: View {
                         .foregroundStyle(PondDesign.pond)
                     Text("Drop ZIP to review before importing")
                         .font(.headline)
-                    Text("MojiPond currently imports one ZIP archive at a time.")
+                    Text("Drop one ZIP archive.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -680,7 +726,7 @@ struct LibraryLoadingView: View {
         VStack(spacing: 12) {
             ProgressView()
                 .controlSize(.large)
-            Text("Gathering your emoji…")
+            Text("Loading emoji…")
                 .font(.headline)
             Text("Loading the built-in catalog and installed packs.")
                 .font(.callout)

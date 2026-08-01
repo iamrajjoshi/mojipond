@@ -214,7 +214,9 @@ struct LibraryImportPreviewView: View {
                 ContentUnavailableView(
                     "No shortcode conflicts",
                     systemImage: "checkmark.circle",
-                    description: Text("Every incoming shortcode is currently available.")
+                    description: Text(
+                        "No incoming shortcodes conflict with your library."
+                    )
                 )
             } else {
                 List(session.preview.collisions) { collision in
@@ -296,8 +298,8 @@ struct LibraryImportPreviewView: View {
                     ?? collision.shortcode.rawValue,
                 aliases: displayItem?.aliases ?? [],
                 detail: owner.isAlias
-                    ? "Currently claims this as an alias"
-                    : "Currently owns this shortcode",
+                    ? "Claims this as an alias"
+                    : "Owns this shortcode",
                 url: displayItem?.assetURL,
                 unicode: displayItem?.unicode,
                 isAnimated: displayItem?.isAnimated ?? false
@@ -325,8 +327,8 @@ struct LibraryImportPreviewView: View {
                 shortcode: owner.shortcode.rawValue,
                 aliases: owner.isAlias ? [owner.shortcode.rawValue] : [],
                 detail: owner.isAlias
-                    ? "\(owner.itemName) currently claims this as an alias"
-                    : "\(owner.itemName) currently owns this shortcode",
+                    ? "\(owner.itemName) claims this as an alias"
+                    : "\(owner.itemName) owns this shortcode",
                 url: displayItem?.assetURL,
                 unicode: displayItem?.unicode,
                 isAnimated: displayItem?.isAnimated ?? false
@@ -525,8 +527,6 @@ struct LibraryImportPreviewView: View {
         switch session.destination {
         case .newPack:
             "Review “\(session.preview.preparedPack.name)”"
-        case let .append(packID):
-            "Review emoji to add to \(packName(packID))"
         case let .replace(packID):
             "Review update for \(packName(packID))"
         }
@@ -545,8 +545,6 @@ struct LibraryImportPreviewView: View {
         switch session.destination {
         case .newPack:
             return "Install \(count) Emoji"
-        case .append:
-            return "Add \(count) Emoji"
         case .replace:
             return "Update with \(count) Emoji"
         }

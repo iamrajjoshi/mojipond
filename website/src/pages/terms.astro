@@ -1,0 +1,54 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+
+const title = "Preview terms — MojiPond";
+const description = "Terms for using pre-release builds of MojiPond.";
+---
+
+<BaseLayout title={title} description={description} noindex>
+  <article class="legal-page">
+    <p class="eyebrow">Preview terms</p>
+    <h1>MojiPond is still pre-release software.</h1>
+    <div class="legal-note">
+      <strong
+        >Do not treat a development build as a signed public release.</strong
+      >
+      <p>Last updated August 1, 2026.</p>
+    </div>
+
+    <h2>Using a preview build</h2>
+    <p>
+      Preview builds exist for testing. Features can change, and some editors
+      may behave differently from the controlled test fixtures. Keep a copy of
+      any emoji pack you import.
+    </p>
+
+    <h2>Your emoji packs</h2>
+    <p>
+      You are responsible for the artwork and metadata you import. Only use
+      files you own or have permission to use. MojiPond does not grant rights to
+      third-party emoji packs.
+    </p>
+
+    <h2>macOS permissions</h2>
+    <p>
+      You choose whether to grant Input Monitoring, Accessibility, and optional
+      Event Posting. macOS lets you revoke them at any time in System Settings.
+      Without the required permissions, global autocomplete will not work.
+    </p>
+
+    <h2>No warranty for preview builds</h2>
+    <p>
+      The preview is provided as available, without a promise that it will work
+      in every app or preserve compatibility between builds. Stop using it if it
+      interferes with typing or another input tool.
+    </p>
+
+    <h2>Public release terms</h2>
+    <p>
+      These preview terms will be reviewed before the first signed and notarized
+      release. The release page will name the applicable license and
+      version-specific notices.
+    </p>
+  </article>
+</BaseLayout>

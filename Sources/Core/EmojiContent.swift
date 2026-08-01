@@ -84,11 +84,20 @@ struct UnicodeEmojiContent: Codable, Hashable, Sendable {
     }
 }
 
-enum EmojiMediaType: String, Codable, CaseIterable, Hashable, Sendable {
+enum AssetFormat: String, Codable, CaseIterable, Hashable, Sendable {
     case png
     case jpeg
     case gif
     case webP
+
+    var preferredFilenameExtension: String {
+        switch self {
+        case .png: "png"
+        case .jpeg: "jpg"
+        case .gif: "gif"
+        case .webP: "webp"
+        }
+    }
 
     var supportsAnimation: Bool {
         self == .gif || self == .webP
@@ -109,24 +118,22 @@ struct MediaDimensions: Codable, Hashable, Sendable {
 /// directory. Original image bytes live on disk and are never represented by
 /// a recompressed bitmap in metadata.
 struct MediaEmojiContent: Codable, Hashable, Sendable {
-    let mediaType: EmojiMediaType
+    let mediaType: AssetFormat
     let relativePath: String
     let thumbnailRelativePath: String?
     let originalFilename: String?
     let contentHash: String
     let dimensions: MediaDimensions?
     let isAnimated: Bool
-    let fallbackRelativePath: String?
 
     init(
-        mediaType: EmojiMediaType,
+        mediaType: AssetFormat,
         relativePath: String,
         thumbnailRelativePath: String? = nil,
         originalFilename: String? = nil,
         contentHash: String,
         dimensions: MediaDimensions? = nil,
-        isAnimated: Bool = false,
-        fallbackRelativePath: String? = nil
+        isAnimated: Bool = false
     ) {
         self.mediaType = mediaType
         self.relativePath = relativePath
@@ -135,7 +142,6 @@ struct MediaEmojiContent: Codable, Hashable, Sendable {
         self.contentHash = contentHash
         self.dimensions = dimensions
         self.isAnimated = isAnimated
-        self.fallbackRelativePath = fallbackRelativePath
     }
 }
 

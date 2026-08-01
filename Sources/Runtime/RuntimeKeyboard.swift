@@ -10,22 +10,6 @@ enum RuntimeKeyboardAction: Equatable, Sendable {
     case ignore
 }
 
-enum RuntimeKeyboardKeyCode {
-    static let returnKey: CGKeyCode = 36
-    static let tab: CGKeyCode = 48
-    static let delete: CGKeyCode = 51
-    static let escape: CGKeyCode = 53
-    static let keypadEnter: CGKeyCode = 76
-    static let home: CGKeyCode = 115
-    static let pageUp: CGKeyCode = 116
-    static let end: CGKeyCode = 119
-    static let pageDown: CGKeyCode = 121
-    static let leftArrow: CGKeyCode = 123
-    static let rightArrow: CGKeyCode = 124
-    static let downArrow: CGKeyCode = 125
-    static let upArrow: CGKeyCode = 126
-}
-
 /// Converts the immutable event-tap snapshot into the parser's OS-independent
 /// input vocabulary. This work runs on MojiPond's serial runtime queue, never
 /// in the event-tap callback.
@@ -157,14 +141,6 @@ enum RuntimeKeyboardEventMapper {
             false
         }
     }
-}
-
-enum RuntimeInterceptionMode: Equatable, Sendable {
-    case hidden
-    case suggestions
-    case browser
-    case media
-    case committing
 }
 
 /// The only mutable state consulted synchronously by the event-tap callback.

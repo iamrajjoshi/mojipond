@@ -219,8 +219,8 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
             keySnapshot(keyCode: RuntimeKeyboardKeyCode.tab)
         )
 
-        // Keep enough room for a cold ImageIO process while guarding against
-        // the former square-redraw path's minute-long codec stall.
+        // Allow a cold ImageIO startup, but fail before a codec can stall for
+        // a minute.
         let didPaste = await eventually(timeout: .seconds(15)) {
             harness.poster.pasteCount == 1
         }
@@ -1117,7 +1117,7 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
         let results = commandResults(ids: ["frog", "fox"])
         let coordinator = RuntimeMediaCoordinatorStub(
             response: .offline(results),
-            download: MediaCommandDownload(
+            download: MediaDownload(
                 data: original,
                 contentType: "image/gif",
                 suggestedFilename: "original.gif"
@@ -1163,9 +1163,12 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
     {
         let coordinator = RuntimeMediaCoordinatorStub(
             response: .empty(
-                MediaCommandRequest(id: 1, command: .sticker)
+                MediaCommandRequest(
+                    id: MediaCommandRequestID(rawValue: 1),
+                    command: .sticker
+                )
             ),
-            download: MediaCommandDownload(
+            download: MediaDownload(
                 data: Data("GIF89a-unused".utf8),
                 contentType: "image/gif",
                 suggestedFilename: "unused.gif"
@@ -1198,9 +1201,12 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
     func testStickerCommandPassesExplicitNetworkOptions() async throws {
         let coordinator = RuntimeMediaCoordinatorStub(
             response: .empty(
-                MediaCommandRequest(id: 1, command: .sticker)
+                MediaCommandRequest(
+                    id: MediaCommandRequestID(rawValue: 1),
+                    command: .sticker
+                )
             ),
-            download: MediaCommandDownload(
+            download: MediaDownload(
                 data: Data("GIF89a-unused".utf8),
                 contentType: "image/gif",
                 suggestedFilename: "unused.gif"
@@ -1231,9 +1237,12 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
     func testMediaPositioningFailureNeverArmsInterception() async throws {
         let coordinator = RuntimeMediaCoordinatorStub(
             response: .empty(
-                MediaCommandRequest(id: 1, command: .sticker)
+                MediaCommandRequest(
+                    id: MediaCommandRequestID(rawValue: 1),
+                    command: .sticker
+                )
             ),
-            download: MediaCommandDownload(
+            download: MediaDownload(
                 data: validGIFData,
                 contentType: "image/gif",
                 suggestedFilename: "unused.gif"
@@ -1280,7 +1289,7 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
             response: .results(
                 commandResults(ids: ["frog"])
             ),
-            download: MediaCommandDownload(
+            download: MediaDownload(
                 data: validGIFData,
                 contentType: "image/gif",
                 suggestedFilename: "frog.gif"
@@ -1336,7 +1345,7 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
             response: .results(
                 commandResults(ids: ["frog"])
             ),
-            download: MediaCommandDownload(
+            download: MediaDownload(
                 data: validGIFData,
                 contentType: "image/gif",
                 suggestedFilename: "frog.gif"
@@ -1374,7 +1383,7 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
             response: .results(
                 commandResults(ids: ["fresh"])
             ),
-            download: MediaCommandDownload(
+            download: MediaDownload(
                 data: Data("GIF89a-unused".utf8),
                 contentType: "image/gif",
                 suggestedFilename: "unused.gif"
@@ -1420,7 +1429,7 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
             response: .results(
                 commandResults(ids: ["result"])
             ),
-            download: MediaCommandDownload(
+            download: MediaDownload(
                 data: validGIFData,
                 contentType: "image/gif",
                 suggestedFilename: "result.gif"
@@ -1477,7 +1486,7 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
         let results = commandResults(ids: ["delayed"])
         let coordinator = RuntimeMediaCoordinatorStub(
             response: .results(results),
-            download: MediaCommandDownload(
+            download: MediaDownload(
                 data: validGIFData,
                 contentType: "image/gif",
                 suggestedFilename: "delayed.gif"
@@ -1534,7 +1543,7 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
             response: .results(
                 commandResults(ids: ["stale"])
             ),
-            download: MediaCommandDownload(
+            download: MediaDownload(
                 data: validGIFData,
                 contentType: "image/gif",
                 suggestedFilename: "stale.gif"
@@ -1569,7 +1578,10 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
     }
 
     func testMediaPanelStateMappingCoversEverySearchState() {
-        let request = MediaCommandRequest(id: 1, command: .sticker)
+        let request = MediaCommandRequest(
+            id: MediaCommandRequestID(rawValue: 1),
+            command: .sticker
+        )
         let results = MediaCommandResults(
             request: request,
             items: [],
@@ -1756,7 +1768,7 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
 
     private func mediaEmoji(
         shortcode: String,
-        mediaType: EmojiMediaType,
+        mediaType: AssetFormat,
         relativePath: String,
         data: Data,
         isAnimated: Bool? = nil
@@ -1864,7 +1876,10 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
             )
         }
         return MediaCommandResults(
-            request: MediaCommandRequest(id: 1, command: .sticker),
+            request: MediaCommandRequest(
+                id: MediaCommandRequestID(rawValue: 1),
+                command: .sticker
+            ),
             items: items,
             attributions: [.notoAnimatedEmoji]
         )
@@ -2076,7 +2091,7 @@ private actor RuntimeMediaCoordinatorStub:
     RuntimeMediaCommandCoordinating
 {
     private let response: MediaCommandSearchState
-    private let download: MediaCommandDownload
+    private let download: MediaDownload
     private let firstSearchDelay: Duration?
     private let resolveDelay: Duration?
     private let cancelDelay: Duration?
@@ -2090,7 +2105,7 @@ private actor RuntimeMediaCoordinatorStub:
 
     init(
         response: MediaCommandSearchState,
-        download: MediaCommandDownload,
+        download: MediaDownload,
         firstSearchDelay: Duration? = nil,
         resolveDelay: Duration? = nil,
         cancelDelay: Duration? = nil,
@@ -2123,7 +2138,10 @@ private actor RuntimeMediaCoordinatorStub:
                 try await Task.sleep(for: firstSearchDelay)
             } catch {
                 return .cancelled(
-                    MediaCommandRequest(id: 1, command: command)
+                    MediaCommandRequest(
+                        id: MediaCommandRequestID(rawValue: 1),
+                        command: command
+                    )
                 )
             }
         }
@@ -2142,7 +2160,7 @@ private actor RuntimeMediaCoordinatorStub:
 
     func resolve(
         _ result: MediaCommandResult
-    ) async throws -> MediaCommandDownload {
+    ) async throws -> MediaDownload {
         resolutions += 1
         resolvedID = result.id
         if let resolveDelay {

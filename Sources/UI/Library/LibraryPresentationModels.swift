@@ -131,7 +131,6 @@ struct LibraryImportSession: Identifiable, Equatable {
 
 enum LibraryImportDestination: Equatable, Sendable {
     case newPack
-    case append(packID: UUID)
     case replace(packID: UUID)
 }
 
@@ -169,15 +168,6 @@ struct LibraryRemovalTarget: Identifiable, Equatable {
     let message: String
 }
 
-struct LibraryPackDraft: Equatable {
-    var name = ""
-    var author = ""
-    var description = ""
-    var version = "1.0.0"
-    var license = ""
-    var sourceURL = ""
-}
-
 struct LibraryItemDraft: Equatable {
     let packID: UUID
     let itemID: UUID
@@ -196,16 +186,6 @@ struct LibraryItemDraft: Equatable {
         tags = item.tags.joined(separator: ", ")
         category = item.category ?? ""
     }
-}
-
-struct LibraryUnicodeItemDraft: Equatable {
-    let packID: UUID
-    var unicode = ""
-    var shortcode = ""
-    var aliases = ""
-    var displayName = ""
-    var tags = ""
-    var category = ""
 }
 
 struct LibraryNotice: Identifiable, Equatable {

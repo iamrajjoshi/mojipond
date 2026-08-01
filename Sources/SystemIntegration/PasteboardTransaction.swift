@@ -32,8 +32,7 @@ struct PasteboardItemPayload: Equatable, Sendable {
     /// previews are additional representations and never replace the animation.
     static func image(
         originalData: Data,
-        type: UTType,
-        includeCompatibilityFallbacks: Bool = true
+        type: UTType
     ) -> PasteboardItemPayload {
         var representations = [
             PasteboardRepresentation(
@@ -43,7 +42,6 @@ struct PasteboardItemPayload: Equatable, Sendable {
         ]
         let limits = AssetValidationLimits.default
         guard
-            includeCompatibilityFallbacks,
             (try? AssetValidator(limits: limits).validate(
                 data: originalData
             )) != nil,
@@ -329,23 +327,6 @@ final class PasteboardTransactionCoordinator {
             try? await Task.sleep(for: duration)
         }
         await sleeper.value
-    }
-
-    /// Used by the explicit "Copy image instead" fallback.
-    @discardableResult
-    func writePermanently(_ items: [PasteboardItemPayload]) async -> Bool {
-        do {
-            try await acquireTransaction()
-        } catch {
-            return false
-        }
-        defer {
-            releaseTransaction()
-        }
-        guard !Task.isCancelled else {
-            return false
-        }
-        return pasteboard.replaceContents(with: items)
     }
 
     private func addingOwnershipMarker(

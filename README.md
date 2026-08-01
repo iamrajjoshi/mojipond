@@ -1,9 +1,11 @@
 # MojiPond
 
+[mojipond.com](https://mojipond.com)
+
 MojiPond is a native macOS menu-bar app for Slack-style emoji autocomplete.
 Type a shortcode such as `:wave:`, choose a result beside the caret, and keep
-typing. The project also contains a local custom-pack library, safe import
-pipelines, and a Messages-only sticker command.
+typing. It also includes a local custom-pack library, bounded ZIP imports, and
+a Messages-only sticker command.
 
 > **Pre-release status:** global Unicode autocomplete, the custom-pack Library,
 > and Messages media commands are connected to the app and exercised by
@@ -31,8 +33,9 @@ pipelines, and a Messages-only sticker command.
   Messages sticker workflow.
 - Enabled custom Unicode and image entries participate in `:query`, exact
   `:name:`, and `::` browsing beside the built-in catalog.
-- Clipboard-safe media insertion that snapshots all pasteboard items and
-  representations before a temporary paste.
+- Media insertion snapshots all pasteboard items and representations before a
+  temporary paste, then restores them unless another process changed the
+  pasteboard.
 - Signed update checks plus an explicit, bounded download-and-verify flow for a
   single Developer ID-signed, hardened, Gatekeeper-accepted app. MojiPond
   installs only after **Install & Relaunch**, with a locked atomic swap,
@@ -54,8 +57,7 @@ MojiPond windows or panels.
 | Double-trigger browser | Native integration fixture |
 | ![MojiPond emoji browser in dark appearance](docs/screenshots/emoji-browser-dark.png) | ![MojiPond integration fixture](docs/screenshots/integration-fixture.png) |
 
-The complete reviewed set also includes additional permission states and a
-dark-appearance ZIP import under
+Additional permission states and a dark ZIP-import screenshot are in
 [`docs/screenshots`](docs/screenshots).
 
 ## Requirements
@@ -70,6 +72,32 @@ Install XcodeGen with Homebrew if needed:
 
 ```sh
 brew install xcodegen
+```
+
+## Website
+
+The public site lives in `website/` and is built with Astro. The repository
+uses pnpm for all website commands:
+
+```sh
+corepack enable
+pnpm install --frozen-lockfile
+pnpm site:check
+pnpm site:build
+pnpm site:test
+```
+
+The site uses reviewed app screenshots from `docs/screenshots/`. Before the
+first notarized release, its primary action links to the product tour and says
+that the public build is waiting for Apple signing. After a GitHub release is
+published, the Pages workflow copies the final DMG, ZIP, checksums, and signed
+update feed into the public site. It does not expose assets from the private
+repository directly.
+
+Local development is available at `http://localhost:4321`:
+
+```sh
+pnpm site:dev
 ```
 
 ## Build and install
@@ -146,7 +174,7 @@ The MojiPond UI scheme launches with isolated temporary Library data,
 deterministic not-requested/denied/granted/revoked permission scenarios, and
 runtime/network startup disabled. It also forces explicit light or dark
 appearance and fails if the two Library captures are identical. It does not
-request TCC access or interact with Messages. The integration fixture safely
+request TCC access or interact with Messages. The integration fixture
 exercises an ordinary field, multiline editor, secure field, and
 attachment-capable rich text view.
 
@@ -260,16 +288,14 @@ executable—there is no helper, daemon, or privileged component. It acquires a
 sibling lock and consumes a private, one-time handoff bound to the running app
 and exact staged candidate. It then waits for the old process to exit, copies
 and re-verifies the candidate beside the installed app, atomically exchanges
-the two bundles,
-moves the displaced app to a backup name, and verifies the final destination
-before launch. The backup is removed only
-after the final app writes a private readiness acknowledgement; failures
-restore and re-verify the previous app.
+the two bundles, moves the displaced app to a backup name, and verifies the
+final destination before launch. The backup is removed only after the final
+app writes a private readiness acknowledgement; failures restore and re-verify
+the previous app.
 
-If the installed app's parent directory is not writable, MojiPond does not
-pretend installation succeeded: it offers the verified candidate in Finder for
-manual replacement. Unsafe paths or identity failures never receive that
-fallback. See
+If the installed app's parent directory is not writable, MojiPond opens the
+verified candidate in Finder for manual replacement. Unsafe paths or identity
+failures never receive that fallback. See
 [docs/RELEASING.md](docs/RELEASING.md) for the release-side requirements.
 
 The example environment file contains local build and packaging settings:
@@ -300,7 +326,7 @@ credentials, or a real API key.
 
 - Confirm MojiPond is enabled in the menu.
 - Try a standard TextEdit or Notes text field; some custom editors do not
-  expose the Accessibility attributes required for safe replacement.
+  expose the Accessibility attributes required for validated replacement.
 - Check whether the current application or browser domain is excluded.
 - Secure fields and fields whose security status cannot be proven are rejected
   deliberately.
@@ -316,12 +342,11 @@ passed through.
 ### An image cannot be pasted
 
 Custom-image insertion needs the optional **Image emoji in Messages** access.
-When MojiPond cannot
-snapshot the clipboard safely, validate the target, or post the paste command,
-the insertion engine leaves the token and clipboard unchanged and records a
-copy-fallback notice. If the selected original passed validation, open the
-MojiPond menu and choose **Copy Media Instead** to place it on the clipboard
-for a manual paste.
+When MojiPond cannot capture a complete clipboard snapshot, validate the
+target, or post the paste command, the insertion engine leaves the token and
+clipboard unchanged and records a copy-fallback notice. If the selected
+original passed validation, open the MojiPond menu and choose **Copy Media
+Instead** to place it on the clipboard for a manual paste.
 
 ### An import is rejected
 

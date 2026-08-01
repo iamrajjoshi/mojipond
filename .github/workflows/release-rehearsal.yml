@@ -1,0 +1,69 @@
+name: Release rehearsal
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 13 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-rehearsal
+  cancel-in-progress: true
+
+jobs:
+  rehearse:
+    name: Rehearse local package
+    runs-on: macos-26
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Install pinned XcodeGen
+        env:
+          XCODEGEN_VERSION: 2.46.0
+          XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
+        run: |
+          mkdir -p .derived/tools
+          curl \
+            --fail \
+            --location \
+            --silent \
+            --show-error \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_VERSION}/xcodegen.zip" \
+            --output .derived/tools/xcodegen.zip
+          printf '%s  %s\n' \
+            "${XCODEGEN_SHA256}" \
+            ".derived/tools/xcodegen.zip" \
+            | shasum -a 256 -c -
+          ditto -x -k .derived/tools/xcodegen.zip .derived/tools
+          echo "${GITHUB_WORKSPACE}/.derived/tools/xcodegen/bin" >> "${GITHUB_PATH}"
+
+      - name: Run deterministic tests
+        run: ./scripts/test.sh
+
+      - name: Build an ad-hoc Universal package from a clean snapshot
+        run: ./scripts/package-local.sh
+
+      - name: Verify packaged output
+        shell: zsh {0}
+        run: |
+          artifact_directory=("${PWD}"/Artifacts/releases/MojiPond-*(N[1]))
+          if (( ${#artifact_directory[@]} != 1 )); then
+            echo "Expected one release directory." >&2
+            exit 1
+          fi
+          ./scripts/verify-release-package.sh \
+            "${artifact_directory[1]}" \
+            ad-hoc
+
+      - name: Keep rehearsal artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mojipond-release-rehearsal-${{ github.sha }}
+          path: Artifacts/releases
+          if-no-files-found: error
+          retention-days: 7

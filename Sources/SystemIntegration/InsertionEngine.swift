@@ -155,7 +155,7 @@ final class InsertionEngine {
                 try accessibility.replaceUnicode(text, request: request)
                 return .inserted(.directAccessibility)
             } catch {
-                // Continue to the rich-editor-compatible path below.
+                // Rich editors may require the pasteboard path below.
             }
         }
 
@@ -266,11 +266,6 @@ final class InsertionEngine {
             }
             try await Task.sleep(for: pollingInterval)
         } while true
-    }
-
-    @discardableResult
-    func copyForManualPaste(_ payload: InsertionPayload) async -> Bool {
-        await pasteboard.writePermanently(payload.pasteboardItems)
     }
 
     private static func mapAccessibilityError(

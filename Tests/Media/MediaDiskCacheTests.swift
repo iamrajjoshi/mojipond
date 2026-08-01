@@ -18,7 +18,7 @@ final class MediaDiskCacheTests: XCTestCase {
             dimensions: nil,
             attribution: "Noto Animated Emoji by Google"
         )
-        let download = RemoteMediaDownloader.Download(
+        let download = MediaDownload(
             data: Data([0x47, 0x49, 0x46]),
             contentType: "image/gif",
             suggestedFilename: "source.gif"
@@ -64,7 +64,7 @@ final class MediaDiskCacheTests: XCTestCase {
         )
     }
 
-    private func download(bytes: Int) -> RemoteMediaDownloader.Download {
+    private func download(bytes: Int) -> MediaDownload {
         .init(
             data: Data(repeating: 1, count: bytes),
             contentType: "image/gif",

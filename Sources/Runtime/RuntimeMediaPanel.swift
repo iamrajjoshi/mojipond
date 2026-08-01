@@ -241,9 +241,6 @@ final class RuntimeMediaPanelModel: ObservableObject {
 
 struct RuntimeMediaPanelView: View {
     @ObservedObject var model: RuntimeMediaPanelModel
-    @Environment(\.colorSchemeContrast) private var contrast
-    @Environment(\.accessibilityReduceTransparency)
-    private var reduceTransparency
 
     private var snapshot: RuntimeMediaPanelSnapshot {
         model.snapshot
@@ -299,36 +296,7 @@ struct RuntimeMediaPanelView: View {
             footer
         }
         .padding(12)
-        .background {
-            RoundedRectangle(
-                cornerRadius: PondDesign.cornerRadius,
-                style: .continuous
-            )
-                .fill(
-                    PondDesign.surface.opacity(
-                        reduceTransparency ? 1 : 0.97
-                    )
-                )
-        }
-        .clipShape(
-            RoundedRectangle(
-                cornerRadius: PondDesign.cornerRadius,
-                style: .continuous
-            )
-        )
-        .overlay {
-            RoundedRectangle(
-                cornerRadius: PondDesign.cornerRadius,
-                style: .continuous
-            )
-                .strokeBorder(
-                    PondDesign.ripple.opacity(
-                        contrast == .increased ? 1 : 0.58
-                    ),
-                    lineWidth: contrast == .increased ? 2 : 1
-                )
-        }
-        .accessibilityElement(children: .contain)
+        .pondFloatingPanel()
     }
 
     private var header: some View {
@@ -409,9 +377,8 @@ struct RuntimeMediaPanelView: View {
             .onAppear {
                 scrollToSelection(using: proxy)
             }
-            // A retained hosting view no longer receives onAppear for every
-            // result set. Re-scroll on the snapshot revision so index 0 in a
-            // new grid cannot inherit the old grid's scroll offset.
+            // A retained hosting view runs onAppear only once. Re-scroll each
+            // snapshot so a new grid cannot inherit the old scroll offset.
             .onChange(of: snapshot.revision) {
                 scrollToSelection(using: proxy)
             }

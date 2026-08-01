@@ -229,7 +229,7 @@ final class RuntimeManagedMediaTests: XCTestCase {
 
         for (data, contentType, typeIdentifier) in downloads {
             let payload = try RuntimeMediaPayloadBuilder.payload(
-                for: MediaCommandDownload(
+                for: MediaDownload(
                     data: data,
                     contentType: contentType,
                     suggestedFilename: "asset"
@@ -277,7 +277,7 @@ final class RuntimeManagedMediaTests: XCTestCase {
     }
 
     private func media(
-        type: EmojiMediaType,
+        type: AssetFormat,
         path: String,
         data: Data,
         isAnimated: Bool = false

@@ -1,6 +1,4 @@
-import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct LibraryShellView: View {
     @ObservedObject var appState: AppState
@@ -276,18 +274,10 @@ struct LibraryShellView: View {
                 packDetails = PackDetailSelection(id: pack.id)
             }
             Divider()
-            Button("Move Up") {
-                Task {
-                    await viewModel.movePack(pack.id, by: -1)
-                }
-            }
-            .disabled(!viewModel.canMovePack(pack.id, by: -1))
-            Button("Move Down") {
-                Task {
-                    await viewModel.movePack(pack.id, by: 1)
-                }
-            }
-            .disabled(!viewModel.canMovePack(pack.id, by: 1))
+            LibraryPackMoveButtons(
+                viewModel: viewModel,
+                packID: pack.id
+            )
             Divider()
             Button("Remove Pack…", role: .destructive) {
                 viewModel.requestRemovePack(pack)
@@ -440,18 +430,10 @@ struct LibraryShellView: View {
                         showsBuiltInDetails = true
                     }
                 } else if let pack = viewModel.selectedPack {
-                    Toggle(
-                        "Enabled",
-                        isOn: Binding(
-                            get: { pack.isEnabled },
-                            set: { enabled in
-                                Task {
-                                    await viewModel.setPackEnabled(pack.id, isEnabled: enabled)
-                                }
-                            }
-                        )
+                    LibraryPackEnabledToggle(
+                        viewModel: viewModel,
+                        pack: pack
                     )
-                    .toggleStyle(.switch)
                     Button("Pack Details", systemImage: "info.circle") {
                         packDetails = PackDetailSelection(id: pack.id)
                     }
@@ -549,23 +531,7 @@ struct LibraryShellView: View {
                                 selectedItem = item
                             }
                             .contextMenu {
-                                Button(
-                                    viewModel.isFavorite(item)
-                                        ? "Remove from Favorites"
-                                        : "Add to Favorites"
-                                ) {
-                                    Task {
-                                        await viewModel.toggleFavorite(item)
-                                    }
-                                }
-                                Button("Copy Emoji") {
-                                    Task {
-                                        await viewModel.copyToClipboard(item)
-                                    }
-                                }
-                                Button("Show Details") {
-                                    selectedItem = item
-                                }
+                                emojiContextMenu(for: item)
                             }
                         }
                     }
@@ -581,27 +547,34 @@ struct LibraryShellView: View {
                         selectedItem = item
                     }
                     .contextMenu {
-                        Button(
-                            viewModel.isFavorite(item)
-                                ? "Remove from Favorites"
-                                : "Add to Favorites"
-                        ) {
-                            Task {
-                                await viewModel.toggleFavorite(item)
-                            }
-                        }
-                        Button("Copy Emoji") {
-                            Task {
-                                await viewModel.copyToClipboard(item)
-                            }
-                        }
-                        Button("Show Details") {
-                            selectedItem = item
-                        }
+                        emojiContextMenu(for: item)
                     }
                 }
                 .listStyle(.inset)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func emojiContextMenu(
+        for item: LibraryDisplayItem
+    ) -> some View {
+        Button(
+            viewModel.isFavorite(item)
+                ? "Remove from Favorites"
+                : "Add to Favorites"
+        ) {
+            Task {
+                await viewModel.toggleFavorite(item)
+            }
+        }
+        Button("Copy Emoji") {
+            Task {
+                await viewModel.copyToClipboard(item)
+            }
+        }
+        Button("Show Details") {
+            selectedItem = item
         }
     }
 
@@ -697,14 +670,9 @@ struct LibraryShellView: View {
     }
 
     private func chooseZIP() {
-        let panel = NSOpenPanel()
-        panel.title = "Choose an emoji ZIP"
-        panel.prompt = "Review"
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [.zip]
-        guard panel.runModal() == .OK, let url = panel.url else {
+        guard let url = LibraryZIPPicker.choose(
+            title: "Choose an emoji ZIP"
+        ) else {
             return
         }
         viewModel.prepareImport(.zipArchive(url))
