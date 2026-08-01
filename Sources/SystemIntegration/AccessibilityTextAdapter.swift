@@ -556,8 +556,13 @@ final class AccessibilityTextAdapter: DirectUnicodeReplacing {
                 in: fragmentRange,
                 from: target.element
             )
+            let followingCharacter = try characterAfterSelection(
+                selection,
+                in: target.element
+            )
+            let detectionFragment = fragment + (followingCharacter ?? "")
             if let localRange = Self.shortcodeTokenRange(
-                in: fragment,
+                in: detectionFragment,
                 selection: NSRange(
                     location: fragment.utf16.count,
                     length: 0
@@ -775,15 +780,22 @@ final class AccessibilityTextAdapter: DirectUnicodeReplacing {
                   ) {
                 candidateStart -= 1
             }
+            let range: NSRange
             if candidateStart > 0,
-               candidateStart < closingTriggerLocation,
                utf16.character(at: candidateStart - 1) == trigger {
-                return NSRange(
+                range = NSRange(
                     location: candidateStart - 1,
                     length: selection.location - candidateStart + 1
                 )
+            } else {
+                range = NSRange(
+                    location: closingTriggerLocation,
+                    length: 1
+                )
             }
-            return NSRange(location: closingTriggerLocation, length: 1)
+            return hasValidShortcodeBoundaries(range, in: utf16)
+                ? range
+                : nil
         }
 
         var start = selection.location
@@ -811,7 +823,33 @@ final class AccessibilityTextAdapter: DirectUnicodeReplacing {
            utf16.character(at: end) == trigger {
             end += 1
         }
-        return NSRange(location: start, length: end - start)
+        let range = NSRange(location: start, length: end - start)
+        return hasValidShortcodeBoundaries(range, in: utf16)
+            ? range
+            : nil
+    }
+
+    private static func hasValidShortcodeBoundaries(
+        _ range: NSRange,
+        in string: NSString
+    ) -> Bool {
+        if
+            range.location > 0,
+            isShortcodeCharacter(
+                string.character(at: range.location - 1)
+            )
+        {
+            return false
+        }
+
+        let end = range.location + range.length
+        if
+            end < string.length,
+            isShortcodeCharacter(string.character(at: end))
+        {
+            return false
+        }
+        return true
     }
 
     private static func isShortcodeCharacter(_ character: unichar) -> Bool {
@@ -830,6 +868,34 @@ final class AccessibilityTextAdapter: DirectUnicodeReplacing {
     private func rejectSecureTarget(_ target: AccessibilityTextTarget) throws {
         if try subrole(of: target) == kAXSecureTextFieldSubrole {
             throw AccessibilityTextError.secureTextField
+        }
+    }
+
+    private func characterAfterSelection(
+        _ selection: NSRange,
+        in element: AccessibilityElementReference
+    ) throws -> String? {
+        let characterCount: Int?
+        do {
+            characterCount = try system.numberOfCharacters(in: element)
+        } catch AccessibilityTextError.axFailure(_, let code)
+            where code == AXError.noValue.rawValue {
+            characterCount = nil
+        }
+        if let characterCount, selection.location >= characterCount {
+            return nil
+        }
+
+        do {
+            let following = try text(
+                in: NSRange(location: selection.location, length: 1),
+                from: element
+            )
+            return following.utf16.count == 1 ? following : nil
+        } catch AccessibilityTextError.invalidUTF16Range {
+            return nil
+        } catch AccessibilityTextError.unsupportedAttribute {
+            return nil
         }
     }
 

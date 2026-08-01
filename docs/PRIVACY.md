@@ -15,8 +15,9 @@ also sees mouse-down events so it can cancel an active suggestion session.
 Parsing and search happen on the Mac. MojiPond does not persist raw keystrokes,
 message text, or clipboard history, and it does not read the Messages database.
 It retains only a bounded shortcode candidate in memory while a session is
-active. The default maximum shortcode length is 64 bytes and the default
-inactivity timeout is three seconds.
+active. The default maximum shortcode length is 64 bytes. The candidate stays
+in memory until you finish or dismiss the picker, change focus, move the caret,
+or quit MojiPond.
 
 Accessibility is used to:
 

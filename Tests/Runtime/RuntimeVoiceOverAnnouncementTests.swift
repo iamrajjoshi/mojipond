@@ -76,37 +76,64 @@ final class RuntimeVoiceOverAnnouncementTests: XCTestCase {
         )
     }
 
-    func testSuggestionPanelUsesProductionDocumentationGeometry() {
-        let rows = [
+    func testSuggestionPanelSizesToVisibleSuggestionRows() {
+        let row =
             RuntimeSuggestionRow(
                 id: "wave",
                 glyph: "👋",
                 shortcode: "wave",
                 name: "Waving hand"
             )
-        ]
-        let suggestions = RuntimeSuggestionPanelSnapshot(
+        let oneSuggestion = RuntimeSuggestionPanelSnapshot(
             revision: 1,
             transactionID: ParserTransactionID(rawValue: 1),
             mode: .suggestions,
-            rows: rows,
+            rows: [row],
             selectedIndex: 0,
             query: nil
         )
-        let browser = RuntimeSuggestionPanelSnapshot(
+        let fiveSuggestions = RuntimeSuggestionPanelSnapshot(
             revision: 2,
+            transactionID: ParserTransactionID(rawValue: 1),
+            mode: .suggestions,
+            rows: Array(repeating: row, count: 5),
+            selectedIndex: 0,
+            query: "wa"
+        )
+        let noSuggestions = RuntimeSuggestionPanelSnapshot(
+            revision: 3,
+            transactionID: ParserTransactionID(rawValue: 1),
+            mode: .suggestions,
+            rows: [],
+            selectedIndex: 0,
+            query: "zzzz"
+        )
+        let browser = RuntimeSuggestionPanelSnapshot(
+            revision: 4,
             transactionID: ParserTransactionID(rawValue: 2),
             mode: .browser,
-            rows: rows,
+            rows: [row],
             selectedIndex: 0,
             query: "pond"
         )
 
         XCTAssertEqual(
             RuntimeSuggestionPanelController.preferredSize(
-                for: suggestions
+                for: oneSuggestion
             ),
-            CGSize(width: 380, height: 282)
+            CGSize(width: 380, height: 128)
+        )
+        XCTAssertEqual(
+            RuntimeSuggestionPanelController.preferredSize(
+                for: fiveSuggestions
+            ),
+            CGSize(width: 380, height: 320)
+        )
+        XCTAssertEqual(
+            RuntimeSuggestionPanelController.preferredSize(
+                for: noSuggestions
+            ),
+            CGSize(width: 380, height: 128)
         )
         XCTAssertEqual(
             RuntimeSuggestionPanelController.preferredSize(

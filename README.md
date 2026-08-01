@@ -190,8 +190,8 @@ With the default settings:
 
 - `:wave:` performs an exact replacement when the closing colon is typed.
 - `::` opens the emoji browser.
-- Escape, a mouse click, cursor movement, an unsupported modifier, or parser
-  timeout dismisses the session without changing the text.
+- Escape, a mouse click, cursor movement, or an unsupported modifier dismisses
+  the session without changing the text. Pausing does not close the picker.
 - The popup is not shown for a bare `:` until that setting is enabled.
 
 Settings let you pause MojiPond, launch it at login, change the trigger and

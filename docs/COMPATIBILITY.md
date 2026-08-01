@@ -42,7 +42,7 @@ Signing identities installed: none
 
 | Capability | State | Evidence or remaining proof |
 | --- | --- | --- |
-| Bounded shortcode parser and exact closing token | Automated | Parser tests cover timeout, reset, maximum length, modifiers, double trigger, and exact replacement actions |
+| Bounded shortcode parser and exact closing token | Automated | Parser tests cover persistent and optional-timeout sessions, reset, boundaries, maximum length, modifiers, double trigger, and exact replacement actions |
 | Deterministic search, aliases, ranking, usage, and tones | Automated | Core catalog/search/usage tests |
 | Constant-time event callback boundary | Automated | Event-tap and interception-gate tests |
 | Caret popup positioning and display clamping | Automated | Positioner and runtime presentation tests; physical multi-display proof remains pending |

@@ -873,7 +873,7 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         )
     }
 
-    func testSuggestionRefreshHidesPanelWhenResultsBecomeEmpty()
+    func testSuggestionRefreshKeepsPanelVisibleWhenResultsBecomeEmpty()
         async throws
     {
         let harness = try makeHarness(
@@ -891,17 +891,58 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         harness.worker.enqueue(
             keySnapshot(keyCode: 6, characters: "z")
         )
-        let hidden = await eventually {
+        let emptyStateShown = await eventually {
+            harness.presenter.updates.dropFirst(updateStart).contains {
+                guard case let .show(snapshot, _) = $0 else {
+                    return false
+                }
+                return snapshot.mode == .suggestions
+                    && snapshot.rows.isEmpty
+            }
+                && harness.gate.mode == .suggestions
+        }
+
+        XCTAssertTrue(emptyStateShown)
+        XCTAssertFalse(
             harness.presenter.updates.dropFirst(updateStart).contains {
                 guard case .hide = $0 else {
                     return false
                 }
                 return true
             }
-        }
+        )
+        XCTAssertEqual(
+            harness.gate.outcome(
+                for: keySnapshot(keyCode: RuntimeKeyboardKeyCode.tab)
+            ).decision,
+            .passThrough
+        )
+        XCTAssertEqual(
+            harness.gate.outcome(
+                for: keySnapshot(keyCode: RuntimeKeyboardKeyCode.returnKey)
+            ).decision,
+            .passThrough
+        )
+    }
 
-        XCTAssertTrue(hidden)
-        XCTAssertEqual(harness.gate.mode, .hidden)
+    func testFreshTriggerAfterInvalidSuffixKeepsNewPredictionArmed()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":f :",
+            parserTimeout: 10
+        )
+        harness.worker.setCaptureEnabled(true)
+        harness.gate.setCaptureEnabled(true)
+
+        deliver(":f :", into: harness)
+
+        let freshPredictionVerified = await eventually {
+            harness.captureProvider.captureCount >= 1
+                && harness.gate.isExactCommitArmed
+        }
+        XCTAssertTrue(freshPredictionVerified)
     }
 
     func testBackspaceRestoresSuggestionsAfterAccidentalSpace()
@@ -1462,6 +1503,26 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
             harness.gate.mode == .hidden
         }
         XCTAssertTrue(hidden)
+    }
+
+    func testDisabledSuggestionTimeoutKeepsPanelVisibleWithoutAnotherEvent()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":f",
+            parserTimeout: 0
+        )
+        harness.worker.setCaptureEnabled(true)
+        type(":f", into: harness.worker)
+
+        let shown = await eventually {
+            harness.gate.mode == .suggestions
+        }
+        XCTAssertTrue(shown)
+
+        try? await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(harness.gate.mode, .suggestions)
     }
 
     func testNavigationRearmsSuggestionInactivityTimeout() async throws {
