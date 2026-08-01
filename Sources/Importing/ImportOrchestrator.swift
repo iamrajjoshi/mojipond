@@ -145,14 +145,6 @@ struct ImportOrchestrator: Sendable {
         return preparation
     }
 
-    func prepare(
-        _ request: ImportRequest,
-        using store: LibraryStore
-    ) async throws -> ImportPreparation {
-        let library = try await store.snapshot()
-        return try await prepare(request, against: library)
-    }
-
     private func scanFolder(
         at folderURL: URL,
         packName: String?,
@@ -466,19 +458,12 @@ actor ImportPreparation {
         decisions: [UUID: CollisionDecision] = [:],
         reservedShortcodeOwners: [ReservedShortcodeOwner]? = nil
     ) async throws -> EmojiPack {
-        try beginInstall()
-        do {
-            let resolved = try await resolve(
-                using: store,
-                decisions: decisions,
-                reservedShortcodeOwners: reservedShortcodeOwners
-            )
-            let pack = try await store.install(resolved)
-            finishInstall()
-            return pack
-        } catch {
-            state = .ready
-            throw error
+        try await performInstall(
+            using: store,
+            decisions: decisions,
+            reservedShortcodeOwners: reservedShortcodeOwners
+        ) { resolved in
+            try await store.install(resolved)
         }
     }
 
@@ -488,19 +473,12 @@ actor ImportPreparation {
         decisions: [UUID: CollisionDecision] = [:],
         reservedShortcodeOwners: [ReservedShortcodeOwner]? = nil
     ) async throws -> EmojiPack {
-        try beginInstall()
-        do {
-            let resolved = try await resolve(
-                using: store,
-                decisions: decisions,
-                reservedShortcodeOwners: reservedShortcodeOwners
-            )
-            let pack = try await store.append(resolved, to: packID)
-            finishInstall()
-            return pack
-        } catch {
-            state = .ready
-            throw error
+        try await performInstall(
+            using: store,
+            decisions: decisions,
+            reservedShortcodeOwners: reservedShortcodeOwners
+        ) { resolved in
+            try await store.append(resolved, to: packID)
         }
     }
 
@@ -510,18 +488,32 @@ actor ImportPreparation {
         decisions: [UUID: CollisionDecision] = [:],
         reservedShortcodeOwners: [ReservedShortcodeOwner]? = nil
     ) async throws -> EmojiPack {
+        try await performInstall(
+            using: store,
+            decisions: decisions,
+            reservedShortcodeOwners: reservedShortcodeOwners,
+            excludingPackID: packID
+        ) { resolved in
+            try await store.replacePackContents(resolved, in: packID)
+        }
+    }
+
+    private func performInstall(
+        using store: LibraryStore,
+        decisions: [UUID: CollisionDecision],
+        reservedShortcodeOwners: [ReservedShortcodeOwner]?,
+        excludingPackID: UUID? = nil,
+        operation: @Sendable (ResolvedPackImport) async throws -> EmojiPack
+    ) async throws -> EmojiPack {
         try beginInstall()
         do {
             let resolved = try await resolve(
                 using: store,
                 decisions: decisions,
                 reservedShortcodeOwners: reservedShortcodeOwners,
-                excludingPackID: packID
+                excludingPackID: excludingPackID
             )
-            let pack = try await store.replacePackContents(
-                resolved,
-                in: packID
-            )
+            let pack = try await operation(resolved)
             finishInstall()
             return pack
         } catch {

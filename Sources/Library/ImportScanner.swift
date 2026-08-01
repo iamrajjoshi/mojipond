@@ -201,9 +201,8 @@ struct ImportScanner: Sendable {
                 continue
             }
             guard let file = entry.file else {
-                // PortablePackManifest.validated() guarantees exactly one
-                // content field. Keep this guard so future schema changes fail
-                // closed instead of inventing an import payload.
+                // PortablePackManifest.validated() enforces this invariant;
+                // fail closed if it is violated.
                 throw PortablePackManifestError.missingEmojiContent(
                     entry.shortcode
                 )

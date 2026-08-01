@@ -287,13 +287,7 @@ struct ShortcodeParser: Sendable {
         session.query.append(contentsOf: EmojiAliasSyntax.normalizedToken(String(character)))
         session.lastInputAt = date
         state = .collecting(session)
-        actions.append(
-            .updateSuggestions(
-                transactionID: session.transactionID,
-                query: session.query,
-                token: session.token(trigger: configuration.preferences.trigger)
-            )
-        )
+        refreshSuggestions(for: session, actions: &actions)
     }
 
     private mutating func handleClosingTrigger(
@@ -349,27 +343,8 @@ struct ShortcodeParser: Sendable {
                         transactionID: session.transactionID
                     )
                 )
-            } else if
-                session.query.isEmpty
-                    && !configuration.preferences
-                        .showsSuggestionsOnBareTrigger
-            {
-                actions.append(
-                    .hideSuggestions(
-                        transactionID: session.transactionID
-                    )
-                )
             } else {
-                actions.append(
-                    .updateSuggestions(
-                        transactionID: session.transactionID,
-                        query: session.query,
-                        token: session.token(
-                            trigger:
-                                configuration.preferences.trigger
-                        )
-                    )
-                )
+                refreshSuggestions(for: session, actions: &actions)
             }
             return
         }
@@ -381,17 +356,7 @@ struct ShortcodeParser: Sendable {
         session.query.removeLast()
         session.lastInputAt = date
         state = .collecting(session)
-        if session.query.isEmpty && !configuration.preferences.showsSuggestionsOnBareTrigger {
-            actions.append(.hideSuggestions(transactionID: session.transactionID))
-        } else {
-            actions.append(
-                .updateSuggestions(
-                    transactionID: session.transactionID,
-                    query: session.query,
-                    token: session.token(trigger: configuration.preferences.trigger)
-                )
-            )
-        }
+        refreshSuggestions(for: session, actions: &actions)
     }
 
     private mutating func handleNavigation(
@@ -466,14 +431,32 @@ struct ShortcodeParser: Sendable {
         state = .collecting(session)
         actions.append(.began(session))
         if configuration.preferences.showsSuggestionsOnBareTrigger {
+            refreshSuggestions(for: session, actions: &actions)
+        }
+    }
+
+    private func refreshSuggestions(
+        for session: ShortcodeParserSession,
+        actions: inout [ShortcodeParserAction]
+    ) {
+        guard
+            !session.query.isEmpty
+                || configuration.preferences.showsSuggestionsOnBareTrigger
+        else {
             actions.append(
-                .updateSuggestions(
-                    transactionID: session.transactionID,
-                    query: "",
-                    token: session.token(trigger: configuration.preferences.trigger)
+                .hideSuggestions(transactionID: session.transactionID)
+            )
+            return
+        }
+        actions.append(
+            .updateSuggestions(
+                transactionID: session.transactionID,
+                query: session.query,
+                token: session.token(
+                    trigger: configuration.preferences.trigger
                 )
             )
-        }
+        )
     }
 
     @discardableResult

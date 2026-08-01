@@ -591,9 +591,8 @@ final class AdaptiveGlyphPayloadService: @unchecked Sendable {
                         work: explicitWork
                     )
                 } else if runningExplicitKey == key {
-                    // This new call is now the newest actual request and can
-                    // share the running build. Any different-key pending work
-                    // predates it and must not start afterward.
+                    // The latest same-key request shares the running build.
+                    // Discard older pending work for other keys.
                     discardPendingExplicit()
                 }
                 inFlightRequests[key] = inFlight

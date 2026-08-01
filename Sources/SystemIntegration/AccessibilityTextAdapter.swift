@@ -11,7 +11,7 @@ enum AccessibilityTextError: Error, Equatable {
     case staleSelection
     case tokenChanged
     case secureTextField
-    case axFailure(operation: String, code: Int32)
+    case axFailure(operation: String, code: AXError)
 }
 
 final class AccessibilityElementReference: @unchecked Sendable {
@@ -157,7 +157,7 @@ final class MacAccessibilityTextSystem: AccessibilityTextSystem {
         } catch AccessibilityTextError.unsupportedAttribute {
             return nil
         } catch AccessibilityTextError.axFailure(_, let code)
-            where code == AXError.noValue.rawValue {
+            where code == .noValue {
             return nil
         }
     }
@@ -291,7 +291,7 @@ final class MacAccessibilityTextSystem: AccessibilityTextSystem {
         } catch AccessibilityTextError.unsupportedAttribute {
             return nil
         } catch AccessibilityTextError.axFailure(_, let code)
-            where code == AXError.noValue.rawValue {
+            where code == .noValue {
             return nil
         }
         guard
@@ -401,8 +401,8 @@ final class MacAccessibilityTextSystem: AccessibilityTextSystem {
             where attribute == kAXSubroleAttribute {
             return nil
         } catch AccessibilityTextError.axFailure(_, let code)
-            where code == AXError.attributeUnsupported.rawValue
-                || code == AXError.noValue.rawValue {
+            where code == .attributeUnsupported
+                || code == .noValue {
             return nil
         }
     }
@@ -485,20 +485,13 @@ final class MacAccessibilityTextSystem: AccessibilityTextSystem {
         guard error == .success else {
             throw AccessibilityTextError.axFailure(
                 operation: operation,
-                code: error.rawValue
+                code: error
             )
         }
     }
 }
 
-protocol DirectUnicodeReplacing: AnyObject {
-    func replaceUnicode(
-        _ replacement: String,
-        request: AccessibilityReplacementRequest
-    ) throws
-}
-
-final class AccessibilityTextAdapter: DirectUnicodeReplacing {
+final class AccessibilityTextAdapter {
     static let defaultMaximumFallbackDocumentLength = 4_096
     static let maximumShortcodeContextLength = 66
     private static let maximumApproximateCaretHeight: CGFloat = 256
@@ -719,10 +712,6 @@ final class AccessibilityTextAdapter: DirectUnicodeReplacing {
             && selection.location <= nearbyUpperBound
     }
 
-    func isSecure(_ target: AccessibilityTextTarget) -> Bool {
-        (try? secureStatus(of: target)) == true
-    }
-
     func secureStatus(of target: AccessibilityTextTarget) throws -> Bool {
         try subrole(of: target) == kAXSecureTextFieldSubrole
     }
@@ -879,7 +868,7 @@ final class AccessibilityTextAdapter: DirectUnicodeReplacing {
         do {
             characterCount = try system.numberOfCharacters(in: element)
         } catch AccessibilityTextError.axFailure(_, let code)
-            where code == AXError.noValue.rawValue {
+            where code == .noValue {
             characterCount = nil
         }
         if let characterCount, selection.location >= characterCount {
@@ -909,8 +898,8 @@ final class AccessibilityTextAdapter: DirectUnicodeReplacing {
             // has no specialized subrole; it is not an unknown security state.
             return nil
         } catch AccessibilityTextError.axFailure(_, let code)
-            where code == AXError.attributeUnsupported.rawValue
-                || code == AXError.noValue.rawValue {
+            where code == .attributeUnsupported
+                || code == .noValue {
             return nil
         }
     }
@@ -966,8 +955,8 @@ final class AccessibilityTextAdapter: DirectUnicodeReplacing {
         do {
             return try system.bounds(for: range, in: element)
         } catch AccessibilityTextError.axFailure(_, let code)
-            where code == AXError.noValue.rawValue
-                || code == AXError.notEnoughPrecision.rawValue {
+            where code == .noValue
+                || code == .notEnoughPrecision {
             return nil
         }
     }
@@ -1063,7 +1052,7 @@ final class AccessibilityTextAdapter: DirectUnicodeReplacing {
         do {
             rangedString = try system.string(for: range, in: element)
         } catch AccessibilityTextError.axFailure(_, let code)
-            where code == AXError.noValue.rawValue {
+            where code == .noValue {
             rangedString = nil
         }
         if let rangedString {
@@ -1082,7 +1071,7 @@ final class AccessibilityTextAdapter: DirectUnicodeReplacing {
         do {
             characterCount = try system.numberOfCharacters(in: element)
         } catch AccessibilityTextError.axFailure(_, let code)
-            where code == AXError.noValue.rawValue {
+            where code == .noValue {
             characterCount = nil
         }
         guard

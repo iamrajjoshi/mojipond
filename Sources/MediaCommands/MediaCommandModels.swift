@@ -12,8 +12,12 @@ enum MediaCommandKind: String, CaseIterable, Equatable, Sendable {
     }
 }
 
+struct MediaCommandRequestID: RawRepresentable, Hashable, Sendable {
+    let rawValue: UInt64
+}
+
 struct MediaCommandRequest: Equatable, Sendable {
-    let id: UInt64
+    let id: MediaCommandRequestID
     let command: MediaCommandKind
 }
 
@@ -100,10 +104,4 @@ enum MediaCommandSearchState: Equatable, Sendable {
             request
         }
     }
-}
-
-struct MediaCommandDownload: Equatable, Sendable {
-    let data: Data
-    let contentType: String
-    let suggestedFilename: String
 }

@@ -1,5 +1,4 @@
 import CoreGraphics
-import CryptoKit
 import Foundation
 import ImageIO
 import UniformTypeIdentifiers
@@ -435,21 +434,6 @@ actor LibraryThumbnailPipeline: LibraryThumbnailServing {
         }
     }
 
-    func removeAll() throws {
-        memoryCache.removeAll()
-        memoryOrder.removeAll()
-        for operation in inFlight.values {
-            operation.task.cancel()
-        }
-        inFlight.removeAll()
-
-        guard fileManager.fileExists(atPath: rootURL.path) else {
-            return
-        }
-        _ = try preparedRoot()
-        try fileManager.removeItem(at: rootURL)
-    }
-
     private func makeFingerprint(
         for sourceURL: URL
     ) throws -> SourceFingerprint {
@@ -488,9 +472,9 @@ actor LibraryThumbnailPipeline: LibraryThumbnailServing {
             String(modificationBits),
             String(limits.thumbnailPixelSize)
         ].joined(separator: "\u{0}")
-        let fingerprint = Self.sha256(
-            Data(versionedIdentity.utf8)
-        )
+        let fingerprint = ContentHasher.sha256(
+            of: Data(versionedIdentity.utf8)
+        ).sha256
         return SourceFingerprint(
             sourceIdentifier: sourceIdentifier,
             cacheKey: "\(sourceIdentifier)-\(fingerprint)"
@@ -782,19 +766,15 @@ actor LibraryThumbnailPipeline: LibraryThumbnailServing {
     }
 
     private static func sourceIdentifier(for url: URL) -> String {
-        sha256(Data(url.standardizedFileURL.path.utf8))
+        ContentHasher.sha256(
+            of: Data(url.standardizedFileURL.path.utf8)
+        ).sha256
     }
 
     private static func sourceIdentifier(
         fromCacheKey key: String
     ) -> String {
         String(key.prefix(64))
-    }
-
-    private static func sha256(_ data: Data) -> String {
-        SHA256.hash(data: data)
-            .map { String(format: "%02x", $0) }
-            .joined()
     }
 
     private static func defaultCacheRoot() -> URL {

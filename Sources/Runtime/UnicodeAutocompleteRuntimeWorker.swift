@@ -390,30 +390,6 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         }
     }
 
-    func updateManagedMediaRoot(_ root: URL?) {
-        queue.async { [weak self] in
-            guard let self else {
-                return
-            }
-            managedMediaRoot = root?
-                .standardizedFileURL
-                .resolvingSymlinksInPath()
-            cancelAllTransactions(reason: .externallyCancelled)
-        }
-    }
-
-    func updateMediaNetworkOptions(
-        _ options: MediaCommandNetworkOptions
-    ) {
-        queue.async { [weak self] in
-            guard let self else {
-                return
-            }
-            mediaNetworkOptions = options
-            cancelMediaTransaction(showCancelled: false)
-        }
-    }
-
     func updateUsageSnapshot(_ usageSnapshot: EmojiUsageSnapshot) {
         queue.async { [weak self] in
             guard let self else {
@@ -1065,8 +1041,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                 result,
                 request: request,
                 generation: generation,
-                expectedToken: expectedToken,
-                command: transaction.command
+                expectedToken: expectedToken
             )
         }
     }
@@ -1258,8 +1233,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         _ result: MediaCommandResult,
         request: AccessibilityReplacementRequest,
         generation: UInt64,
-        expectedToken: String,
-        command: MediaCommandKind
+        expectedToken: String
     ) {
         guard let mediaCommandCoordinator else {
             updateMediaPanel(
@@ -1271,7 +1245,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         let bridge = mainActorBridge
         let remoteMediaCache = remoteMediaCache
         mediaOperation = Task { [weak self] in
-            let download: MediaCommandDownload
+            let download: MediaDownload
             do {
                 download = try await RuntimeMediaDownloadResolver(
                     coordinator: mediaCommandCoordinator,
@@ -2866,7 +2840,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
     }
 
     private func adaptiveGlyphSourceType(
-        for mediaType: EmojiMediaType
+        for mediaType: AssetFormat
     ) -> UTType {
         switch mediaType {
         case .png:

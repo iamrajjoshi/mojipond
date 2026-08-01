@@ -1,18 +1,12 @@
-import CryptoKit
 import Foundation
 
 protocol MediaCommandRemoteDownloading: Sendable {
-    func downloadOriginal(_ item: RemoteMediaItem) async throws -> MediaCommandDownload
+    func downloadOriginal(_ item: RemoteMediaItem) async throws -> MediaDownload
 }
 
 extension RemoteMediaDownloader: MediaCommandRemoteDownloading {
-    func downloadOriginal(_ item: RemoteMediaItem) async throws -> MediaCommandDownload {
-        let download = try await download(item)
-        return MediaCommandDownload(
-            data: download.data,
-            contentType: download.contentType,
-            suggestedFilename: download.suggestedFilename
-        )
+    func downloadOriginal(_ item: RemoteMediaItem) async throws -> MediaDownload {
+        try await download(item)
     }
 }
 
@@ -26,7 +20,7 @@ struct MediaCommandAssetResolver: Sendable {
         self.remoteDownloader = remoteDownloader
     }
 
-    func resolve(_ result: MediaCommandResult) async throws -> MediaCommandDownload {
+    func resolve(_ result: MediaCommandResult) async throws -> MediaDownload {
         switch result.origin {
         case let .bundled(asset):
             let data: Data
@@ -42,26 +36,21 @@ struct MediaCommandAssetResolver: Sendable {
             }
             guard
                 data.count == asset.expectedByteCount,
-                Self.sha256(data) == asset.expectedSHA256
+                ContentHasher.sha256(of: data).sha256
+                    == asset.expectedSHA256
             else {
                 throw NotoOfflineCatalogError.assetCorrupt(
                     asset.fileURL.lastPathComponent
                 )
             }
-            return MediaCommandDownload(
+            return MediaDownload(
                 data: data,
                 contentType: "image/gif",
                 suggestedFilename: asset.fileURL.lastPathComponent
             )
         case .remote:
-            // The downloader returns the provider's original bytes untouched.
             return try await remoteDownloader.downloadOriginal(result.media)
         }
     }
 
-    private static func sha256(_ data: Data) -> String {
-        SHA256.hash(data: data)
-            .map { String(format: "%02x", $0) }
-            .joined()
-    }
 }

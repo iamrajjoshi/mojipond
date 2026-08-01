@@ -79,7 +79,7 @@ Signing identities installed: none
 | Public GitHub ref resolution and archive policy | Automated | Mocked HTTP, redirect, size, ref, and subdirectory tests |
 | Collision decisions and duplicate-content preview | Automated | Import and library tests |
 | Atomic library install, edit, replacement, removal, and migration | Automated | Actor store tests |
-| Custom Unicode creation, search, copy, and portable export | Automated | Store tests cover collision-safe creation, validation, digesting, Unicode-only export, and mixed round trips; Library ViewModel tests cover creation, alias search, rejection, and clipboard bytes |
+| Custom Unicode creation, search, copy, and portable export | Automated | Store tests cover collision-safe creation, validation, digesting, Unicode-only export, and mixed round trips; Library ViewModel tests cover alias search and clipboard bytes for imported Unicode entries |
 | Library ZIP import workflow in the running app | Pending | The public UI accepts one local ZIP through the picker or drag and drop, then presents preview, conflict resolution, install, export, and ZIP replacement; a manual running-app check is not yet recorded |
 | Manual ZIP import and replacement | Pending | ZIP extraction, portable/simple-folder/Slack-local parsing, conflicts, and replacement are covered by deterministic scanner/orchestrator tests; interactive running-app checks are not yet recorded |
 | Manual failed and cancelled ZIP imports | Pending | Failure, cancellation, and cleanup behavior are automated; interactive running-app checks are not yet recorded |

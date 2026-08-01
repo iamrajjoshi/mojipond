@@ -214,10 +214,6 @@ struct ExclusionPreferences: Codable, Equatable, Sendable {
         applications: protectedApplications
     )
 
-    static func isProtectedApplication(_ application: ApplicationExclusion) -> Bool {
-        isProtectedApplication(bundleIdentifier: application.bundleIdentifier)
-    }
-
     static func isProtectedApplication(bundleIdentifier: String) -> Bool {
         protectedApplications.contains {
             $0.matches(bundleIdentifier: bundleIdentifier)

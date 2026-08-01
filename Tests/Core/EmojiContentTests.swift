@@ -10,8 +10,7 @@ final class EmojiContentTests: XCTestCase {
             originalFilename: "bufo_wave.gif",
             contentHash: String(repeating: "a", count: 64),
             dimensions: MediaDimensions(width: 128, height: 128),
-            isAnimated: true,
-            fallbackRelativePath: nil
+            isAnimated: true
         )
         let item = EmojiItem(
             id: "bufo.wave",

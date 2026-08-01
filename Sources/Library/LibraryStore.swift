@@ -33,11 +33,6 @@ actor LibraryStore {
         try loadIfNeeded()
     }
 
-    func reload() throws -> MojiPondLibrary {
-        cachedLibrary = nil
-        return try loadIfNeeded()
-    }
-
     func assetURL(for asset: StoredAsset) throws -> URL {
         guard StoredAsset.isSafeRelativePath(asset.relativePath) else {
             throw LibraryStoreError.unsafeStoredPath(asset.relativePath)
@@ -732,26 +727,6 @@ actor LibraryStore {
             throw LibraryStoreError.packNotFound(packID)
         }
         library.packs[index].manifest = metadata
-        try commit(library)
-    }
-
-    func markPackChecked(
-        _ packID: UUID,
-        at date: Date = Date(),
-        sourceRevision: String? = nil,
-        sourceETag: String? = nil
-    ) throws {
-        var library = try loadIfNeeded()
-        guard let index = library.packs.firstIndex(where: { $0.id == packID }) else {
-            throw LibraryStoreError.packNotFound(packID)
-        }
-        library.packs[index].updateMetadata.lastCheckedAt = date
-        if let sourceRevision {
-            library.packs[index].updateMetadata.sourceRevision = sourceRevision
-        }
-        if let sourceETag {
-            library.packs[index].updateMetadata.sourceETag = sourceETag
-        }
         try commit(library)
     }
 

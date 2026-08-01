@@ -118,10 +118,6 @@ final class MojiPondRuntimeController: ObservableObject {
     private let interceptionGate: RuntimeInterceptionGate
     private let worker: UnicodeAutocompleteRuntimeWorker
     private let eventTap: any RuntimeEventMonitoring
-    private let diagnosticRelay: MojiPondRuntimeDiagnosticRelay
-    private let mediaDiagnosticRelay:
-        MojiPondRuntimeMediaDiagnosticRelay
-
     private var configuration: UnicodeAutocompleteRuntimeConfiguration
     private var wantsToRun = false
     private var userEnabled = true
@@ -149,15 +145,16 @@ final class MojiPondRuntimeController: ObservableObject {
             )
             throw MojiPondRuntimeControllerError.builtInCatalog(error)
         }
+        // Sticker search is optional; its catalog must not disable Unicode
+        // autocomplete or the Library.
+        let mediaCommandCoordinator = try? RuntimeMediaNetworkPolicy
+            .liveCoordinator(bundle: bundle)
         self.init(
             searchIndex: searchIndex,
             preferences: preferences,
             usageStore: usageStore,
             managedMediaRoot: managedMediaRoot,
-            mediaCommandCoordinator:
-                try? RuntimeMediaNetworkPolicy.liveCoordinator(
-                    bundle: bundle
-                ),
+            mediaCommandCoordinator: mediaCommandCoordinator,
             remoteMediaCache: mediaCacheRoot.map {
                 RuntimeNotoMediaDiskCache(rootURL: $0)
             }
@@ -251,8 +248,6 @@ final class MojiPondRuntimeController: ObservableObject {
         self.worker = worker
         self.configuration = configuration
         userEnabled = preferences.activationMode == .enabled
-        diagnosticRelay = diagnostics
-        mediaDiagnosticRelay = mediaDiagnostics
         eventTap = eventMonitor
             ?? SessionEventTapService(
                 eventTypes: [
@@ -356,16 +351,6 @@ final class MojiPondRuntimeController: ObservableObject {
 
     func updateSearchIndex(_ searchIndex: EmojiSearchIndex) {
         worker.updateSearchIndex(searchIndex)
-    }
-
-    func setManagedMediaRoot(_ root: URL?) {
-        worker.updateManagedMediaRoot(root)
-    }
-
-    func updateMediaNetworkOptions(
-        _ options: MediaCommandNetworkOptions
-    ) {
-        worker.updateMediaNetworkOptions(options)
     }
 
     func openBrowser() {

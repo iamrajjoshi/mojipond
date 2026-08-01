@@ -56,7 +56,12 @@ final class MediaCommandCoordinatorTests: XCTestCase {
         )
         XCTAssertEqual(
             empty,
-            .empty(MediaCommandRequest(id: 1, command: .sticker))
+            .empty(
+                MediaCommandRequest(
+                    id: MediaCommandRequestID(rawValue: 1),
+                    command: .sticker
+                )
+            )
         )
 
         let failed = await offlineCoordinator.search(
@@ -68,7 +73,10 @@ final class MediaCommandCoordinatorTests: XCTestCase {
         XCTAssertEqual(
             failed,
             .failed(
-                MediaCommandRequest(id: 2, command: .sticker),
+                MediaCommandRequest(
+                    id: MediaCommandRequestID(rawValue: 2),
+                    command: .sticker
+                ),
                 .invalidProviderResponse
             )
         )
@@ -89,7 +97,12 @@ final class MediaCommandCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(
             state,
-            .rateLimited(MediaCommandRequest(id: 1, command: .sticker))
+            .rateLimited(
+                MediaCommandRequest(
+                    id: MediaCommandRequestID(rawValue: 1),
+                    command: .sticker
+                )
+            )
         )
     }
 
@@ -110,7 +123,12 @@ final class MediaCommandCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(
             state,
-            .cancelled(MediaCommandRequest(id: 1, command: .sticker))
+            .cancelled(
+                MediaCommandRequest(
+                    id: MediaCommandRequestID(rawValue: 1),
+                    command: .sticker
+                )
+            )
         )
         let callCount = await searcher.numberOfCalls()
         XCTAssertEqual(callCount, 0)
@@ -145,7 +163,12 @@ final class MediaCommandCoordinatorTests: XCTestCase {
         let loadingState = await coordinator.currentState()
         XCTAssertEqual(
             loadingState,
-            .loading(MediaCommandRequest(id: 1, command: .sticker))
+            .loading(
+                MediaCommandRequest(
+                    id: MediaCommandRequestID(rawValue: 1),
+                    command: .sticker
+                )
+            )
         )
 
         let fresh = await coordinator.search(
@@ -158,12 +181,20 @@ final class MediaCommandCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(
             stale,
-            .cancelled(MediaCommandRequest(id: 1, command: .sticker))
+            .cancelled(
+                MediaCommandRequest(
+                    id: MediaCommandRequestID(rawValue: 1),
+                    command: .sticker
+                )
+            )
         )
         guard case let .results(freshResults) = fresh else {
             return XCTFail("Expected fresh results, got \(fresh)")
         }
-        XCTAssertEqual(freshResults.request.id, 2)
+        XCTAssertEqual(
+            freshResults.request.id,
+            MediaCommandRequestID(rawValue: 2)
+        )
         XCTAssertEqual(freshResults.items.map(\.id), ["fresh"])
         let currentState = await coordinator.currentState()
         XCTAssertEqual(currentState, fresh)
@@ -198,7 +229,12 @@ final class MediaCommandCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(
             cancelled,
-            .cancelled(MediaCommandRequest(id: 1, command: .sticker))
+            .cancelled(
+                MediaCommandRequest(
+                    id: MediaCommandRequestID(rawValue: 1),
+                    command: .sticker
+                )
+            )
         )
         XCTAssertEqual(completed, cancelled)
         let currentState = await coordinator.currentState()
@@ -229,7 +265,12 @@ final class MediaCommandCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(
             state,
-            .cancelled(MediaCommandRequest(id: 1, command: .sticker))
+            .cancelled(
+                MediaCommandRequest(
+                    id: MediaCommandRequestID(rawValue: 1),
+                    command: .sticker
+                )
+            )
         )
         let callCount = await searcher.numberOfCalls()
         XCTAssertEqual(callCount, 0)
@@ -243,7 +284,7 @@ final class MediaCommandCoordinatorTests: XCTestCase {
             0x01, 0x00, 0x01, 0x00, 0x3b
         ])
         let downloader = FixedRemoteDownloader(
-            download: MediaCommandDownload(
+            download: MediaDownload(
                 data: originalBytes,
                 contentType: "image/gif",
                 suggestedFilename: "original.gif"
@@ -272,7 +313,7 @@ final class MediaCommandCoordinatorTests: XCTestCase {
         searcher: MediaSearchStub?,
         downloader: any MediaCommandRemoteDownloading =
             FixedRemoteDownloader(
-                download: MediaCommandDownload(
+                download: MediaDownload(
                     data: Data(),
                     contentType: "image/gif",
                     suggestedFilename: "unused.gif"
@@ -307,7 +348,7 @@ final class MediaCommandCoordinatorTests: XCTestCase {
             title: id,
             previewURL: preview,
             originalURL: original,
-            dimensions: RemoteMediaDimensions(width: 512, height: 512),
+            dimensions: MediaDimensions(width: 512, height: 512),
             attribution: "Noto Animated Emoji by Google"
         )
     }
@@ -353,11 +394,11 @@ private actor MediaSearchStub: MediaCommandStickerSearching {
 }
 
 private struct FixedRemoteDownloader: MediaCommandRemoteDownloading {
-    let download: MediaCommandDownload
+    let download: MediaDownload
 
     func downloadOriginal(
         _: RemoteMediaItem
-    ) async throws -> MediaCommandDownload {
+    ) async throws -> MediaDownload {
         download
     }
 }

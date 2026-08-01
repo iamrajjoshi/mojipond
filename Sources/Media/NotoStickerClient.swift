@@ -53,23 +53,6 @@ actor NotoStickerClient {
             .compactMap(makeResult)
     }
 
-    func all(limit: Int = 100) async throws -> [RemoteMediaItem] {
-        let icons = try await loadIcons()
-        return icons
-            .sorted {
-                if $0.popularity != $1.popularity {
-                    return $0.popularity > $1.popularity
-                }
-                return $0.codepoint < $1.codepoint
-            }
-            .prefix(min(max(limit, 1), 200))
-            .compactMap(makeResult)
-    }
-
-    func clearManifestCache() {
-        cachedIcons = nil
-    }
-
     private func loadIcons() async throws -> [NotoIcon] {
         if let cachedIcons {
             return cachedIcons
@@ -127,7 +110,7 @@ actor NotoStickerClient {
             title: icon.displayName,
             previewURL: gifURL,
             originalURL: gifURL,
-            dimensions: RemoteMediaDimensions(width: 512, height: 512),
+            dimensions: MediaDimensions(width: 512, height: 512),
             attribution: "Noto Animated Emoji by Google"
         )
     }

@@ -10,37 +10,7 @@ protocol LibraryImportPreparing: Sendable {
     ) async throws -> ImportPreparation
 }
 
-extension LibraryImportPreparing {
-    func prepare(
-        _ request: ImportRequest,
-        against library: MojiPondLibrary
-    ) async throws -> ImportPreparation {
-        try await prepare(
-            request,
-            against: library,
-            reservedShortcodeOwners: []
-        )
-    }
-}
-
 extension ImportOrchestrator: LibraryImportPreparing {}
-
-protocol LibraryGitHubRevisionResolving: Sendable {
-    func resolveRevision(
-        from repositoryURL: URL,
-        ref: String?,
-        subdirectory: String?
-    ) async throws -> GitHubResolvedRevision
-}
-
-extension GitHubImportClient: LibraryGitHubRevisionResolving {}
-
-enum LibraryGitHubRevisionState: Equatable, Sendable {
-    case checking
-    case current(revision: String)
-    case updateAvailable(installed: String?, latest: String)
-    case failed(String)
-}
 
 private enum LibraryPasteboardSource: Sendable {
     case ready(PasteboardItemPayload)
@@ -70,16 +40,11 @@ final class LibraryViewModel: ObservableObject {
     @Published var pendingRemoval: LibraryRemovalTarget?
     @Published var notice: LibraryNotice?
     @Published private(set) var undoMessage: String?
-    @Published private(set) var githubRevisionStates:
-        [UUID: LibraryGitHubRevisionState] = [:]
-
     let paths: ApplicationPaths
     let thumbnailService: any LibraryThumbnailServing
 
     private let store: LibraryStore
     private let importer: any LibraryImportPreparing
-    private let githubRevisionResolver:
-        any LibraryGitHubRevisionResolving
     private let builtInLoader: BuiltInPackLoader
     private let onMutation: MutationCallback
     private let pasteboard: any PasteboardAccessing
@@ -94,8 +59,6 @@ final class LibraryViewModel: ObservableObject {
         store: LibraryStore,
         paths: ApplicationPaths,
         importer: (any LibraryImportPreparing)? = nil,
-        githubRevisionResolver:
-            (any LibraryGitHubRevisionResolving)? = nil,
         builtInLoader: @escaping BuiltInPackLoader = {
             try BuiltInRuntimeCatalogLoader().loadPack()
         },
@@ -110,8 +73,6 @@ final class LibraryViewModel: ObservableObject {
         self.importer = importer ?? ImportOrchestrator(
             temporaryRootURL: paths.importStagingRoot
         )
-        self.githubRevisionResolver =
-            githubRevisionResolver ?? GitHubImportClient()
         self.builtInLoader = builtInLoader
         self.thumbnailService =
             thumbnailService ?? LibraryThumbnailPipeline(
@@ -386,46 +347,6 @@ final class LibraryViewModel: ObservableObject {
         repairCategoryFilter()
     }
 
-    @discardableResult
-    func createPack(_ draft: LibraryPackDraft) async -> Bool {
-        do {
-            let trimmedName = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmedName.isEmpty else {
-                throw LibraryViewModelError.emptyPackName
-            }
-            let id = UUID()
-            let sourceURL: URL?
-            if draft.sourceURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                sourceURL = nil
-            } else {
-                guard let candidate = URL(string: draft.sourceURL),
-                      candidate.scheme?.lowercased() == "https" else {
-                    throw LibraryViewModelError.invalidSourceURL
-                }
-                sourceURL = candidate
-            }
-            let manifest = PackManifestMetadata(
-                packID: .local(id),
-                name: trimmedName,
-                version: Self.nilIfBlank(draft.version) ?? "1.0.0",
-                author: Self.nilIfBlank(draft.author),
-                description: Self.nilIfBlank(draft.description),
-                sourceURL: sourceURL,
-                license: Self.nilIfBlank(draft.license)
-            )
-            _ = try await store.createPack(id: id, manifest: manifest)
-            try await finishMutation(
-                message: "Created \(trimmedName).",
-                undo: nil
-            )
-            scope = .pack(id)
-            return true
-        } catch {
-            presentError("Couldn’t create pack", error)
-            return false
-        }
-    }
-
     func setPackEnabled(_ packID: UUID, isEnabled: Bool) async {
         guard let pack = library.packs.first(where: { $0.id == packID }),
               pack.isEnabled != isEnabled else {
@@ -528,43 +449,6 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    @discardableResult
-    func createUnicodeItem(
-        _ draft: LibraryUnicodeItemDraft
-    ) async -> Bool {
-        do {
-            let shortcode = try Self.shortcode(from: draft.shortcode)
-            let aliases = try Self.shortcodes(from: draft.aliases)
-            try validateClaimsAgainstReservations(
-                [shortcode] + aliases
-            )
-            let additionalReservedShortcodes = Set(
-                effectiveReservedShortcodeOwners()
-                    .map(\.shortcode)
-            )
-            let tags = Self.commaSeparatedValues(draft.tags)
-            _ = try await store.createUnicodeItem(
-                in: draft.packID,
-                shortcode: shortcode,
-                unicode: draft.unicode,
-                aliases: aliases,
-                displayName: Self.nilIfBlank(draft.displayName),
-                tags: tags,
-                category: Self.nilIfBlank(draft.category),
-                additionalReservedShortcodes:
-                    additionalReservedShortcodes
-            )
-            try await finishMutation(
-                message: "Added :\(shortcode.rawValue):.",
-                undo: nil
-            )
-            return true
-        } catch {
-            presentError("Couldn’t add emoji", error)
-            return false
-        }
-    }
-
     func replaceItemAsset(
         packID: UUID,
         itemID: UUID,
@@ -586,14 +470,13 @@ final class LibraryViewModel: ObservableObject {
 
     func prepareImport(
         _ request: ImportRequest,
-        networkAccessGranted: Bool = false,
         destination: LibraryImportDestination = .newPack
     ) {
-        if Self.requiresNetworkAccess(request), !networkAccessGranted {
+        if Self.requiresNetworkAccess(request) {
             notice = LibraryNotice(
                 kind: .warning,
-                title: "Network access not granted",
-                message: "Turn on the explicit network option for this import, then try again."
+                title: "Use a local ZIP",
+                message: "Network imports are not available in the Library."
             )
             return
         }
@@ -699,7 +582,7 @@ final class LibraryViewModel: ObservableObject {
             notice = LibraryNotice(
                 kind: .warning,
                 title: "ZIP archive required",
-                message: "MojiPond currently imports one ZIP archive at a time."
+                message: "Choose a local ZIP archive."
             )
             return false
         }
@@ -841,14 +724,6 @@ final class LibraryViewModel: ObservableObject {
                     reservedShortcodeOwners:
                         currentReservedShortcodeOwners
                 )
-            case let .append(packID):
-                installed = try await preparation.append(
-                    into: store,
-                    packID: packID,
-                    decisions: decisions,
-                    reservedShortcodeOwners:
-                        currentReservedShortcodeOwners
-                )
             case let .replace(packID):
                 installed = try await preparation.replacePackContents(
                     in: store,
@@ -936,10 +811,6 @@ final class LibraryViewModel: ObservableObject {
         notice = nil
     }
 
-    func showNotice(_ notice: LibraryNotice) {
-        self.notice = notice
-    }
-
     func copyToClipboard(_ item: LibraryDisplayItem) async {
         do {
             let source = try pasteboardSource(for: item)
@@ -964,8 +835,8 @@ final class LibraryViewModel: ObservableObject {
                 kind: .information,
                 title: "Copied \(item.displayName)",
                 message: item.unicode == nil
-                    ? "Original image bytes are on the clipboard."
-                    : "Unicode emoji is on the clipboard."
+                    ? "Original image copied to the clipboard."
+                    : "Unicode emoji copied to the clipboard."
             )
         } catch is CancellationError {
             return
@@ -1132,149 +1003,17 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    func prepareAddFiles(_ urls: [URL], to packID: UUID) {
+    func prepareReplacement(
+        fromZIP url: URL,
+        for packID: UUID
+    ) {
         guard let pack = library.packs.first(where: { $0.id == packID }) else {
             return
         }
         prepareImport(
-            .files(urls, packName: pack.name),
-            destination: .append(packID: packID)
-        )
-    }
-
-    func prepareReplacement(
-        from urls: [URL],
-        for packID: UUID,
-        allowRemoteSlackAssets: Bool = false
-    ) {
-        guard let pack = library.packs.first(where: { $0.id == packID }),
-              !urls.isEmpty else {
-            return
-        }
-        let request: ImportRequest
-        if urls.count == 1, let url = urls.first {
-            let values = try? url.resourceValues(forKeys: [.isDirectoryKey])
-            if values?.isDirectory == true {
-                request = .folder(
-                    url,
-                    packName: pack.name,
-                    allowRemoteSlackAssets: allowRemoteSlackAssets
-                )
-            } else if url.pathExtension.lowercased() == "zip" {
-                request = .zipArchive(url, packName: pack.name)
-            } else if url.lastPathComponent.lowercased() == "emoji.json" {
-                request = .slackManifest(
-                    url,
-                    packName: pack.name,
-                    allowRemoteAssets: allowRemoteSlackAssets
-                )
-            } else {
-                request = .files(urls, packName: pack.name)
-            }
-        } else {
-            request = .files(urls, packName: pack.name)
-        }
-        prepareImport(
-            request,
-            networkAccessGranted: allowRemoteSlackAssets,
+            .zipArchive(url, packName: pack.name),
             destination: .replace(packID: packID)
         )
-    }
-
-    func prepareGitHubUpdate(
-        for packID: UUID,
-        networkAccessGranted: Bool
-    ) {
-        guard let pack = library.packs.first(where: { $0.id == packID }),
-              let github = pack.source.github,
-              let repositoryURL = URL(
-                  string: "https://github.com/\(github.owner)/\(github.repository)"
-              ) else {
-            notice = LibraryNotice(
-                kind: .warning,
-                title: "GitHub source unavailable",
-                message: "This pack does not contain a valid GitHub source reference."
-            )
-            return
-        }
-        prepareImport(
-            .github(
-                repositoryURL,
-                ref: github.ref,
-                subdirectory: github.subdirectory,
-                packName: pack.name
-            ),
-            networkAccessGranted: networkAccessGranted,
-            destination: .replace(packID: packID)
-        )
-    }
-
-    func githubRevisionState(
-        for packID: UUID
-    ) -> LibraryGitHubRevisionState? {
-        githubRevisionStates[packID]
-    }
-
-    func checkGitHubRevision(
-        for packID: UUID,
-        networkAccessGranted: Bool
-    ) async {
-        guard networkAccessGranted else {
-            notice = LibraryNotice(
-                kind: .warning,
-                title: "Network access not granted",
-                message:
-                    "Review and allow this GitHub revision check before MojiPond contacts the repository."
-            )
-            return
-        }
-        guard
-            let pack = library.packs.first(where: { $0.id == packID }),
-            let github = pack.source.github,
-            let repositoryURL = URL(
-                string:
-                    "https://github.com/\(github.owner)/\(github.repository)"
-            )
-        else {
-            notice = LibraryNotice(
-                kind: .warning,
-                title: "GitHub source unavailable",
-                message:
-                    "This pack does not contain a valid GitHub source reference."
-            )
-            return
-        }
-
-        githubRevisionStates[packID] = .checking
-        do {
-            let resolved = try await githubRevisionResolver.resolveRevision(
-                from: repositoryURL,
-                ref: github.ref,
-                subdirectory: github.subdirectory
-            )
-            try await store.markPackChecked(
-                packID,
-                sourceETag: resolved.sourceETag
-            )
-            library = try await store.snapshot()
-            onMutation(library)
-            let installed = pack.updateMetadata.sourceRevision
-            if installed == resolved.commitSHA {
-                githubRevisionStates[packID] = .current(
-                    revision: resolved.commitSHA
-                )
-            } else {
-                githubRevisionStates[packID] = .updateAvailable(
-                    installed: installed,
-                    latest: resolved.commitSHA
-                )
-            }
-        } catch {
-            githubRevisionStates[packID] = .failed(
-                error.localizedDescription
-            )
-            presentError("Couldn’t check GitHub", error)
-        }
     }
 
     private var builtInDisplayItems: [LibraryDisplayItem] {
@@ -1352,7 +1091,7 @@ final class LibraryViewModel: ObservableObject {
             throw LibraryCopyError.itemUnavailable
         }
         let media = MediaEmojiContent(
-            mediaType: Self.mediaType(for: asset.format),
+            mediaType: asset.format,
             relativePath: asset.relativePath,
             originalFilename: libraryItem.sourceFilename,
             contentHash: asset.sha256,
@@ -1377,21 +1116,6 @@ final class LibraryViewModel: ObservableObject {
     ) -> EmojiItem? {
         builtInPack?.items.first {
             $0.id == runtimeItemID(for: item)
-        }
-    }
-
-    private static func mediaType(
-        for format: AssetFormat
-    ) -> EmojiMediaType {
-        switch format {
-        case .png:
-            .png
-        case .jpeg:
-            .jpeg
-        case .gif:
-            .gif
-        case .webP:
-            .webP
         }
     }
 
@@ -1421,8 +1145,6 @@ final class LibraryViewModel: ObservableObject {
         switch destination {
         case .newPack:
             "Installed \(pack.name) with \(pack.items.count.formatted()) emoji."
-        case .append:
-            "Added files to \(pack.name). It now has \(pack.items.count.formatted()) emoji."
         case .replace:
             "Updated \(pack.name) with \(pack.items.count.formatted()) reviewed emoji."
         }
@@ -1746,18 +1468,12 @@ private enum LibraryUsageError: Error, LocalizedError {
 }
 
 enum LibraryViewModelError: Error, Equatable, LocalizedError {
-    case emptyPackName
-    case invalidSourceURL
     case unresolvedConflict
     case builtInCatalogUnavailable
     case protectedShortcode(Shortcode)
 
     var errorDescription: String? {
         switch self {
-        case .emptyPackName:
-            "Enter a name for the pack."
-        case .invalidSourceURL:
-            "Source URLs must be valid HTTPS links."
         case .unresolvedConflict:
             "Every shortcode conflict needs a decision."
         case .builtInCatalogUnavailable:

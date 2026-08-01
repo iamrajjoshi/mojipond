@@ -190,7 +190,7 @@ but must resolve to an asset; missing targets and cycles are rejected.
 
 Local asset paths use the same traversal protections as portable packs. The
 current public UI does not grant network access during ZIP preparation, so
-remote asset URLs in a Slack-style manifest are not downloaded. The retained
+remote asset URLs in a Slack-style manifest are not downloaded. The internal
 import engine can validate explicitly authorized HTTPS assets in tests and
 internal integrations; that path rejects embedded credentials, custom ports,
 localhost and `.local` names, and non-public IPv4 or IPv6 literals or DNS
@@ -209,11 +209,10 @@ ratios. A selected archive is copied into a fresh app-private `0700` staging
 directory, validated and extracted only from that read-only snapshot, and
 deleted after preparation.
 
-## Retained GitHub engine
+## Internal GitHub engine
 
-The source tree retains a public-GitHub import engine for compatibility tests,
-but the current application UI does not expose it or grant it network access.
-The engine accepts:
+An internal public-GitHub importer supports compatibility tests. The app does
+not expose it or grant it network access. The importer accepts:
 
 ```text
 https://github.com/OWNER/REPOSITORY

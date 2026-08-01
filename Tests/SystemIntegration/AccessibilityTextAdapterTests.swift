@@ -186,7 +186,7 @@ final class AccessibilityTextAdapterTests: XCTestCase {
             .unsupportedAttribute(kAXSubroleAttribute),
             .axFailure(
                 operation: "read text target subrole",
-                code: AXError.noValue.rawValue
+                code: .noValue
             )
         ]
 
@@ -256,7 +256,7 @@ final class AccessibilityTextAdapterTests: XCTestCase {
             let previousCharacterRange = NSRange(location: 5, length: 1)
             system.boundsErrorsByRange[collapsedRange] = .axFailure(
                 operation: "read bounds for text range",
-                code: error.rawValue
+                code: error
             )
             system.boundsByRange[previousCharacterRange] = CGRect(
                 x: 14,
@@ -417,7 +417,7 @@ final class AccessibilityTextAdapterTests: XCTestCase {
         system.selection = NSRange(location: 6, length: 0)
         system.rangedStringError = .axFailure(
             operation: "read string for text range",
-            code: AXError.noValue.rawValue
+            code: .noValue
         )
         let adapter = AccessibilityTextAdapter(
             system: system,
@@ -438,7 +438,7 @@ final class AccessibilityTextAdapterTests: XCTestCase {
         system.supportsRangedStrings = false
         system.characterCountError = .axFailure(
             operation: "read text character count",
-            code: AXError.noValue.rawValue
+            code: .noValue
         )
         let adapter = AccessibilityTextAdapter(system: system)
 
@@ -460,7 +460,7 @@ final class AccessibilityTextAdapterTests: XCTestCase {
         let collapsedRange = NSRange(location: 6, length: 0)
         let expectedError = AccessibilityTextError.axFailure(
             operation: "read bounds for text range",
-            code: AXError.cannotComplete.rawValue
+            code: .cannotComplete
         )
         system.boundsErrorsByRange[collapsedRange] = expectedError
         let adapter = AccessibilityTextAdapter(system: system)

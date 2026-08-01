@@ -25,6 +25,11 @@ Package.resolved
 Artifacts/
 LocalPacks/
 Screenshots/Local/
+node_modules/
+website/.astro/
+website/dist/
+website/test-results/
+website/playwright-report/
 *.app
 *.dmg
 *.zip

@@ -1,0 +1,16 @@
+{
+  "name": "MojiPond",
+  "short_name": "MojiPond",
+  "description": "Emoji shortcuts and custom packs for macOS.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#eff4ee",
+  "theme_color": "#eff4ee",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

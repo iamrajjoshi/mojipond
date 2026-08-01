@@ -1,6 +1,30 @@
 import CoreGraphics
 import Foundation
 
+enum RuntimeKeyboardKeyCode {
+    static let returnKey: CGKeyCode = 36
+    static let tab: CGKeyCode = 48
+    static let delete: CGKeyCode = 51
+    static let escape: CGKeyCode = 53
+    static let keypadEnter: CGKeyCode = 76
+    static let home: CGKeyCode = 115
+    static let pageUp: CGKeyCode = 116
+    static let end: CGKeyCode = 119
+    static let pageDown: CGKeyCode = 121
+    static let leftArrow: CGKeyCode = 123
+    static let rightArrow: CGKeyCode = 124
+    static let downArrow: CGKeyCode = 125
+    static let upArrow: CGKeyCode = 126
+}
+
+enum RuntimeInterceptionMode: Equatable, Sendable {
+    case hidden
+    case suggestions
+    case browser
+    case media
+    case committing
+}
+
 struct KeyboardEventSnapshot: Equatable, Sendable {
     let typeRawValue: UInt32
     let keyCode: CGKeyCode
@@ -165,7 +189,6 @@ final class SessionEventTapService: @unchecked Sendable {
     private let lock = NSLock()
 
     private var eventTap: CFMachPort?
-    private var runLoopSource: CFRunLoopSource?
     private var workerRunLoop: CFRunLoop?
     private var workerThread: Thread?
     private var shutdownSignal: DispatchSemaphore?
@@ -333,7 +356,6 @@ final class SessionEventTapService: @unchecked Sendable {
         let runLoop = CFRunLoopGetCurrent()
         let shouldStop = lock.withLock { () -> Bool in
             eventTap = tap
-            runLoopSource = source
             workerRunLoop = runLoop
             startupInProgress = false
             return stopRequested
@@ -352,7 +374,6 @@ final class SessionEventTapService: @unchecked Sendable {
         CFMachPortInvalidate(tap)
         lock.withLock {
             eventTap = nil
-            runLoopSource = nil
             workerRunLoop = nil
             workerThread = nil
             shutdownSignal = nil

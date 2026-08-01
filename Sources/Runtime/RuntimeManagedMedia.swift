@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 import ImageIO
 import UniformTypeIdentifiers
@@ -55,8 +54,7 @@ struct RuntimeResolvedManagedMedia: Equatable, Sendable {
     var pasteboardPayload: PasteboardItemPayload {
         .image(
             originalData: originalData,
-            type: uniformType,
-            includeCompatibilityFallbacks: true
+            type: uniformType
         )
     }
 }
@@ -164,7 +162,7 @@ struct RuntimeManagedMediaResolver:
             throw RuntimeManagedMediaError.fileTooLarge(limit: maximumBytes)
         }
         guard
-            Self.sha256(data)
+            ContentHasher.sha256(of: data).sha256
                 == media.contentHash.lowercased(
                     with: Locale(identifier: "en_US_POSIX")
                 )
@@ -228,13 +226,7 @@ struct RuntimeManagedMediaResolver:
         )
     }
 
-    private static func sha256(_ data: Data) -> String {
-        SHA256.hash(data: data)
-            .map { String(format: "%02x", $0) }
-            .joined()
-    }
-
-    private static func uniformType(for mediaType: EmojiMediaType) -> UTType {
+    private static func uniformType(for mediaType: AssetFormat) -> UTType {
         switch mediaType {
         case .png:
             .png
@@ -249,7 +241,7 @@ struct RuntimeManagedMediaResolver:
 
     private static func matchesMagic(
         _ data: Data,
-        mediaType: EmojiMediaType
+        mediaType: AssetFormat
     ) -> Bool {
         switch mediaType {
         case .png:
@@ -301,7 +293,7 @@ struct RuntimeManagedMediaResolver:
     private static func safeFilename(
         _ originalFilename: String?,
         fallbackPath: String,
-        mediaType: EmojiMediaType
+        mediaType: AssetFormat
     ) -> String {
         let candidate = originalFilename?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -318,23 +310,8 @@ struct RuntimeManagedMediaResolver:
             let fallback = URL(
                 fileURLWithPath: fallbackPath
             ).deletingPathExtension().lastPathComponent
-            return "\(fallback).\(fileExtension(for: mediaType))"
+            return "\(fallback).\(mediaType.preferredFilenameExtension)"
         }
         return basename
-    }
-
-    private static func fileExtension(
-        for mediaType: EmojiMediaType
-    ) -> String {
-        switch mediaType {
-        case .png:
-            "png"
-        case .jpeg:
-            "jpg"
-        case .gif:
-            "gif"
-        case .webP:
-            "webp"
-        }
     }
 }
