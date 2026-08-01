@@ -245,15 +245,21 @@ struct LibraryAddUnicodeItemView: View {
 struct LibraryItemDetailView: View {
     @ObservedObject var viewModel: LibraryViewModel
     let item: LibraryDisplayItem
+    let showsPersonalAliasEditor: Bool
 
     @State private var draft: LibraryItemDraft?
     @State private var customAliasesDraft: String
     @State private var isSaving = false
     @Environment(\.dismiss) private var dismiss
 
-    init(viewModel: LibraryViewModel, item: LibraryDisplayItem) {
+    init(
+        viewModel: LibraryViewModel,
+        item: LibraryDisplayItem,
+        showsPersonalAliasEditor: Bool = false
+    ) {
         self.viewModel = viewModel
         self.item = item
+        self.showsPersonalAliasEditor = showsPersonalAliasEditor
         if case let .custom(packID) = item.origin,
            let libraryItem = viewModel.item(
                packID: packID,
@@ -311,7 +317,9 @@ struct LibraryItemDetailView: View {
 
             Divider()
 
-            if let draft {
+            if showsPersonalAliasEditor {
+                personalAliasEditor
+            } else if let draft {
                 customEditor(draft)
             } else {
                 builtInDetails
@@ -324,6 +332,85 @@ struct LibraryItemDetailView: View {
                     .padding(18)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
             }
+        }
+    }
+
+    private var personalAliasEditor: some View {
+        Form {
+            Section("Your aliases") {
+                TextField(
+                    "Aliases, separated by commas",
+                    text: $customAliasesDraft
+                )
+                .font(.body.monospaced())
+                .accessibilityIdentifier("library.personalAliases")
+                .accessibilityHint(
+                    "Adds local aliases without changing the emoji pack."
+                )
+                Button("Save Aliases") {
+                    savePersonalAliases()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+
+            if let notice = viewModel.notice {
+                Section {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: noticeSymbol(for: notice.kind))
+                            .foregroundStyle(noticeTint(for: notice.kind))
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(notice.title)
+                                .font(.callout.weight(.semibold))
+                            if !notice.message.isEmpty {
+                                Text(notice.message)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        Button("Dismiss") {
+                            viewModel.dismissNotice()
+                        }
+                    }
+                }
+            }
+
+            Section("Emoji") {
+                LabeledContent(
+                    "Primary shortcode",
+                    value: ":\(item.shortcode):"
+                )
+                LabeledContent("Pack", value: item.packName)
+                LabeledContent(
+                    "Pack aliases",
+                    value: item.aliases.isEmpty
+                        ? "None"
+                        : item.aliases.map { ":\($0):" }
+                            .joined(separator: ", ")
+                )
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear {
+            viewModel.dismissNotice()
+        }
+        .safeAreaInset(edge: .bottom) {
+            HStack {
+                Button("Copy Emoji") {
+                    Task {
+                        await viewModel.copyToClipboard(item)
+                    }
+                }
+                .keyboardShortcut("c", modifiers: .command)
+                Spacer()
+                Button("Done") {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+            }
+            .padding(18)
+            .background(.bar)
         }
     }
 
@@ -457,18 +544,12 @@ struct LibraryItemDetailView: View {
                     text: $customAliasesDraft
                 )
                 .font(.body.monospaced())
+                .accessibilityIdentifier("library.personalAliases")
                 .accessibilityHint(
                     "Adds local aliases without changing the bundled dataset."
                 )
                 Button("Save Aliases") {
-                    isSaving = true
-                    Task {
-                        await viewModel.setCustomAliases(
-                            customAliasesDraft,
-                            for: item
-                        )
-                        isSaving = false
-                    }
+                    savePersonalAliases()
                 }
             }
 
@@ -528,6 +609,37 @@ struct LibraryItemDetailView: View {
             }
             .padding(18)
             .background(.bar)
+        }
+    }
+
+    private func savePersonalAliases() {
+        isSaving = true
+        Task {
+            await viewModel.setCustomAliases(
+                customAliasesDraft,
+                for: item
+            )
+            isSaving = false
+        }
+    }
+
+    private func noticeSymbol(
+        for kind: LibraryNotice.Kind
+    ) -> String {
+        switch kind {
+        case .information: "checkmark.circle.fill"
+        case .warning: "exclamationmark.triangle.fill"
+        case .error: "xmark.octagon.fill"
+        }
+    }
+
+    private func noticeTint(
+        for kind: LibraryNotice.Kind
+    ) -> Color {
+        switch kind {
+        case .information: PondDesign.lily
+        case .warning: PondDesign.warningForeground
+        case .error: PondDesign.errorForeground
         }
     }
 

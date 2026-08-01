@@ -186,6 +186,12 @@ final class LibraryViewModel: ObservableObject {
         builtInDisplayItems + customDisplayItems
     }
 
+    var personalAliasCount: Int {
+        usageSnapshot.customAliasesByItemID.values.reduce(0) {
+            $0 + $1.count
+        }
+    }
+
     var visibleItems: [LibraryDisplayItem] {
         let scoped = allDisplayItems.filter { item in
             switch scope {
@@ -193,6 +199,8 @@ final class LibraryViewModel: ObservableObject {
                 true
             case .favorites:
                 isFavorite(item)
+            case .aliases:
+                true
             case .builtIn:
                 item.origin == .builtIn
             case .custom:
@@ -244,6 +252,8 @@ final class LibraryViewModel: ObservableObject {
                 return item.category
             case .favorites:
                 return isFavorite(item) ? item.category : nil
+            case .aliases:
+                return item.category
             case .builtIn:
                 return item.origin == .builtIn ? item.category : nil
             case .custom:
@@ -266,6 +276,8 @@ final class LibraryViewModel: ObservableObject {
             "All Emoji"
         case .favorites:
             "Favorites"
+        case .aliases:
+            "Aliases"
         case .builtIn:
             builtInPack?.name ?? "Built-in Emoji"
         case .custom:
@@ -281,6 +293,10 @@ final class LibraryViewModel: ObservableObject {
             return "\(allDisplayItems.count.formatted()) emoji across \(packs.count + 1) sources"
         case .favorites:
             return "\(usageSnapshot.favoriteItemIDs.count.formatted()) favorite emoji"
+        case .aliases:
+            let count = personalAliasCount
+            let noun = count == 1 ? "personal alias" : "personal aliases"
+            return "\(count.formatted()) \(noun) · Choose an emoji to add or edit aliases"
         case .builtIn:
             return builtInPack?.packDescription
                 ?? "Unicode emoji and familiar GitHub-style aliases"

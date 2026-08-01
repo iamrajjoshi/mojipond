@@ -63,6 +63,46 @@ final class PondDesignContrastTests: XCTestCase {
         }
     }
 
+    func testBrandTextContrastsWithDeepWater() throws {
+        for (appearanceName, appearance) in try appearances() {
+            let foreground = try resolve(
+                PondDesign.onDeepWaterColor,
+                appearance: appearance
+            )
+            let background = try resolve(
+                PondDesign.deepWaterColor,
+                appearance: appearance
+            )
+            let ratio = contrastRatio(foreground, background)
+
+            XCTAssertGreaterThanOrEqual(
+                ratio,
+                4.5,
+                "Brand text has \(ratio) contrast in \(appearanceName)"
+            )
+        }
+    }
+
+    func testSelectedTextContrastsWithSelectionBackground() throws {
+        for (appearanceName, appearance) in try appearances() {
+            let foreground = try resolve(
+                .white,
+                appearance: appearance
+            )
+            let background = try resolve(
+                PondDesign.selectionBackgroundColor,
+                appearance: appearance
+            )
+            let ratio = contrastRatio(foreground, background)
+
+            XCTAssertGreaterThanOrEqual(
+                ratio,
+                4.5,
+                "Selected text has \(ratio) contrast in \(appearanceName)"
+            )
+        }
+    }
+
     private func appearances() throws -> [(String, NSAppearance)] {
         try [
             ("light", NSAppearance.Name.aqua),

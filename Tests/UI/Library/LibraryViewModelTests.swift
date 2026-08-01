@@ -141,6 +141,72 @@ final class LibraryViewModelTests: XCTestCase {
         XCTAssertEqual(usageMutationCount, 3)
     }
 
+    func testAliasesScopeBrowsesAndFiltersAllEmoji() async throws {
+        let fixture = try await makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.workspace) }
+        let frog = try TestSupport.writeImage(
+            to: fixture.workspace.appendingPathComponent("frog.png")
+        )
+        _ = try await install(
+            files: [frog],
+            name: "Frog Pack",
+            into: fixture.store
+        )
+        let usageStore = InMemoryEmojiUsageStore()
+        let viewModel = makeViewModel(fixture, usageStore: usageStore)
+        await viewModel.reload()
+        let wave = try XCTUnwrap(
+            viewModel.allDisplayItems.first(where: { $0.shortcode == "wave" })
+        )
+        let customFrog = try XCTUnwrap(
+            viewModel.allDisplayItems.first(where: { $0.shortcode == "frog" })
+        )
+
+        await viewModel.setCustomAliases("salute, hi-wave", for: wave)
+        await viewModel.setCustomAliases("toad", for: customFrog)
+        viewModel.scope = .aliases
+
+        XCTAssertEqual(viewModel.personalAliasCount, 3)
+        XCTAssertEqual(viewModel.visibleItems.map(\.shortcode), ["wave", "frog"])
+        XCTAssertEqual(viewModel.selectedScopeTitle, "Aliases")
+        XCTAssertEqual(
+            viewModel.selectedScopeSubtitle,
+            "3 personal aliases · Choose an emoji to add or edit aliases"
+        )
+
+        let aliasCategories = viewModel.availableCategories
+        viewModel.scope = .all
+        XCTAssertEqual(aliasCategories, viewModel.availableCategories)
+
+        viewModel.scope = .aliases
+        viewModel.searchText = "salute"
+        XCTAssertEqual(viewModel.visibleItems.map(\.shortcode), ["wave"])
+
+        viewModel.searchText = ""
+        viewModel.contentFilter = .images
+        XCTAssertEqual(viewModel.visibleItems.map(\.shortcode), ["frog"])
+    }
+
+    func testAliasesScopeUsesSingularSubtitle() async throws {
+        let fixture = try await makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.workspace) }
+        let usageStore = InMemoryEmojiUsageStore(
+            initialState: EmojiUsageSnapshot(
+                customAliasesByItemID: ["builtin.test.wave": ["salute"]]
+            )
+        )
+        let viewModel = makeViewModel(fixture, usageStore: usageStore)
+        await viewModel.reload()
+
+        viewModel.scope = .aliases
+
+        XCTAssertEqual(viewModel.personalAliasCount, 1)
+        XCTAssertEqual(
+            viewModel.selectedScopeSubtitle,
+            "1 personal alias · Choose an emoji to add or edit aliases"
+        )
+    }
+
     func testNetworkImportRequiresExplicitPerImportConsent() async throws {
         let fixture = try await makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.workspace) }

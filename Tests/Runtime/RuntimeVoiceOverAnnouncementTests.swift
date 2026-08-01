@@ -143,6 +143,67 @@ final class RuntimeVoiceOverAnnouncementTests: XCTestCase {
         )
     }
 
+    func testSuggestionInteractionHintMatchesAcceptedKeys() {
+        let base = RuntimeSuggestionPanelSnapshot(
+            revision: 1,
+            transactionID: ParserTransactionID(rawValue: 1),
+            mode: .suggestions,
+            rows: [],
+            selectedIndex: 0,
+            query: nil,
+            acceptsTab: true,
+            acceptsReturn: false
+        )
+
+        XCTAssertEqual(
+            base.compactInteractionHint,
+            "↑↓ choose  ·  tab insert  ·  esc close"
+        )
+        XCTAssertEqual(
+            base.compactInteractionAccessibilityLabel,
+            "Up and Down Arrow choose, Tab inserts, Escape closes"
+        )
+
+        let noAcceptanceKeys = RuntimeSuggestionPanelSnapshot(
+            revision: 2,
+            transactionID: ParserTransactionID(rawValue: 1),
+            mode: .suggestions,
+            rows: [],
+            selectedIndex: 0,
+            query: nil,
+            acceptsTab: false,
+            acceptsReturn: false
+        )
+        XCTAssertEqual(
+            noAcceptanceKeys.compactInteractionHint,
+            "↑↓ choose  ·  esc close"
+        )
+    }
+
+    func testSuggestionPresentationUsesConfiguredTrigger() {
+        let row = RuntimeSuggestionRow(
+            id: "wave",
+            glyph: "👋",
+            shortcode: "wave",
+            name: "Waving hand"
+        )
+        let snapshot = RuntimeSuggestionPanelSnapshot(
+            revision: 1,
+            transactionID: ParserTransactionID(rawValue: 1),
+            mode: .suggestions,
+            rows: [row],
+            selectedIndex: 0,
+            query: "wa",
+            trigger: .semicolon
+        )
+
+        XCTAssertEqual(snapshot.trigger.rawValue, ";")
+        XCTAssertEqual(
+            RuntimeVoiceOverAnnouncement.suggestions(snapshot),
+            "1 emoji suggestion. Selected Waving hand, semicolon wave semicolon."
+        )
+    }
+
     func testBrowserAnnouncementIncludesQueryCountAndSelection() {
         let snapshot = RuntimeSuggestionPanelSnapshot(
             revision: 1,

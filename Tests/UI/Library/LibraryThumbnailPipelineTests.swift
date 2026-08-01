@@ -49,6 +49,16 @@ final class LibraryThumbnailPipelineTests: XCTestCase {
             "Pond frog, colon frog colon, image emoji, Pond Friends, "
                 + "pack disabled, Emoji preview unavailable"
         )
+        XCTAssertEqual(
+            LibraryItemAccessibility.label(
+                for: disabledItem,
+                artworkState: .loaded,
+                personalAliases: ["salute", "hi-wave"]
+            ),
+            "Pond frog, colon frog colon, image emoji, Pond Friends, "
+                + "pack disabled, personal aliases, colon salute colon, "
+                + "colon hi-wave colon"
+        )
     }
 
     func testCandidateLoaderFallsBackFromInvalidThumbnailToOriginal()

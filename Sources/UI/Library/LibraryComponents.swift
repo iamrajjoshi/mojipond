@@ -43,14 +43,27 @@ enum LibraryArtworkLoadState: Equatable, Sendable {
 enum LibraryItemAccessibility {
     static func label(
         for item: LibraryDisplayItem,
-        artworkState: LibraryArtworkLoadState
+        artworkState: LibraryArtworkLoadState,
+        personalAliases: [String]? = nil
     ) -> String {
         [
             item.accessibilityLabel,
+            personalAliases.map(personalAliasDescription),
             artworkState.accessibilityLabel
         ]
         .compactMap { $0 }
         .joined(separator: ", ")
+    }
+
+    private static func personalAliasDescription(
+        _ aliases: [String]
+    ) -> String {
+        guard !aliases.isEmpty else {
+            return "no personal aliases"
+        }
+        let values = aliases.map { "colon \($0) colon" }
+            .joined(separator: ", ")
+        return "personal aliases, \(values)"
     }
 }
 
@@ -80,7 +93,14 @@ struct LibraryEmojiArtwork: View {
             }
         }
         .frame(width: size, height: size)
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10))
+        .background(
+            PondDesign.raisedSurface,
+            in: RoundedRectangle(cornerRadius: 10)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(PondDesign.ripple.opacity(0.18))
+        }
         .overlay(alignment: .bottomTrailing) {
             if item.isAnimated {
                 Image(systemName: "play.fill")
@@ -273,6 +293,8 @@ enum LibraryThumbnailCandidateLoader {
 
 struct LibraryEmojiCard: View {
     let item: LibraryDisplayItem
+    var personalAliases: [String] = []
+    var showsPersonalAliases = false
     let action: () -> Void
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -300,6 +322,11 @@ struct LibraryEmojiCard: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                    if showsPersonalAliases {
+                        LibraryPersonalAliasSummary(
+                            aliases: personalAliases
+                        )
+                    }
                 }
                 .frame(maxWidth: .infinity)
             }
@@ -336,12 +363,16 @@ struct LibraryEmojiCard: View {
             value: isHovered
         )
         .accessibilityLabel(accessibilityLabel)
-        .accessibilityHint("Opens emoji details")
+        .accessibilityHint(
+            showsPersonalAliases
+                ? "Opens emoji details to add or edit personal aliases"
+                : "Opens emoji details"
+        )
     }
 
     private var cardBackground: Color {
         guard isHovered || isFocused else {
-            return Color(nsColor: .controlBackgroundColor)
+            return PondDesign.surface
         }
         return PondDesign.pond.opacity(
             contrast == .increased ? 0.16 : 0.09
@@ -352,7 +383,7 @@ struct LibraryEmojiCard: View {
         if isFocused {
             return PondDesign.pond
         }
-        return Color(nsColor: .separatorColor).opacity(
+        return PondDesign.ripple.opacity(
             contrast == .increased ? 1 : 0.55
         )
     }
@@ -364,7 +395,8 @@ struct LibraryEmojiCard: View {
     private var accessibilityLabel: String {
         LibraryItemAccessibility.label(
             for: item,
-            artworkState: resolvedArtworkLoadState
+            artworkState: resolvedArtworkLoadState,
+            personalAliases: showsPersonalAliases ? personalAliases : nil
         )
     }
 
@@ -383,6 +415,8 @@ struct LibraryEmojiCard: View {
 
 struct LibraryEmojiListRow: View {
     let item: LibraryDisplayItem
+    var personalAliases: [String] = []
+    var showsPersonalAliases = false
     let action: () -> Void
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -408,6 +442,11 @@ struct LibraryEmojiListRow: View {
                     Text(item.displayName)
                         .font(.callout)
                         .foregroundStyle(.secondary)
+                    if showsPersonalAliases {
+                        LibraryPersonalAliasSummary(
+                            aliases: personalAliases
+                        )
+                    }
                 }
 
                 Spacer(minLength: 12)
@@ -462,13 +501,18 @@ struct LibraryEmojiListRow: View {
             value: isHovered
         )
         .accessibilityLabel(accessibilityLabel)
-        .accessibilityHint("Opens emoji details")
+        .accessibilityHint(
+            showsPersonalAliases
+                ? "Opens emoji details to add or edit personal aliases"
+                : "Opens emoji details"
+        )
     }
 
     private var accessibilityLabel: String {
         LibraryItemAccessibility.label(
             for: item,
-            artworkState: resolvedArtworkLoadState
+            artworkState: resolvedArtworkLoadState,
+            personalAliases: showsPersonalAliases ? personalAliases : nil
         )
     }
 
@@ -482,6 +526,27 @@ struct LibraryEmojiListRow: View {
             return .failed
         }
         return artworkLoadState
+    }
+}
+
+private struct LibraryPersonalAliasSummary: View {
+    let aliases: [String]
+
+    var body: some View {
+        Label(summary, systemImage: aliases.isEmpty ? "plus.circle" : "tag.fill")
+            .font(.caption2)
+            .foregroundStyle(
+                aliases.isEmpty ? Color.secondary : PondDesign.pond
+            )
+            .lineLimit(1)
+            .accessibilityHidden(true)
+    }
+
+    private var summary: String {
+        guard !aliases.isEmpty else {
+            return "Add alias"
+        }
+        return aliases.map { ":\($0):" }.joined(separator: ", ")
     }
 }
 

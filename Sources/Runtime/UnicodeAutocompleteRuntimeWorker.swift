@@ -2845,6 +2845,16 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         }
 
         uiRevision &+= 1
+        let hasSelection = transaction.results.indices.contains(
+            transaction.selectedIndex
+        )
+        let isBrowser = transaction.visibleMode == .browser
+        let acceptsTab = hasSelection
+            && (isBrowser
+                || configuration.preferences.shortcode.acceptsTab)
+        let acceptsReturn = hasSelection
+            && (isBrowser
+                || configuration.preferences.shortcode.acceptsReturn)
         let snapshot = RuntimeSuggestionPanelSnapshot(
             revision: uiRevision,
             transactionID: transaction.transactionID,
@@ -2853,7 +2863,10 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             selectedIndex: transaction.selectedIndex,
             query: transaction.visibleMode == .browser
                 ? transaction.browserQuery
-                : nil
+                : nil,
+            trigger: configuration.preferences.shortcode.trigger,
+            acceptsTab: acceptsTab,
+            acceptsReturn: acceptsReturn
         )
         let revision = snapshot.revision
         let transactionID = transaction.transactionID
@@ -2872,13 +2885,6 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             return
         }
         let gate = interceptionGate
-        let hasSelection = transaction.results.indices.contains(
-            transaction.selectedIndex
-        )
-        let acceptsTab = hasSelection
-            && configuration.preferences.shortcode.acceptsTab
-        let acceptsReturn = hasSelection
-            && configuration.preferences.shortcode.acceptsReturn
         suggestionPresentationTask?.cancel()
         suggestionPresentationTask = Task { @MainActor [weak self] in
             guard !Task.isCancelled else {

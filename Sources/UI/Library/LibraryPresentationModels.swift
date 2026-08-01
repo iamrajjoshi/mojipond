@@ -3,6 +3,7 @@ import Foundation
 enum LibraryScope: Hashable, Identifiable {
     case all
     case favorites
+    case aliases
     case builtIn
     case custom
     case pack(UUID)
@@ -13,6 +14,8 @@ enum LibraryScope: Hashable, Identifiable {
             "all"
         case .favorites:
             "favorites"
+        case .aliases:
+            "aliases"
         case .builtIn:
             "built-in"
         case .custom:

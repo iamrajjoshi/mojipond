@@ -1157,6 +1157,29 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         )
     }
 
+    func testBrowserHintIncludesKeysItAlwaysAccepts() async throws {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: "::",
+            acceptsTab: false,
+            acceptsReturn: false
+        )
+        harness.worker.setCaptureEnabled(true)
+        type("::", into: harness.worker)
+
+        let browserShown = await eventually {
+            harness.presenter.latestShown?.mode == .browser
+        }
+
+        XCTAssertTrue(browserShown)
+        XCTAssertEqual(harness.presenter.latestShown?.acceptsTab, true)
+        XCTAssertEqual(harness.presenter.latestShown?.acceptsReturn, true)
+        XCTAssertEqual(
+            harness.presenter.latestShown?.compactInteractionHint,
+            "↑↓ choose  ·  tab or ↩ insert  ·  esc close"
+        )
+    }
+
     func testBrowserSelectionKeyRepeatReusesRowsForLargeLibrary()
         async throws
     {
@@ -1571,6 +1594,8 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         captureDelayMilliseconds: Int = 0,
         captureError: RuntimeTextCaptureError? = nil,
         canPostEvents: Bool = true,
+        acceptsTab: Bool = true,
+        acceptsReturn: Bool = true,
         diagnosticHandler:
             (@Sendable (UnicodeAutocompleteRuntimeDiagnostic) -> Void)? = nil
     ) throws -> RuntimeWorkerHarness {
@@ -1609,6 +1634,8 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         )
         var preferences = MojiPondPreferences.defaults
         preferences.shortcode.parserTimeout = parserTimeout
+        preferences.shortcode.acceptsTab = acceptsTab
+        preferences.shortcode.acceptsReturn = acceptsReturn
         let worker = UnicodeAutocompleteRuntimeWorker(
             searchIndex: EmojiSearchIndex(items: items),
             configuration: UnicodeAutocompleteRuntimeConfiguration(
