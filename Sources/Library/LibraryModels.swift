@@ -511,22 +511,6 @@ struct StoredAsset: Codable, Equatable, Sendable {
     }
 }
 
-enum AssetFormat: String, Codable, CaseIterable, Equatable, Sendable {
-    case png
-    case jpeg
-    case gif
-    case webP
-
-    var preferredFilenameExtension: String {
-        switch self {
-        case .png: "png"
-        case .jpeg: "jpg"
-        case .gif: "gif"
-        case .webP: "webp"
-        }
-    }
-}
-
 struct PackSource: Codable, Equatable, Sendable {
     enum Kind: String, Codable, Sendable {
         case individualFiles

@@ -1050,7 +1050,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ) -> String {
         switch reason {
         case .notMessages:
-            "Automatic media paste is currently verified only in Messages; "
+            "Media insertion works only in Messages; "
                 + "the token was left intact."
         case .managedLibraryUnavailable:
             "The custom media library is unavailable; the token was left intact."
@@ -1089,7 +1089,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func runtimeNotice(for denial: RuntimeSessionDenial) -> String {
         switch denial {
         case .permissionUnavailable:
-            "Permissions are currently unavailable."
+            "Typing permissions are unavailable."
         case .secureEventInput, .secureField, .secureStatusUnknown:
             "MojiPond is suspended in secure text fields."
         case .applicationUnknown:

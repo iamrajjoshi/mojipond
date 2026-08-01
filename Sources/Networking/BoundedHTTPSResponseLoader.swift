@@ -5,6 +5,17 @@ enum HTTPSRedirectPolicy: Equatable, Sendable {
     case sameHost
 }
 
+enum HTTPSURLValidator {
+    static func isSecure(_ url: URL) -> Bool {
+        url.scheme?.lowercased(
+            with: Locale(identifier: "en_US_POSIX")
+        ) == "https"
+            && !(url.host?.isEmpty ?? true)
+            && url.user == nil
+            && url.password == nil
+    }
+}
+
 enum BoundedHTTPSLoadError: Error, Equatable, Sendable {
     case insecureRequestURL
     case insecureRedirectURL
@@ -31,7 +42,10 @@ struct BoundedHTTPSResponseLoader: Sendable {
         redirectPolicy: HTTPSRedirectPolicy = .anyHTTPSHost
     ) async throws -> BoundedHTTPResponse {
         let maximumBytes = max(0, maximumBytes)
-        guard let requestURL = request.url, Self.isSecure(requestURL) else {
+        guard
+            let requestURL = request.url,
+            HTTPSURLValidator.isSecure(requestURL)
+        else {
             throw BoundedHTTPSLoadError.insecureRequestURL
         }
 
@@ -51,7 +65,7 @@ struct BoundedHTTPSResponseLoader: Sendable {
         guard
             let response = rawResponse as? HTTPURLResponse,
             let finalURL = response.url,
-            Self.isSecure(finalURL)
+            HTTPSURLValidator.isSecure(finalURL)
         else {
             bytes.task.cancel()
             throw BoundedHTTPSLoadError.invalidResponse
@@ -84,13 +98,6 @@ struct BoundedHTTPSResponseLoader: Sendable {
         }
 
         return BoundedHTTPResponse(data: data, response: response)
-    }
-
-    private static func isSecure(_ url: URL) -> Bool {
-        url.scheme?.lowercased(with: Locale(identifier: "en_US_POSIX")) == "https"
-            && !(url.host?.isEmpty ?? true)
-            && url.user == nil
-            && url.password == nil
     }
 }
 
@@ -128,7 +135,10 @@ private final class HTTPSRedirectDelegate:
         _ = task
         _ = response
 
-        guard let url = request.url, Self.isSecure(url) else {
+        guard
+            let url = request.url,
+            HTTPSURLValidator.isSecure(url)
+        else {
             record(.insecureRedirectURL)
             completionHandler(nil)
             return
@@ -152,12 +162,5 @@ private final class HTTPSRedirectDelegate:
             storedViolation = violation
         }
         lock.unlock()
-    }
-
-    private static func isSecure(_ url: URL) -> Bool {
-        url.scheme?.lowercased(with: Locale(identifier: "en_US_POSIX")) == "https"
-            && !(url.host?.isEmpty ?? true)
-            && url.user == nil
-            && url.password == nil
     }
 }

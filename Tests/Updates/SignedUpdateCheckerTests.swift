@@ -174,10 +174,11 @@ final class SignedUpdateCheckerTests: XCTestCase {
         do {
             _ = try await task.value
             XCTFail("Expected cancellation")
-        } catch is CancellationError {
-            // Expected.
         } catch {
-            XCTFail("Expected CancellationError, got \(error)")
+            XCTAssertTrue(
+                error is CancellationError,
+                "Expected CancellationError, got \(error)"
+            )
         }
     }
 

@@ -236,8 +236,7 @@ final class PasteboardTransactionTests: XCTestCase {
 
         let payload = PasteboardItemPayload.image(
             originalData: gifBytes,
-            type: .gif,
-            includeCompatibilityFallbacks: false
+            type: .gif
         )
 
         XCTAssertEqual(
@@ -316,8 +315,11 @@ final class PasteboardTransactionTests: XCTestCase {
         do {
             _ = try await second.value
             XCTFail("Expected cancellation")
-        } catch is CancellationError {
-            // Expected.
+        } catch {
+            XCTAssertTrue(
+                error is CancellationError,
+                "Expected CancellationError, got \(error)"
+            )
         }
 
         XCTAssertEqual(pasteboard.writeAttempts, 2)

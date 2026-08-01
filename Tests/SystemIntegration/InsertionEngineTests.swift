@@ -44,11 +44,11 @@ final class InsertionEngineTests: XCTestCase {
         system.caretBounds = nil
         system.boundsErrorsByRange[system.selection] = .axFailure(
             operation: "read bounds for text range",
-            code: AXError.noValue.rawValue
+            code: .noValue
         )
         system.rangedStringError = .axFailure(
             operation: "read string for text range",
-            code: AXError.noValue.rawValue
+            code: .noValue
         )
         system.settableAttributes = [kAXSelectedTextRangeAttribute]
         let adapter = AccessibilityTextAdapter(system: system)

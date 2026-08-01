@@ -28,16 +28,6 @@ actor MediaCommandCoordinator {
         self.assetResolver = assetResolver
     }
 
-    static func live(bundle: Bundle = .main) throws -> MediaCommandCoordinator {
-        try MediaCommandCoordinator(
-            offlineCatalog: NotoOfflineCatalog(
-                resourceProvider: BundleNotoOfflineResourceProvider(
-                    bundle: bundle
-                )
-            )
-        )
-    }
-
     func currentState() -> MediaCommandSearchState {
         state
     }
@@ -117,13 +107,16 @@ actor MediaCommandCoordinator {
         return state
     }
 
-    func resolve(_ result: MediaCommandResult) async throws -> MediaCommandDownload {
+    func resolve(_ result: MediaCommandResult) async throws -> MediaDownload {
         try await assetResolver.resolve(result)
     }
 
     private func nextRequest(command: MediaCommandKind) -> MediaCommandRequest {
         requestCounter = requestCounter == .max ? 1 : requestCounter + 1
-        return MediaCommandRequest(id: requestCounter, command: command)
+        return MediaCommandRequest(
+            id: MediaCommandRequestID(rawValue: requestCounter),
+            command: command
+        )
     }
 
     private static func performSearch(

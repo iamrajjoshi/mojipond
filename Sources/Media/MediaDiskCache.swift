@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 
 actor MediaDiskCache {
@@ -42,7 +41,7 @@ actor MediaDiskCache {
 
     @discardableResult
     func store(
-        _ download: RemoteMediaDownloader.Download,
+        _ download: MediaDownload,
         for item: RemoteMediaItem
     ) throws -> URL {
         let baseURL = try preparedRoot()
@@ -126,8 +125,8 @@ actor MediaDiskCache {
     }
 
     private func cacheKey(for url: URL) -> String {
-        SHA256.hash(data: Data(url.absoluteString.utf8))
-            .map { String(format: "%02x", $0) }
-            .joined()
+        ContentHasher.sha256(
+            of: Data(url.absoluteString.utf8)
+        ).sha256
     }
 }

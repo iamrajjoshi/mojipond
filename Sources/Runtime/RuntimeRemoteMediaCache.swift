@@ -3,10 +3,10 @@ import Foundation
 protocol RuntimeRemoteMediaCaching: Sendable {
     func cachedDownload(
         for result: MediaCommandResult
-    ) async throws -> MediaCommandDownload?
+    ) async throws -> MediaDownload?
 
     func store(
-        _ download: MediaCommandDownload,
+        _ download: MediaDownload,
         for result: MediaCommandResult
     ) async throws
 }
@@ -27,7 +27,7 @@ actor RuntimeNotoMediaDiskCache: RuntimeRemoteMediaCaching {
 
     func cachedDownload(
         for result: MediaCommandResult
-    ) async throws -> MediaCommandDownload? {
+    ) async throws -> MediaDownload? {
         guard Self.isCacheable(result) else {
             return nil
         }
@@ -42,7 +42,7 @@ actor RuntimeNotoMediaDiskCache: RuntimeRemoteMediaCaching {
         let contentType = try Self.contentType(
             forFileExtension: fileURL.pathExtension
         )
-        let download = MediaCommandDownload(
+        let download = MediaDownload(
             data: try Data(contentsOf: fileURL, options: [.mappedIfSafe]),
             contentType: contentType,
             suggestedFilename: fileURL.lastPathComponent
@@ -54,7 +54,7 @@ actor RuntimeNotoMediaDiskCache: RuntimeRemoteMediaCaching {
     }
 
     func store(
-        _ download: MediaCommandDownload,
+        _ download: MediaDownload,
         for result: MediaCommandResult
     ) async throws {
         guard Self.isCacheable(result) else {
@@ -68,7 +68,7 @@ actor RuntimeNotoMediaDiskCache: RuntimeRemoteMediaCaching {
             forContentType: download.contentType
         )
         _ = try await diskCache.store(
-            RemoteMediaDownloader.Download(
+            MediaDownload(
                 data: download.data,
                 contentType: download.contentType,
                 suggestedFilename: "noto.\(fileExtension)"
@@ -143,7 +143,7 @@ struct RuntimeMediaDownloadResolver: Sendable {
 
     func resolve(
         _ result: MediaCommandResult
-    ) async throws -> MediaCommandDownload {
+    ) async throws -> MediaDownload {
         guard Self.shouldUseCache(result), let cache else {
             return try await coordinator.resolve(result)
         }

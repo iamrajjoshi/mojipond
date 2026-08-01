@@ -99,7 +99,7 @@ enum EmojiLibrarySearchAdapter {
             }
             return .media(
                 MediaEmojiContent(
-                    mediaType: mediaType(for: asset.format),
+                    mediaType: asset.format,
                     relativePath: asset.relativePath,
                     originalFilename: item.sourceFilename,
                     contentHash: asset.sha256,
@@ -110,15 +110,6 @@ enum EmojiLibrarySearchAdapter {
                     isAnimated: asset.frameCount > 1
                 )
             )
-        }
-    }
-
-    private static func mediaType(for format: AssetFormat) -> EmojiMediaType {
-        switch format {
-        case .png: .png
-        case .jpeg: .jpeg
-        case .gif: .gif
-        case .webP: .webP
         }
     }
 }

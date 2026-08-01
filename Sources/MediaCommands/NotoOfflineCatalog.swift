@@ -1,5 +1,13 @@
-import CryptoKit
 import Foundation
+
+private func isSafeNotoAssetPath(_ relativePath: String) -> Bool {
+    guard !relativePath.isEmpty, !relativePath.hasPrefix("/") else {
+        return false
+    }
+    return relativePath.split(separator: "/").allSatisfy {
+        !$0.isEmpty && $0 != "." && $0 != ".."
+    }
+}
 
 enum NotoOfflineCatalogError: Error, Equatable, LocalizedError, Sendable {
     case manifestMissing
@@ -57,7 +65,7 @@ struct BundleNotoOfflineResourceProvider: NotoOfflineResourceProviding, @uncheck
     }
 
     func assetURL(for relativePath: String) throws -> URL {
-        guard Self.isSafe(relativePath: relativePath) else {
+        guard isSafeNotoAssetPath(relativePath) else {
             throw NotoOfflineCatalogError.invalidManifest
         }
         let relativeURL = URL(fileURLWithPath: relativePath)
@@ -109,14 +117,6 @@ struct BundleNotoOfflineResourceProvider: NotoOfflineResourceProviding, @uncheck
         })
     }
 
-    private static func isSafe(relativePath: String) -> Bool {
-        guard !relativePath.isEmpty, !relativePath.hasPrefix("/") else {
-            return false
-        }
-        return relativePath.split(separator: "/").allSatisfy {
-            !$0.isEmpty && $0 != "." && $0 != ".."
-        }
-    }
 }
 
 struct NotoOfflineCatalog: Sendable {
@@ -173,7 +173,7 @@ struct NotoOfflineCatalog: Sendable {
                 asset.codepoint.allSatisfy({ $0.isHexDigit || $0 == "_" }),
                 asset.filename.hasPrefix("gifs/"),
                 asset.filename.hasSuffix(".gif"),
-                Self.isSafe(relativePath: asset.filename),
+                isSafeNotoAssetPath(asset.filename),
                 asset.sha256.count == 64,
                 asset.sha256.allSatisfy({ $0.isHexDigit }),
                 asset.byteCount > 0,
@@ -193,7 +193,8 @@ struct NotoOfflineCatalog: Sendable {
             guard
                 gifData.count == asset.byteCount,
                 Self.isGIF(gifData),
-                Self.sha256(gifData) == asset.sha256.lowercased()
+                ContentHasher.sha256(of: gifData).sha256
+                    == asset.sha256.lowercased()
             else {
                 throw NotoOfflineCatalogError.assetCorrupt(asset.filename)
             }
@@ -255,7 +256,7 @@ struct NotoOfflineCatalog: Sendable {
             title: entry.asset.title,
             previewURL: entry.fileURL,
             originalURL: entry.fileURL,
-            dimensions: RemoteMediaDimensions(width: 512, height: 512),
+            dimensions: MediaDimensions(width: 512, height: 512),
             attribution: "Noto Animated Emoji by Google"
         )
         return MediaCommandResult(
@@ -327,20 +328,6 @@ struct NotoOfflineCatalog: Sendable {
             data.prefix(6) == Data("GIF89a".utf8)
     }
 
-    private static func sha256(_ data: Data) -> String {
-        SHA256.hash(data: data)
-            .map { String(format: "%02x", $0) }
-            .joined()
-    }
-
-    private static func isSafe(relativePath: String) -> Bool {
-        guard !relativePath.isEmpty, !relativePath.hasPrefix("/") else {
-            return false
-        }
-        return relativePath.split(separator: "/").allSatisfy {
-            !$0.isEmpty && $0 != "." && $0 != ".."
-        }
-    }
 }
 
 private extension NotoOfflineCatalog {

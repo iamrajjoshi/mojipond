@@ -124,12 +124,12 @@ final class RuntimeRemoteMediaCacheTests: XCTestCase {
 
     private func gifDownload(
         suffix: String = ""
-    ) -> MediaCommandDownload {
+    ) -> MediaDownload {
         let base = Data(
             base64Encoded:
                 "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="
         )!
-        return MediaCommandDownload(
+        return MediaDownload(
             data: base + Data(suffix.utf8),
             contentType: "image/gif",
             suggestedFilename: "original.gif"
@@ -156,24 +156,24 @@ final class RuntimeRemoteMediaCacheTests: XCTestCase {
 }
 
 private actor RuntimeRemoteMediaCacheSpy: RuntimeRemoteMediaCaching {
-    private let cached: MediaCommandDownload?
+    private let cached: MediaDownload?
     private var reads = 0
     private var writes = 0
 
-    init(cached: MediaCommandDownload?) {
+    init(cached: MediaDownload?) {
         self.cached = cached
     }
 
     func cachedDownload(
         for result: MediaCommandResult
-    ) -> MediaCommandDownload? {
+    ) -> MediaDownload? {
         _ = result
         reads += 1
         return cached
     }
 
     func store(
-        _ download: MediaCommandDownload,
+        _ download: MediaDownload,
         for result: MediaCommandResult
     ) {
         _ = download
@@ -193,10 +193,10 @@ private actor RuntimeRemoteMediaCacheSpy: RuntimeRemoteMediaCaching {
 private actor RuntimeRemoteMediaCoordinatorSpy:
     RuntimeMediaCommandCoordinating
 {
-    private let download: MediaCommandDownload
+    private let download: MediaDownload
     private var resolutions = 0
 
-    init(download: MediaCommandDownload) {
+    init(download: MediaDownload) {
         self.download = download
     }
 
@@ -211,7 +211,12 @@ private actor RuntimeRemoteMediaCoordinatorSpy:
         _ = bundleIdentifier
         _ = networkOptions
         _ = limit
-        return .empty(MediaCommandRequest(id: 1, command: command))
+        return .empty(
+            MediaCommandRequest(
+                id: MediaCommandRequestID(rawValue: 1),
+                command: command
+            )
+        )
     }
 
     func cancel() -> MediaCommandSearchState {
@@ -220,7 +225,7 @@ private actor RuntimeRemoteMediaCoordinatorSpy:
 
     func resolve(
         _ result: MediaCommandResult
-    ) -> MediaCommandDownload {
+    ) -> MediaDownload {
         _ = result
         resolutions += 1
         return download

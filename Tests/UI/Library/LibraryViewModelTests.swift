@@ -212,7 +212,7 @@ final class LibraryViewModelTests: XCTestCase {
         )
     }
 
-    func testNetworkImportRequiresExplicitPerImportConsent() async throws {
+    func testNetworkImportIsUnavailableFromLibraryUI() async throws {
         let fixture = try await makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.workspace) }
         let viewModel = makeViewModel(fixture)
@@ -224,7 +224,7 @@ final class LibraryViewModelTests: XCTestCase {
 
         XCTAssertFalse(viewModel.isPreparingImport)
         XCTAssertEqual(viewModel.notice?.kind, .warning)
-        XCTAssertEqual(viewModel.notice?.title, "Network access not granted")
+        XCTAssertEqual(viewModel.notice?.title, "Use a local ZIP")
         XCTAssertNil(viewModel.importSession)
     }
 
@@ -430,28 +430,18 @@ final class LibraryViewModelTests: XCTestCase {
         )
     }
 
-    func testDirectCreateAndEditRejectBuiltInClaims() async throws {
+    func testEditRejectsBuiltInClaims() async throws {
         let fixture = try await makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.workspace) }
         let pack = try await fixture.store.createPack(name: "Pond")
+        let item = try await fixture.store.createUnicodeItem(
+            in: pack.id,
+            shortcode: Shortcode(validating: "frog"),
+            unicode: "🐸"
+        )
         let viewModel = makeViewModel(fixture)
         await viewModel.reload()
 
-        var draft = LibraryUnicodeItemDraft(packID: pack.id)
-        draft.unicode = "🐸"
-        draft.shortcode = "wave"
-        let createdReserved =
-            await viewModel.createUnicodeItem(draft)
-        XCTAssertFalse(createdReserved)
-
-        draft.shortcode = "frog"
-        let createdFrog =
-            await viewModel.createUnicodeItem(draft)
-        XCTAssertTrue(createdFrog)
-        let item = try XCTUnwrap(
-            viewModel.library.packs.first?
-                .items.first
-        )
         var edit = LibraryItemDraft(
             packID: pack.id,
             item: item
@@ -472,7 +462,6 @@ final class LibraryViewModelTests: XCTestCase {
     func testBuiltInLoadFailureBlocksClaimMutations() async throws {
         let fixture = try await makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.workspace) }
-        let pack = try await fixture.store.createPack(name: "Pond")
         let viewModel = LibraryViewModel(
             store: fixture.store,
             paths: fixture.paths,
@@ -492,17 +481,6 @@ final class LibraryViewModelTests: XCTestCase {
         XCTAssertEqual(
             viewModel.notice?.title,
             "Built-in emoji unavailable"
-        )
-
-        var draft = LibraryUnicodeItemDraft(packID: pack.id)
-        draft.unicode = "🐸"
-        draft.shortcode = "frog"
-        let created =
-            await viewModel.createUnicodeItem(draft)
-        XCTAssertFalse(created)
-        XCTAssertEqual(
-            viewModel.notice?.title,
-            "Couldn’t add emoji"
         )
     }
 
@@ -568,50 +546,6 @@ final class LibraryViewModelTests: XCTestCase {
         )
     }
 
-    func testAddsFilesToExistingPackThroughReviewedImport() async throws {
-        let fixture = try await makeFixture()
-        defer { try? FileManager.default.removeItem(at: fixture.workspace) }
-        let frog = try TestSupport.writeImage(
-            to: fixture.workspace.appendingPathComponent("frog.png")
-        )
-        let toad = try TestSupport.writeImage(
-            to: fixture.workspace.appendingPathComponent("toad.png"),
-            width: 3,
-            height: 3
-        )
-        let pack = try await install(
-            files: [frog],
-            name: "Pond",
-            into: fixture.store
-        )
-        var latestCallback: MojiPondLibrary?
-        let viewModel = makeViewModel(
-            fixture,
-            onMutation: {
-                latestCallback = $0
-            }
-        )
-        await viewModel.reload()
-
-        viewModel.prepareAddFiles([toad], to: pack.id)
-        await waitForImportPreparation(viewModel)
-        XCTAssertEqual(
-            viewModel.importSession?.destination,
-            .append(packID: pack.id)
-        )
-        XCTAssertTrue(viewModel.canInstallImport)
-        await viewModel.installPreparedImport()
-
-        let updated = try XCTUnwrap(
-            latestCallback?.packs.first(where: { $0.id == pack.id })
-        )
-        XCTAssertEqual(
-            updated.items.map(\.shortcode.rawValue).sorted(),
-            ["frog", "toad"]
-        )
-        XCTAssertEqual(viewModel.scope, .pack(pack.id))
-    }
-
     func testReplacesPackContentsWithoutSelfCollision() async throws {
         let fixture = try await makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.workspace) }
@@ -623,6 +557,15 @@ final class LibraryViewModelTests: XCTestCase {
             width: 4,
             height: 4
         )
+        let archive = fixture.workspace.appendingPathComponent("newt.zip")
+        try TestZipBuilder.archive(
+            entries: [
+                .init(
+                    path: "newt.png",
+                    data: try Data(contentsOf: newt)
+                )
+            ]
+        ).write(to: archive)
         let pack = try await install(
             files: [frog],
             name: "Pond",
@@ -631,7 +574,7 @@ final class LibraryViewModelTests: XCTestCase {
         let viewModel = makeViewModel(fixture)
         await viewModel.reload()
 
-        viewModel.prepareReplacement(from: [newt], for: pack.id)
+        viewModel.prepareReplacement(fromZIP: archive, for: pack.id)
         await waitForImportPreparation(viewModel)
         let session = try XCTUnwrap(viewModel.importSession)
         XCTAssertEqual(session.destination, .replace(packID: pack.id))
@@ -676,25 +619,19 @@ final class LibraryViewModelTests: XCTestCase {
         )
     }
 
-    func testCreatesEditsReplacesAndRemovesThroughViewModel() async throws {
+    func testEditsAndRemovesThroughViewModel() async throws {
         let fixture = try await makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.workspace) }
-        let viewModel = makeViewModel(fixture)
-        await viewModel.reload()
-
-        var draft = LibraryPackDraft()
-        draft.name = "My Pond"
-        draft.author = "Raj"
-        let created = await viewModel.createPack(draft)
-        XCTAssertTrue(created)
-        let pack = try XCTUnwrap(viewModel.selectedPack)
-
         let frog = try TestSupport.writeImage(
             to: fixture.workspace.appendingPathComponent("frog.png")
         )
-        viewModel.prepareAddFiles([frog], to: pack.id)
-        await waitForImportPreparation(viewModel)
-        await viewModel.installPreparedImport()
+        let pack = try await install(
+            files: [frog],
+            name: "My Pond",
+            into: fixture.store
+        )
+        let viewModel = makeViewModel(fixture)
+        await viewModel.reload()
 
         let installedItem = try XCTUnwrap(
             viewModel.library.packs
@@ -732,12 +669,24 @@ final class LibraryViewModelTests: XCTestCase {
         )
     }
 
-    func testCreatesSearchesAndCopiesUnicodeItemThroughViewModel()
+    func testSearchesAndCopiesImportedUnicodeItemThroughViewModel()
         async throws
     {
         let fixture = try await makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.workspace) }
         let pack = try await fixture.store.createPack(name: "Pond")
+        _ = try await fixture.store.createUnicodeItem(
+            in: pack.id,
+            shortcode: Shortcode(validating: "pond_coder"),
+            unicode: "👨🏽‍💻",
+            aliases: [
+                Shortcode(validating: "frog_dev"),
+                Shortcode(validating: "ship_it")
+            ],
+            displayName: "Pond Coder",
+            tags: ["frog", "code"],
+            category: "Pond"
+        )
         let pasteboard = FakePasteboard()
         let viewModel = makeViewModel(
             fixture,
@@ -745,16 +694,6 @@ final class LibraryViewModelTests: XCTestCase {
         )
         await viewModel.reload()
 
-        var draft = LibraryUnicodeItemDraft(packID: pack.id)
-        draft.unicode = "👨🏽‍💻"
-        draft.shortcode = ":pond_coder:"
-        draft.aliases = "frog_dev, ship_it"
-        draft.displayName = "Pond Coder"
-        draft.tags = "frog, code"
-        draft.category = "Pond"
-
-        let created = await viewModel.createUnicodeItem(draft)
-        XCTAssertTrue(created)
         viewModel.scope = .pack(pack.id)
         viewModel.searchText = "frog_dev"
         let displayItem = try XCTUnwrap(viewModel.visibleItems.first)
@@ -766,81 +705,6 @@ final class LibraryViewModelTests: XCTestCase {
             pasteboard.items.first?.representations.first?.data,
             Data("👨🏽‍💻".utf8)
         )
-
-        draft.shortcode = "plain_text"
-        draft.unicode = "hello"
-        let rejected = await viewModel.createUnicodeItem(draft)
-        XCTAssertFalse(rejected)
-        XCTAssertEqual(viewModel.notice?.kind, .error)
-        let snapshot = try await fixture.store.snapshot()
-        XCTAssertEqual(snapshot.packs.first?.items.count, 1)
-    }
-
-    func testGitHubRevisionCheckPersistsCheckWithoutDownloadingArchive()
-        async throws
-    {
-        let fixture = try await makeFixture()
-        defer { try? FileManager.default.removeItem(at: fixture.workspace) }
-        let source = PackSource(
-            kind: .github,
-            displayLocation:
-                "https://github.com/knobiknows/all-the-bufo",
-            github: GitHubPackSource(
-                owner: "knobiknows",
-                repository: "all-the-bufo",
-                ref: "main"
-            )
-        )
-        let pack = try await fixture.store.createPack(
-            name: "All the Bufo",
-            source: source
-        )
-        let installedRevision = String(repeating: "a", count: 40)
-        let latestRevision = String(repeating: "b", count: 40)
-        try await fixture.store.markPackChecked(
-            pack.id,
-            sourceRevision: installedRevision
-        )
-        let resolver = RecordingRevisionResolver(
-            result: GitHubResolvedRevision(
-                requestedReference: try GitHubRepositoryReference(
-                    owner: "knobiknows",
-                    repository: "all-the-bufo",
-                    ref: "main"
-                ),
-                commitSHA: latestRevision,
-                sourceETag: "\"latest\""
-            )
-        )
-        let viewModel = makeViewModel(
-            fixture,
-            githubRevisionResolver: resolver
-        )
-        await viewModel.reload()
-
-        await viewModel.checkGitHubRevision(
-            for: pack.id,
-            networkAccessGranted: true
-        )
-
-        XCTAssertEqual(
-            viewModel.githubRevisionState(for: pack.id),
-            .updateAvailable(
-                installed: installedRevision,
-                latest: latestRevision
-            )
-        )
-        let resolverCallCount = await resolver.recordedCallCount()
-        XCTAssertEqual(resolverCallCount, 1)
-        let updated = try XCTUnwrap(
-            viewModel.library.packs.first(where: { $0.id == pack.id })
-        )
-        XCTAssertEqual(
-            updated.updateMetadata.sourceRevision,
-            installedRevision
-        )
-        XCTAssertEqual(updated.updateMetadata.sourceETag, "\"latest\"")
-        XCTAssertNotNil(updated.updateMetadata.lastCheckedAt)
     }
 
     func testCancelsAsynchronousPreparationImmediately() async throws {
@@ -931,8 +795,6 @@ final class LibraryViewModelTests: XCTestCase {
         _ fixture: Fixture,
         pasteboard: any PasteboardAccessing = FakePasteboard(),
         usageStore: (any EmojiUsageStore)? = nil,
-        githubRevisionResolver:
-            (any LibraryGitHubRevisionResolving)? = nil,
         onUsageMutation:
             @escaping LibraryViewModel.UsageMutationCallback = {},
         onMutation: @escaping LibraryViewModel.MutationCallback = { _ in }
@@ -940,7 +802,6 @@ final class LibraryViewModelTests: XCTestCase {
         LibraryViewModel(
             store: fixture.store,
             paths: fixture.paths,
-            githubRevisionResolver: githubRevisionResolver,
             builtInLoader: { Self.builtInPack() },
             pasteboard: pasteboard,
             usageStore: usageStore,
@@ -1122,28 +983,5 @@ private actor ControlledImporter: LibraryImportPreparing {
         continuations.removeValue(forKey: name)?.resume(
             returning: preparation
         )
-    }
-}
-
-private actor RecordingRevisionResolver:
-    LibraryGitHubRevisionResolving {
-    private let result: GitHubResolvedRevision
-    private var callCount = 0
-
-    init(result: GitHubResolvedRevision) {
-        self.result = result
-    }
-
-    func resolveRevision(
-        from repositoryURL: URL,
-        ref: String?,
-        subdirectory: String?
-    ) async throws -> GitHubResolvedRevision {
-        callCount += 1
-        return result
-    }
-
-    func recordedCallCount() -> Int {
-        callCount
     }
 }

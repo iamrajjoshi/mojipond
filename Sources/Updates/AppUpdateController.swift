@@ -53,7 +53,18 @@ struct BundledUpdateConfigurationLoader {
         automaticChecksEnabled: Bool
     ) -> SignedUpdateConfiguration {
         load(
-            infoDictionary: bundle.infoDictionary ?? [:],
+            feedURLValue: stringValue(
+                in: bundle,
+                for: feedURLKey
+            ),
+            publicKeyValue: stringValue(
+                in: bundle,
+                for: publicKeyKey
+            ),
+            algorithmValue: stringValue(
+                in: bundle,
+                for: algorithmKey
+            ),
             automaticChecksEnabled: automaticChecksEnabled
         )
     }
@@ -62,23 +73,34 @@ struct BundledUpdateConfigurationLoader {
         bundle: Bundle = .main
     ) -> String? {
         nonemptyString(
-            bundle.infoDictionary?[teamIdentifierKey]
+            stringValue(in: bundle, for: teamIdentifierKey)
         )
     }
 
     static func load(
-        infoDictionary: [String: Any],
+        infoDictionary: [String: String],
         automaticChecksEnabled: Bool
     ) -> SignedUpdateConfiguration {
-        let feedURL = nonemptyString(
-            infoDictionary[feedURLKey]
-        ).flatMap(URL.init(string:))
-        let keyData = nonemptyString(
-            infoDictionary[publicKeyKey]
-        ).flatMap { Data(base64Encoded: $0) }
-        let algorithm = nonemptyString(
-            infoDictionary[algorithmKey]
-        ).flatMap(UpdateSignatureAlgorithm.init(rawValue:))
+        load(
+            feedURLValue: infoDictionary[feedURLKey],
+            publicKeyValue: infoDictionary[publicKeyKey],
+            algorithmValue: infoDictionary[algorithmKey],
+            automaticChecksEnabled: automaticChecksEnabled
+        )
+    }
+
+    private static func load(
+        feedURLValue: String?,
+        publicKeyValue: String?,
+        algorithmValue: String?,
+        automaticChecksEnabled: Bool
+    ) -> SignedUpdateConfiguration {
+        let feedURL = nonemptyString(feedURLValue)
+            .flatMap(URL.init(string:))
+        let keyData = nonemptyString(publicKeyValue)
+            .flatMap { Data(base64Encoded: $0) }
+        let algorithm = nonemptyString(algorithmValue)
+            .flatMap(UpdateSignatureAlgorithm.init(rawValue:))
 
         let publicKey: UpdateVerificationKey?
         switch (algorithm, keyData) {
@@ -97,20 +119,29 @@ struct BundledUpdateConfigurationLoader {
         )
     }
 
-    private static func nonemptyString(_ value: Any?) -> String? {
+    private static func stringValue(
+        in bundle: Bundle,
+        for key: String
+    ) -> String? {
+        bundle.object(forInfoDictionaryKey: key) as? String
+    }
+
+    private static func nonemptyString(_ value: String?) -> String? {
         guard
-            let string = value as? String,
-            !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let value,
+            !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else {
             return nil
         }
-        return string
+        return value
     }
 }
 
 @MainActor
 final class AppUpdateController: ObservableObject {
-    private typealias OperationID = UInt64
+    private struct OperationID: Equatable, Sendable {
+        var rawValue: UInt64
+    }
 
     static let defaultAutomaticCheckInterval: TimeInterval = 24 * 60 * 60
 
@@ -150,7 +181,7 @@ final class AppUpdateController: ObservableObject {
     private var activeStager: (any VerifiedUpdateStaging)?
     private var activeStagerOperationID: OperationID?
     private var lastAvailableMetadata: VerifiedUpdateMetadata?
-    private var lastOperationID: OperationID = 0
+    private var lastOperationID = OperationID(rawValue: 0)
     private var installerHandoffCompleted = false
     private var automaticChecksEnabled = false
 
@@ -635,10 +666,10 @@ final class AppUpdateController: ObservableObject {
 
     private func makeOperationID() -> OperationID {
         precondition(
-            lastOperationID < .max,
+            lastOperationID.rawValue < .max,
             "Update operation identifier exhausted."
         )
-        lastOperationID += 1
+        lastOperationID.rawValue += 1
         return lastOperationID
     }
 

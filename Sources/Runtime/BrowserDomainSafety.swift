@@ -38,7 +38,7 @@ protocol BrowserAccessibilityReading: Sendable {
 
 enum BrowserAccessibilityReadError: Error, Equatable {
     case invalidAttributeValue(String)
-    case axFailure(operation: String, code: Int32)
+    case axFailure(operation: String, code: AXError)
 }
 
 final class MacBrowserAccessibilityReader:
@@ -170,7 +170,7 @@ final class MacBrowserAccessibilityReader:
         guard error == .success else {
             throw BrowserAccessibilityReadError.axFailure(
                 operation: operation,
-                code: error.rawValue
+                code: error
             )
         }
         return value

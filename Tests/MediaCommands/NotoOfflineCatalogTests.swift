@@ -96,7 +96,7 @@ private struct ManifestOverrideProvider: NotoOfflineResourceProviding {
 private struct UnexpectedRemoteDownloader: MediaCommandRemoteDownloading {
     func downloadOriginal(
         _: RemoteMediaItem
-    ) async throws -> MediaCommandDownload {
+    ) async throws -> MediaDownload {
         throw UnexpectedRemoteDownloadError()
     }
 }

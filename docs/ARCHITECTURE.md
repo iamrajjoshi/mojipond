@@ -65,7 +65,7 @@ token range, and token content.
 | `Sources/Runtime` | Event-to-parser bridge, safety policy, browser host lookup, Unicode and media popup state, managed-media revalidation, and autocomplete lifecycle |
 | `Sources/SystemIntegration` | macOS permission preflights, event tap, Accessibility text adapter, caret geometry, pasteboard transactions, and insertion |
 | `Sources/Library` | Versioned library model, asset validation, collision resolution, persistence, ZIP handling, and pack source metadata |
-| `Sources/Importing` | ZIP orchestration plus retained local, Slack, and public-GitHub import engines with bounded network and temporary storage |
+| `Sources/Importing` | ZIP orchestration plus local, Slack, and public-GitHub import engines with bounded network and temporary storage |
 | `Sources/Media` | Noto client, direct HTTPS downloads, and bounded disk-cache primitives |
 | `Sources/MediaCommands` | Messages-only `/sticker` parser, state machine, result grid, offline catalog, and asset resolution |
 | `Sources/Updates` | Signed-feed verification, explicit bounded asset download, hostile ZIP inspection, Developer ID and Gatekeeper validation, private staging, and a locked one-executable installer with atomic replacement, readiness acknowledgement, and rollback |
@@ -185,10 +185,10 @@ through a bounded `O_NOFOLLOW` file descriptor, then locked read-only.
 MojiPond validates central and local ZIP headers before invoking the system
 `ditto` extractor with closed stdin, and accepts the result only when a second
 walk exactly matches the validated regular-file tree. The snapshot and
-extraction are deleted after preparation. The retained, unexposed GitHub engine
+extraction are deleted after preparation. The internal GitHub engine
 accepts public `https://github.com` URLs, resolves the requested ref to a commit
-through the GitHub API, and downloads from GitHub’s codeload host. The retained
-remote-Slack path and all redirects remain HTTPS-only. They also reject
+through the GitHub API, and downloads from GitHub’s codeload host. The remote
+Slack path and all redirects remain HTTPS-only. Both paths reject
 credentials, custom ports, localhost and `.local` names, and non-public IPv4 or
 IPv6 literals and DNS answers on the initial request and every redirect. The
 current public UI invokes neither network import path.
@@ -246,8 +246,8 @@ Every user-facing online feature has its own preference and defaults to off:
 
 The offline Noto subset and built-in Unicode catalog require no network.
 Selected online Noto originals may use the bounded on-demand disk cache. ZIP
-import preparation is local and does not grant either retained network-import
-engine permission to run.
+import preparation is local and never invokes the internal network import
+engines.
 
 Update checking requires both an HTTPS feed and a bundled trusted public key.
 Manual checks are available from the status menu and About settings;
@@ -299,7 +299,7 @@ installer remove the backup and staging directory. Any failure after the
 exchange terminates the attempted launch, restores the backup, and re-verifies
 the restored app.
 
-Only an unwritable destination parent enables the honest Finder/manual
+Only an unwritable destination parent enables the Finder/manual
 replacement fallback. Unsafe paths, signature or identity failures, lock
 contention, timeouts, and failed rollback remain hard failures.
 
@@ -309,8 +309,9 @@ Most core and safety behavior is dependency-injected and covered without
 global permissions: fake Accessibility targets, permission providers, event
 monitors, pasteboards, HTTP transports, caches, signed feeds, update assets,
 archive extraction, and code-signature identities. Portable-format tests cover
-v1 compatibility, v2 mixed content, validation, and round trips. Library UI
-tests cover custom Unicode creation, search, rejection, and clipboard output.
+v1 compatibility, v2 mixed content, validation, and round trips. Library store
+tests cover custom Unicode creation and rejection; Library UI tests cover
+search and clipboard output for imported Unicode entries.
 Update tests cover bounded download, digest checks, archive layout, app
 metadata, signature policy, same-team policy, installer handoff validation,
 copy and rename failures, final verification, relaunch readiness, rollback,

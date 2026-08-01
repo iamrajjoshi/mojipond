@@ -82,8 +82,8 @@ struct LibraryItemDetailView: View {
 
             if showsPersonalAliasEditor {
                 personalAliasEditor
-            } else if let draft {
-                customEditor(draft)
+            } else if draft != nil {
+                customEditor
             } else {
                 builtInDetails
             }
@@ -119,8 +119,8 @@ struct LibraryItemDetailView: View {
             if let notice = viewModel.notice {
                 Section {
                     HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: noticeSymbol(for: notice.kind))
-                            .foregroundStyle(noticeTint(for: notice.kind))
+                        Image(systemName: notice.kind.symbolName)
+                            .foregroundStyle(notice.kind.tint)
                             .accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(notice.title)
@@ -175,7 +175,7 @@ struct LibraryItemDetailView: View {
         }
     }
 
-    private func customEditor(_ draft: LibraryItemDraft) -> some View {
+    private var customEditor: some View {
         Form {
             Section("Autocomplete") {
                 TextField(
@@ -310,9 +310,9 @@ struct LibraryItemDetailView: View {
                         notice.message.isEmpty
                             ? notice.title
                             : "\(notice.title): \(notice.message)",
-                        systemImage: noticeSymbol(for: notice.kind)
+                        systemImage: notice.kind.symbolName
                     )
-                    .foregroundStyle(noticeTint(for: notice.kind))
+                    .foregroundStyle(notice.kind.tint)
                 }
             }
 
@@ -459,26 +459,6 @@ struct LibraryItemDetailView: View {
         }
     }
 
-    private func noticeSymbol(
-        for kind: LibraryNotice.Kind
-    ) -> String {
-        switch kind {
-        case .information: "checkmark.circle.fill"
-        case .warning: "exclamationmark.triangle.fill"
-        case .error: "xmark.octagon.fill"
-        }
-    }
-
-    private func noticeTint(
-        for kind: LibraryNotice.Kind
-    ) -> Color {
-        switch kind {
-        case .information: PondDesign.lily
-        case .warning: PondDesign.warningForeground
-        case .error: PondDesign.errorForeground
-        }
-    }
-
     private func draftBinding(
         _ keyPath: WritableKeyPath<LibraryItemDraft, String>
     ) -> Binding<String> {
@@ -551,18 +531,10 @@ struct LibraryPackDetailView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Toggle(
-                        "Enabled",
-                        isOn: Binding(
-                            get: { pack.isEnabled },
-                            set: { enabled in
-                                Task {
-                                    await viewModel.setPackEnabled(pack.id, isEnabled: enabled)
-                                }
-                            }
-                        )
+                    LibraryPackEnabledToggle(
+                        viewModel: viewModel,
+                        pack: pack
                     )
-                    .toggleStyle(.switch)
                 }
                 .padding(20)
 
@@ -633,9 +605,9 @@ struct LibraryPackDetailView: View {
                                 notice.message.isEmpty
                                     ? notice.title
                                     : "\(notice.title): \(notice.message)",
-                                systemImage: noticeSymbol(for: notice.kind)
+                                systemImage: notice.kind.symbolName
                             )
-                            .foregroundStyle(noticeTint(for: notice.kind))
+                            .foregroundStyle(notice.kind.tint)
                         }
                     }
                 }
@@ -649,18 +621,10 @@ struct LibraryPackDetailView: View {
                         dismiss()
                     }
                     Spacer()
-                    Button("Move Up") {
-                        Task {
-                            await viewModel.movePack(pack.id, by: -1)
-                        }
-                    }
-                    .disabled(!viewModel.canMovePack(pack.id, by: -1))
-                    Button("Move Down") {
-                        Task {
-                            await viewModel.movePack(pack.id, by: 1)
-                        }
-                    }
-                    .disabled(!viewModel.canMovePack(pack.id, by: 1))
+                    LibraryPackMoveButtons(
+                        viewModel: viewModel,
+                        packID: pack.id
+                    )
                     Button("Done") {
                         dismiss()
                     }
@@ -704,20 +668,14 @@ struct LibraryPackDetailView: View {
     }
 
     private func chooseReplacementZIP(for pack: EmojiPack) {
-        let panel = NSOpenPanel()
-        panel.title = "Choose replacement ZIP for \(pack.name)"
-        panel.prompt = "Review"
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [.zip]
-        guard panel.runModal() == .OK, let url = panel.url else {
+        guard let url = LibraryZIPPicker.choose(
+            title: "Choose replacement ZIP for \(pack.name)"
+        ) else {
             return
         }
         viewModel.prepareReplacement(
-            from: [url],
-            for: pack.id,
-            allowRemoteSlackAssets: false
+            fromZIP: url,
+            for: pack.id
         )
         dismiss()
     }
@@ -732,21 +690,6 @@ struct LibraryPackDetailView: View {
         return safe.isEmpty ? "Emoji Pack" : safe
     }
 
-    private func noticeSymbol(for kind: LibraryNotice.Kind) -> String {
-        switch kind {
-        case .information: "checkmark.circle.fill"
-        case .warning: "exclamationmark.triangle.fill"
-        case .error: "xmark.octagon.fill"
-        }
-    }
-
-    private func noticeTint(for kind: LibraryNotice.Kind) -> Color {
-        switch kind {
-        case .information: PondDesign.lily
-        case .warning: PondDesign.warningForeground
-        case .error: PondDesign.errorForeground
-        }
-    }
 }
 
 struct LibraryBuiltInPackDetailView: View {

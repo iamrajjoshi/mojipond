@@ -266,10 +266,9 @@ before launch. The backup is removed only
 after the final app writes a private readiness acknowledgement; failures
 restore and re-verify the previous app.
 
-If the installed app's parent directory is not writable, MojiPond does not
-pretend installation succeeded: it offers the verified candidate in Finder for
-manual replacement. Unsafe paths or identity failures never receive that
-fallback. See
+If the installed app's parent directory is not writable, MojiPond opens the
+verified candidate in Finder for manual replacement. Unsafe paths or identity
+failures never receive that fallback. See
 [docs/RELEASING.md](docs/RELEASING.md) for the release-side requirements.
 
 The example environment file contains local build and packaging settings:

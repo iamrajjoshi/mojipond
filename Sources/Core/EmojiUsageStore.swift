@@ -75,7 +75,6 @@ protocol EmojiUsageStore: Sendable {
     func setFavorite(_ isFavorite: Bool, itemID: EmojiItem.ID) async throws
     func setCustomAliases(_ aliases: [String], itemID: EmojiItem.ID) async throws
     func setPreferredSkinTone(_ skinTone: EmojiSkinTone?, itemID: EmojiItem.ID) async throws
-    func resetUsageRanking() async throws
 }
 
 actor InMemoryEmojiUsageStore: EmojiUsageStore {

@@ -1420,27 +1420,6 @@ struct SystemNativeUpdateReadinessCoordinator:
         )
     }
 
-    static func signalIfRequested(
-        arguments: [String],
-        applicationURL: URL,
-        temporaryDirectoryURL: URL =
-            FileManager.default.temporaryDirectory,
-        bundleInspector: any NativeUpdateBundleInspecting =
-            SystemNativeUpdateBundleInspector()
-    ) throws -> Bool {
-        guard let request =
-            NativeUpdateReadinessRequest.parse(arguments: arguments) else {
-            return false
-        }
-        try signal(
-            request,
-            applicationURL: applicationURL,
-            temporaryDirectoryURL: temporaryDirectoryURL,
-            bundleInspector: bundleInspector
-        )
-        return true
-    }
-
     static func signal(
         _ request: NativeUpdateReadinessRequest,
         applicationURL: URL,
