@@ -1,23 +1,26 @@
 :root {
   color-scheme: light;
   --content-width: min(calc(100% - 48px), 1160px);
-  --font-display: "Newsreader Variable", "Iowan Old Style", Georgia, serif;
+  --font-display: "Manrope Variable", "Avenir Next", system-ui, sans-serif;
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  --paper: #f7f4ec;
-  --paper-strong: #fffdf7;
-  --mist: #e8f0eb;
+  --paper: #f5f7f0;
+  --paper-strong: #fffefa;
+  --mist: #e8f1ed;
   --sky: #d9efec;
-  --navy: #082f36;
-  --ink: #17383d;
-  --ink-muted: #4a6264;
-  --teal: #176d70;
-  --moss: #6f8b52;
-  --coral: #ee795f;
-  --line: rgb(8 47 54 / 14%);
-  --soft-shadow: 0 24px 70px rgb(7 44 50 / 16%);
-  font-family:
-    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Avenir Next", system-ui,
-    sans-serif;
+  --deep-water: #06333d;
+  --pond: #0d576e;
+  --ripple: #218fa3;
+  --lily: #126129;
+  --lotus: #c23d59;
+  --navy: var(--deep-water);
+  --ink: #173b42;
+  --ink-muted: #4b6568;
+  --teal: var(--pond);
+  --moss: #66834f;
+  --coral: var(--lotus);
+  --line: rgb(6 51 61 / 14%);
+  --soft-shadow: 0 24px 70px rgb(6 51 61 / 16%);
+  font-family: var(--font-display);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -55,9 +58,10 @@ summary {
 a,
 button {
   transition:
-    color 160ms ease,
-    background-color 160ms ease,
-    border-color 160ms ease;
+    color 260ms cubic-bezier(0.32, 0.72, 0, 1),
+    background-color 260ms cubic-bezier(0.32, 0.72, 0, 1),
+    border-color 260ms cubic-bezier(0.32, 0.72, 0, 1),
+    transform 260ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 a:focus-visible,
@@ -83,7 +87,7 @@ h1,
 h2,
 h3 {
   font-family: var(--font-display);
-  font-weight: 520;
+  font-weight: 600;
   text-wrap: balance;
 }
 
@@ -94,21 +98,21 @@ dd {
 }
 
 h1 {
-  font-size: clamp(3.9rem, 7.2vw, 6.7rem);
-  line-height: 0.9;
-  letter-spacing: -0.045em;
+  font-size: 4.5rem;
+  line-height: 1;
+  letter-spacing: -0.05em;
 }
 
 h2 {
-  font-size: clamp(2.6rem, 5vw, 4.4rem);
-  line-height: 0.98;
-  letter-spacing: -0.035em;
+  font-size: 3rem;
+  line-height: 1;
+  letter-spacing: -0.045em;
 }
 
 h3 {
-  font-size: 1.35rem;
-  line-height: 1.2;
-  letter-spacing: -0.02em;
+  font-size: 1.5rem;
+  line-height: 2rem;
+  letter-spacing: -0.025em;
 }
 
 p {
@@ -141,23 +145,23 @@ code,
   margin-bottom: 12px;
   color: var(--teal);
   font-size: 0.78rem;
-  font-weight: 750;
+  font-weight: 700;
   letter-spacing: 0.08em;
 }
 
 .button {
   display: inline-flex;
-  min-height: 46px;
-  padding: 10px 17px;
+  min-height: 44px;
+  padding: 8px 16px;
   align-items: center;
   justify-content: center;
   color: var(--navy);
-  font-size: 0.95rem;
-  font-weight: 720;
+  font-size: 1rem;
+  font-weight: 700;
   text-decoration: none;
   background: var(--paper-strong);
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 12px;
 }
 
 .button.primary {
@@ -176,6 +180,10 @@ code,
   background: var(--teal);
 }
 
+.button:active {
+  transform: translateY(1px) scale(0.98);
+}
+
 .section-shell {
   width: var(--content-width);
   margin: 0 auto;
@@ -189,15 +197,16 @@ code,
 
 .legal-page h1 {
   margin-bottom: 24px;
-  font-size: clamp(3.1rem, 8vw, 5.6rem);
+  font-size: 3.75rem;
 }
 
 .legal-page h2 {
   margin-top: 52px;
   font-family: inherit;
-  font-size: 1.4rem;
-  font-weight: 760;
-  letter-spacing: -0.025em;
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 2rem;
+  letter-spacing: -0.03em;
 }
 
 .legal-page p,
@@ -222,17 +231,31 @@ code,
   display: none !important;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  white-space: nowrap;
+  border: 0;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+}
+
 @media (max-width: 700px) {
   :root {
     --content-width: min(calc(100% - 32px), 1160px);
   }
 
   h1 {
-    font-size: clamp(3.4rem, 16vw, 5rem);
+    font-size: 3rem;
   }
 
   h2 {
-    font-size: clamp(2.45rem, 12vw, 3.7rem);
+    font-size: 2.25rem;
+    line-height: 2.5rem;
   }
 
   .legal-page {

@@ -1,37 +1,39 @@
 ---
 import { Image } from "astro:assets";
 import caretSuggestions from "../../../docs/screenshots/caret-suggestions.png";
-import emojiBrowser from "../../../docs/screenshots/emoji-browser-dark.png";
-import importPreview from "../../../docs/screenshots/import-preview.png";
-import library from "../../../docs/screenshots/library.png";
 import PondScene from "../components/PondScene.astro";
-import ReleaseAction from "../components/ReleaseAction.astro";
+import ShortcodeDemo from "../components/ShortcodeDemo.astro";
 import BaseLayout from "../layouts/BaseLayout.astro";
 
-const title = "MojiPond — :emoji: autocomplete and custom packs for macOS";
+const title = "MojiPond — emoji shortcuts and custom packs for macOS";
 const description =
-  "Type :emoji: shortcuts beside the caret on macOS. MojiPond includes Unicode emoji and custom packs imported from ZIP.";
+  "Type emoji shortcuts beside the cursor on macOS, then choose with the arrow keys and keep writing.";
 
-const faqItems = [
+const details = [
   {
-    question: "Where does it work?",
+    question: "What happens?",
     answer:
-      "Unicode shortcuts work in supported macOS text fields. MojiPond stays out of password fields, terminals, remote desktop apps, Slack, Discord, and apps or sites you exclude. Custom image insertion works only in Messages.",
-  },
-  {
-    question: "Why does it need macOS permissions?",
-    answer:
-      "Input Monitoring detects a shortcut; Accessibility finds the caret and replaces the token. Event Posting is optional and only needed for image insertion or send-after-insert in Messages.",
-  },
-  {
-    question: "What ZIP files can I import?",
-    answer:
-      "Import one ZIP containing PNG, JPEG, GIF, or WebP files, or a Slack-style emoji.json file with local artwork. MojiPond shows naming conflicts before installing the pack.",
+      "Type a colon and a name. A picker opens beside your cursor. Choose with the arrow keys, then press Tab or Return.",
   },
   {
     question: "What happens to animated emoji?",
     answer:
-      "The original file stays in your library. Messages inserts its first frame so the image can scale with nearby text.",
+      "On macOS 15 or later, MojiPond prepares frame 0 as a static inline glyph. macOS 14 uses a media fallback. The original animation stays in your library.",
+  },
+  {
+    question: "What ZIP files can I import?",
+    answer:
+      "A ZIP can contain a folder of PNG, JPEG, GIF, or WebP files, a mojipond.json manifest, or a Slack emoji.json file with local artwork. You review names and conflicts before anything installs.",
+  },
+  {
+    question: "Why does it need macOS permissions?",
+    answer:
+      "Input Monitoring lets MojiPond notice a shortcut. Accessibility finds the cursor and replaces the selected token. Event Posting is optional for Unicode shortcuts; MojiPond uses it to paste custom images in Messages and to replay Return when you enable Return to send.",
+  },
+  {
+    question: "Where does it work?",
+    answer:
+      "Shortcuts work in supported text fields on macOS 14 or newer. MojiPond stays out of password fields, terminals, remote desktop apps, Slack, Discord, and anything you exclude. Custom images insert only in Messages.",
   },
 ];
 ---
@@ -39,26 +41,23 @@ const faqItems = [
 <BaseLayout title={title} description={description}>
   <section class="hero" aria-labelledby="hero-title">
     <PondScene />
-    <div class="hero-wash" aria-hidden="true"></div>
     <div class="hero-copy">
-      <span class="hero-token shortcode">:emoji:</span>
       <h1 id="hero-title">
-        Your emoji,<br /><em>one colon away.</em>
+        Type <span class="shortcode">:wave:</span><br />Get 👋
       </h1>
       <p>
-        Type <code>:wave:</code>, choose with the arrow keys, and keep writing.
-        Use the built-in Unicode catalog or import your own pack from ZIP.
+        MojiPond puts emoji suggestions beside your cursor. Pick one and keep
+        typing.
       </p>
-      <ReleaseAction />
-      <span class="hero-fact"
-        >Native macOS app. No account or typing analytics.</span
+      <a class="button primary" href="#try"
+        >Try it <span aria-hidden="true">↓</span></a
       >
     </div>
 
     <figure class="hero-picker">
       <Image
         src={caretSuggestions}
-        alt="MojiPond suggestions beside a typed frog shortcode, with Frog selected"
+        alt="MojiPond suggestions beside a typed frog shortcut, with Frog selected"
         width={760}
         height={558}
         loading="eager"
@@ -68,516 +67,278 @@ const faqItems = [
   </section>
 
   <section
-    class="autocomplete section-shell"
-    id="how-it-works"
-    aria-labelledby="autocomplete-title"
+    class="demo-section section-shell"
+    id="try"
+    aria-labelledby="try-title"
   >
-    <div class="section-copy">
-      <h2 id="autocomplete-title">The picker stays with your text.</h2>
+    <div class="demo-intro">
+      <p class="eyebrow">Try it here</p>
+      <h2 id="try-title">Start with a colon.</h2>
       <p>
-        Start with a colon, move through the results with the arrow keys, then
-        press Tab or Return. Type <code>::</code> when you want the full browser.
+        Type <code>:wa</code>, use the arrow keys, then press Tab or Return. The
+        field below behaves like MojiPond's picker.
       </p>
     </div>
-
-    <ol class="key-flow" aria-label="How to insert an emoji">
-      <li><code>:wa</code><span>Start typing</span></li>
-      <li><kbd>↑</kbd><kbd>↓</kbd><span>Pick one</span></li>
-      <li><kbd>Tab</kbd><span>Insert</span></li>
-    </ol>
-
-    <figure class="product-shot browser-shot">
-      <Image
-        src={emojiBrowser}
-        alt="MojiPond's searchable emoji browser in dark appearance"
-        width={880}
-        height={642}
-      />
-    </figure>
+    <ShortcodeDemo />
   </section>
 
-  <section class="packs" id="packs" aria-labelledby="packs-title">
-    <div class="section-shell">
-      <div class="section-copy packs-copy">
-        <h2 id="packs-title">Bring your own emoji.</h2>
-        <p>
-          Import a ZIP containing PNG, JPEG, GIF, or WebP files. MojiPond reads
-          Slack-style <code>emoji.json</code> aliases and shows naming conflicts before
-          it installs the pack.
-        </p>
-      </div>
-
-      <div class="pack-shots">
-        <figure class="product-shot">
-          <Image
-            src={library}
-            alt="The MojiPond library showing built-in emoji and an imported custom pack"
-            width={920}
-            height={672}
-          />
-          <figcaption>Browse built-in and imported emoji together.</figcaption>
-        </figure>
-        <figure class="product-shot">
-          <Image
-            src={importPreview}
-            alt="MojiPond reviewing an emoji ZIP before installation"
-            width={760}
-            height={592}
-          />
-          <figcaption>
-            Review names and collisions before installing.
-          </figcaption>
-        </figure>
-      </div>
-    </div>
-  </section>
-
-  <section class="privacy" id="privacy" aria-labelledby="privacy-title">
-    <div class="privacy-inner section-shell">
-      <h2 id="privacy-title">Your typing stays on your Mac.</h2>
-      <div>
-        <p>
-          MojiPond watches only for an active shortcode. It doesn't log keys,
-          read your Messages database, create an account, or send app telemetry.
-        </p>
-        <a href="/privacy/">Read what each macOS permission does</a>
-      </div>
-    </div>
-  </section>
-
-  <section class="faq" id="faq" aria-labelledby="faq-title">
-    <div class="faq-inner section-shell">
-      <h2 id="faq-title">Questions before installing</h2>
-      <div class="faq-list">
-        {
-          faqItems.map((item) => (
-            <details>
-              <summary>{item.question}</summary>
-              <p>{item.answer}</p>
-            </details>
-          ))
-        }
-      </div>
-    </div>
+  <section
+    class="details-section section-shell"
+    aria-labelledby="details-title"
+  >
+    <h2 class="sr-only" id="details-title">About MojiPond</h2>
+    <dl class="details-list">
+      {
+        details.map((item) => (
+          <div class="detail-row">
+            <dt>{item.question}</dt>
+            <dd>{item.answer}</dd>
+          </div>
+        ))
+      }
+    </dl>
   </section>
 </BaseLayout>
 
 <style>
   .hero {
     position: relative;
-    width: min(calc(100% - 24px), 1540px);
-    height: calc(100svh - 24px);
-    min-height: 840px;
-    max-height: 980px;
-    margin: 12px auto 0;
+    width: 100%;
+    min-height: 100dvh;
     overflow: hidden;
     background: #d9efec;
-    border-radius: 28px;
     isolation: isolate;
-  }
-
-  .hero-wash {
-    position: absolute;
-    inset: 0;
-    z-index: 1;
-    background: linear-gradient(
-      180deg,
-      rgb(255 253 247 / 28%) 0,
-      rgb(255 253 247 / 10%) 42%,
-      transparent 66%
-    );
   }
 
   .hero-copy {
     position: relative;
     z-index: 2;
     display: flex;
-    width: min(calc(100% - 40px), 760px);
-    padding-top: 146px;
+    width: min(calc(100% - 48px), 760px);
+    padding-top: 128px;
     margin: 0 auto;
     align-items: center;
     flex-direction: column;
     text-align: center;
   }
 
-  .hero-token {
-    display: inline-flex;
-    padding: 7px 11px;
-    margin-bottom: 16px;
-    color: var(--navy);
-    font-size: 0.88rem;
-    font-weight: 700;
-    background: rgb(255 253 247 / 84%);
-    border: 1px solid rgb(8 47 54 / 10%);
-    border-radius: 9px;
-  }
-
   .hero h1 {
-    margin-bottom: 20px;
-    color: var(--navy);
+    margin-bottom: 24px;
+    color: var(--deep-water);
+    font-size: 4.5rem;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: -0.055em;
   }
 
-  .hero h1 em {
-    color: var(--teal);
-    font-weight: 430;
+  .hero h1 .shortcode {
+    color: var(--pond);
+    font-family: var(--font-mono);
+    font-size: 0.86em;
+    font-weight: 700;
+    letter-spacing: -0.06em;
   }
 
   .hero-copy > p {
     max-width: 620px;
-    margin-bottom: 16px;
-    color: #315256;
-    font-size: 1.08rem;
+    margin-bottom: 24px;
+    color: #244e54;
+    font-size: 1.125rem;
+    line-height: 1.75rem;
   }
 
-  .hero-copy :global(.release-action) {
-    justify-content: center;
-    margin-top: 2px;
-  }
-
-  .hero-fact {
-    margin-top: 14px;
-    color: #456367;
-    font-size: 0.8rem;
-    font-weight: 620;
+  .hero-copy .button {
+    gap: 8px;
   }
 
   .hero-picker {
     position: absolute;
-    bottom: -52px;
+    bottom: -64px;
     left: 50%;
-    z-index: 3;
-    width: min(calc(100% - 48px), 570px);
+    z-index: 2;
+    width: min(calc(100% - 48px), 500px);
     margin: 0;
     overflow: hidden;
     background: var(--paper-strong);
-    border: 1px solid rgb(8 47 54 / 15%);
-    border-radius: 18px;
-    box-shadow: 0 36px 90px rgb(6 44 50 / 27%);
+    border: 1px solid rgb(6 51 61 / 18%);
+    border-radius: 24px;
+    box-shadow: 0 40px 96px rgb(6 51 61 / 24%);
     transform: translateX(-50%);
   }
 
-  .hero-picker img,
-  .product-shot img {
+  .hero-picker img {
     display: block;
     width: 100%;
     height: auto;
   }
 
-  .autocomplete {
-    padding: 124px 0 132px;
-  }
-
-  .section-copy {
+  .demo-section {
     display: grid;
-    grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
+    grid-template-columns: minmax(240px, 0.7fr) minmax(0, 1.3fr);
     gap: 80px;
-    align-items: end;
-    margin-bottom: 64px;
-  }
-
-  .section-copy h2,
-  .section-copy p {
-    margin-bottom: 0;
-  }
-
-  .section-copy p {
-    color: var(--ink-muted);
-    font-size: 1.04rem;
-  }
-
-  .key-flow {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    padding: 0;
-    margin: 0 0 40px;
-    list-style: none;
-    border-top: 1px solid var(--line);
-    border-bottom: 1px solid var(--line);
-  }
-
-  .key-flow li {
-    display: flex;
-    gap: 7px;
-    min-height: 70px;
-    padding: 18px 24px;
-    align-items: center;
-  }
-
-  .key-flow li + li {
-    border-left: 1px solid var(--line);
-  }
-
-  .key-flow code,
-  .key-flow kbd {
-    color: var(--navy);
-    font-family: var(--font-mono);
-    font-size: 0.84rem;
-    font-weight: 700;
-  }
-
-  .key-flow kbd {
-    min-width: 28px;
-    padding: 4px 6px;
-    text-align: center;
-    background: var(--paper-strong);
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    box-shadow: 0 1px 0 rgb(8 47 54 / 14%);
-  }
-
-  .key-flow span {
-    margin-left: auto;
-    color: var(--ink-muted);
-    font-size: 0.86rem;
-  }
-
-  .product-shot {
-    margin: 0;
-    overflow: hidden;
-    border: 1px solid var(--line);
-    border-radius: 18px;
-    box-shadow: var(--soft-shadow);
-  }
-
-  .browser-shot {
-    width: min(980px, 100%);
-    margin: 0 auto;
-    background: #071f23;
-  }
-
-  .packs {
-    padding: 120px 0 128px;
-    color: #f5f3eb;
-    background: var(--navy);
-  }
-
-  .packs-copy {
-    margin-bottom: 56px;
-  }
-
-  .packs-copy p {
-    color: #bfd0ce;
-  }
-
-  .packs-copy code {
-    color: white;
-  }
-
-  .pack-shots {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 24px;
+    padding-top: 96px;
+    padding-bottom: 96px;
     align-items: start;
   }
 
-  .pack-shots .product-shot {
-    background: #152f33;
-    border-color: rgb(255 255 255 / 13%);
-    box-shadow: 0 28px 72px rgb(0 17 20 / 30%);
+  .demo-intro {
+    padding-top: 48px;
   }
 
-  .pack-shots figcaption {
-    padding: 14px 16px 15px;
-    color: #b9cfcc;
-    font-size: 0.82rem;
+  .demo-intro h2 {
+    margin-bottom: 24px;
+    color: var(--deep-water);
+    font-size: 3rem;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: -0.045em;
   }
 
-  .privacy {
-    padding: 112px 0;
-    background: var(--mist);
-  }
-
-  .privacy-inner {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(320px, 0.85fr);
-    gap: 88px;
-    align-items: center;
-  }
-
-  .privacy h2 {
-    margin: 0;
-  }
-
-  .privacy p {
-    margin-bottom: 18px;
+  .demo-intro > p:last-child {
+    max-width: 430px;
+    margin-bottom: 0;
     color: var(--ink-muted);
-    font-size: 1.04rem;
+    font-size: 1rem;
+    line-height: 1.5rem;
   }
 
-  .privacy a {
-    color: var(--teal);
-    font-weight: 720;
-    text-underline-offset: 4px;
+  .demo-intro code {
+    color: var(--pond);
+    font-weight: 700;
   }
 
-  .faq {
-    padding: 120px 0 64px;
+  .details-section {
+    padding-top: 32px;
+    padding-bottom: 96px;
   }
 
-  .faq-inner > h2 {
-    max-width: 620px;
-    margin-bottom: 56px;
-  }
-
-  .faq-list {
+  .details-list {
+    padding: 0;
+    margin: 0;
     border-top: 1px solid var(--line);
   }
 
-  details {
+  .detail-row {
+    display: grid;
+    grid-template-columns: minmax(220px, 0.72fr) minmax(0, 1.28fr);
+    gap: 64px;
+    padding: 32px 0;
     border-bottom: 1px solid var(--line);
   }
 
-  summary {
-    position: relative;
-    padding: 24px 46px 24px 0;
-    color: var(--navy);
-    font-weight: 730;
-    cursor: pointer;
-    list-style: none;
+  dt {
+    color: var(--deep-water);
+    font-size: 1.25rem;
+    font-weight: 700;
+    line-height: 1.75rem;
   }
 
-  summary::-webkit-details-marker {
-    display: none;
-  }
-
-  summary::after {
-    position: absolute;
-    top: 19px;
-    right: 0;
-    display: grid;
-    width: 30px;
-    height: 30px;
-    place-items: center;
-    content: "+";
-    color: var(--teal);
-    font-size: 1.15rem;
-    border: 1px solid var(--line);
-    border-radius: 50%;
-  }
-
-  details[open] summary::after {
-    content: "−";
-  }
-
-  details p {
-    max-width: 760px;
-    padding: 0 48px 24px 0;
+  dd {
+    max-width: 680px;
     margin: 0;
     color: var(--ink-muted);
+    font-size: 1rem;
+    line-height: 1.5rem;
   }
 
   @media (max-width: 820px) {
-    .section-copy,
-    .privacy-inner {
-      grid-template-columns: 1fr;
-      gap: 24px;
-    }
-
-    .section-copy {
-      margin-bottom: 44px;
-    }
-
-    .key-flow li {
-      padding-inline: 16px;
-    }
-
-    .key-flow span {
-      display: none;
-    }
-  }
-
-  @media (max-width: 700px) {
-    .hero {
-      width: calc(100% - 16px);
-      height: 980px;
-      min-height: 0;
-      margin-top: 8px;
-      border-radius: 22px;
-    }
-
-    .hero-wash {
-      background: linear-gradient(
-        180deg,
-        rgb(255 253 247 / 24%) 0,
-        rgb(255 253 247 / 8%) 48%,
-        transparent 72%
-      );
-    }
-
     .hero-copy {
-      width: calc(100% - 32px);
-      padding-top: 104px;
-    }
-
-    .hero-token {
-      margin-bottom: 12px;
+      padding-top: 112px;
     }
 
     .hero h1 {
-      margin-bottom: 18px;
+      font-size: 3.75rem;
     }
 
-    .hero-copy > p {
-      max-width: 480px;
-      font-size: 0.98rem;
-    }
-
-    .hero-fact {
-      max-width: 290px;
-    }
-
-    .hero-picker {
-      bottom: 36px;
-      width: calc(100% - 28px);
-      border-radius: 14px;
-      box-shadow: 0 28px 70px rgb(6 44 50 / 24%);
-    }
-
-    .autocomplete,
-    .packs,
-    .privacy,
-    .faq {
-      padding-top: 82px;
-      padding-bottom: 88px;
-    }
-
-    .key-flow {
+    .demo-section {
       grid-template-columns: 1fr;
+      gap: 40px;
+      padding-top: 80px;
+      padding-bottom: 80px;
     }
 
-    .key-flow li {
-      justify-content: center;
+    .demo-intro {
+      padding-top: 0;
     }
 
-    .key-flow li + li {
-      border-top: 1px solid var(--line);
-      border-left: 0;
+    .demo-intro > p:last-child {
+      max-width: 620px;
     }
 
-    .pack-shots {
+    .detail-row {
       grid-template-columns: 1fr;
-    }
-
-    .privacy-inner {
-      gap: 30px;
-    }
-
-    .faq-inner > h2 {
-      margin-bottom: 38px;
+      gap: 12px;
     }
   }
 
-  @media (max-width: 420px) {
-    .hero {
-      height: 920px;
+  @media (max-width: 520px) {
+    .hero-copy {
+      width: calc(100% - 32px);
+      padding-top: 112px;
     }
 
+    .hero h1 {
+      margin-bottom: 16px;
+      font-size: 3rem;
+    }
+
+    .hero-copy > p {
+      margin-bottom: 24px;
+      font-size: 1rem;
+      line-height: 1.5rem;
+    }
+
+    .hero-picker {
+      bottom: -32px;
+      width: calc(100% - 24px);
+      border-radius: 16px;
+    }
+
+    .demo-section {
+      gap: 32px;
+      padding-top: 64px;
+      padding-bottom: 64px;
+    }
+
+    .demo-intro h2 {
+      margin-bottom: 16px;
+      font-size: 2.25rem;
+      line-height: 2.5rem;
+    }
+
+    .details-section {
+      padding-top: 16px;
+      padding-bottom: 64px;
+    }
+
+    .detail-row {
+      padding: 24px 0;
+    }
+  }
+
+  @media (max-height: 760px) and (min-width: 521px) {
     .hero-copy {
       padding-top: 96px;
     }
 
+    .hero h1 {
+      margin-bottom: 16px;
+      font-size: 3.75rem;
+    }
+
+    .hero-copy > p {
+      margin-bottom: 16px;
+    }
+
     .hero-picker {
-      bottom: 30px;
+      bottom: -56px;
+      width: 400px;
+    }
+  }
+
+  @media (max-height: 600px) {
+    .hero {
+      min-height: 760px;
     }
   }
 </style>
