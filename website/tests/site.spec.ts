@@ -98,7 +98,7 @@ test("headline skips animation when reduced motion is requested", async ({
   await expect(page.locator("[data-heading-final]")).toHaveCSS("opacity", "1");
 });
 
-test("hero demo types, replaces, and sends the shortcut", async ({ page }) => {
+test("hero demo receives, replies, sends once, and stops", async ({ page }) => {
   await page.goto("/");
 
   const demo = page.locator("[data-hero-demo]");
@@ -110,27 +110,40 @@ test("hero demo types, replaces, and sends the shortcut", async ({ page }) => {
     const demoMessage = document.querySelector<HTMLElement>(
       "[data-demo-message]",
     );
+    const incomingMessage = document.querySelector<HTMLElement>(
+      "[data-incoming-message]",
+    );
 
     return new Promise<{
       values: string[];
       phases: string[];
+      incomingVisibleBeforeTyping: boolean;
       sentBubbleVisible: boolean;
     }>((resolve, reject) => {
-      if (!demo || !input || !demoMessage) {
+      if (!demo || !input || !incomingMessage || !demoMessage) {
         reject(new Error("Hero demo is missing."));
         return;
       }
 
       const values = new Set<string>();
       const phases = new Set<string>();
+      let incomingVisibleBeforeTyping = false;
       const deadline = Date.now() + 14_000;
       const sample = () => {
         values.add(input.value);
         phases.add(demo.dataset.phase ?? "");
+        if (
+          demo.dataset.phase === "incoming" &&
+          !incomingMessage.hidden &&
+          input.value === ""
+        ) {
+          incomingVisibleBeforeTyping = true;
+        }
         if (demo.dataset.phase === "sent") {
           resolve({
             values: [...values],
             phases: [...phases],
+            incomingVisibleBeforeTyping,
             sentBubbleVisible: !demoMessage.hidden,
           });
           return;
@@ -153,13 +166,26 @@ test("hero demo types, replaces, and sends the shortcut", async ({ page }) => {
     ]),
   );
   expect(observed.phases).toEqual(
-    expect.arrayContaining(["accepting", "inserted", "sent"]),
+    expect.arrayContaining([
+      "incoming",
+      "typing",
+      "accepting",
+      "inserted",
+      "sent",
+    ]),
   );
+  expect(observed.incomingVisibleBeforeTyping).toBe(true);
   expect(observed.sentBubbleVisible).toBe(true);
   await expect(demo).toHaveAttribute("data-phase", "sent");
+  await expect(demo).toHaveAttribute("data-mode", "complete");
   await expect(page.locator("[data-demo-message]")).toContainText(
     "Yep, that fixed it — thanks for checking 👋",
   );
+  await page.waitForTimeout(2_600);
+  await expect(demo).toHaveAttribute("data-phase", "sent");
+  await expect(demo).toHaveAttribute("data-mode", "complete");
+  await expect(page.getByRole("combobox", { name: "Message" })).toHaveValue("");
+  await expect(page.locator("[data-demo-message]")).toBeVisible();
   await expect(page.getByRole("button", { name: "Pause demo" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Play demo" })).toHaveCount(0);
 });
@@ -405,6 +431,13 @@ test("source links stay minimal and point to GitHub", async ({
     expect((sourceBox?.y ?? 0) + (sourceBox?.height ?? 0)).toBeGreaterThan(
       (viewport?.height ?? 0) - 56,
     );
+    expect(
+      Math.abs(
+        (sourceBox?.x ?? 0) +
+          (sourceBox?.width ?? 0) / 2 -
+          (viewport?.width ?? 0) / 2,
+      ),
+    ).toBeLessThanOrEqual(1);
   }
   await expect(page.locator(".site-footer")).toHaveCount(0);
   await expect(sourceLinks).not.toContainText("©");
