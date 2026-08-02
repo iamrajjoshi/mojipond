@@ -12,6 +12,7 @@ const expectNoHorizontalOverflow = async (page: Page) => {
 };
 
 test("home page is a full-screen product landing page", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
 
   await expect(page).toHaveTitle(/MojiPond/);
@@ -48,7 +49,72 @@ test("home page is a full-screen product landing page", async ({ page }) => {
   ).toHaveAttribute("srcset", /2160w/);
   await expect(page.locator(".hero-picker-shell img")).toHaveCount(0);
   await expect(page.locator(".hero-picker-shell li")).toHaveCount(5);
+  await expect(page.locator(".hero-picker-shell li").last()).toBeVisible();
+  await expect(page.locator(".hero-picker-shell figcaption")).toBeVisible();
   await expectNoHorizontalOverflow(page);
+});
+
+test("hero demo types and replaces the shortcut", async ({ page }) => {
+  await page.goto("/");
+
+  const demo = page.locator("[data-hero-demo]");
+  const token = page.locator("[data-demo-token]");
+  const toggle = page.getByRole("button", { name: "Pause demo" });
+
+  await toggle.click();
+  await expect(page.getByRole("button", { name: "Play demo" })).toBeVisible();
+  await page.getByRole("button", { name: "Play demo" }).click();
+  const observedTokens = await page.evaluate(() => {
+    const demo = document.querySelector<HTMLElement>("[data-hero-demo]");
+    const token = document.querySelector<HTMLElement>("[data-demo-token]");
+
+    return new Promise<string[]>((resolve, reject) => {
+      if (!demo || !token) {
+        reject(new Error("Hero demo is missing."));
+        return;
+      }
+
+      const tokens = new Set<string>();
+      const deadline = Date.now() + 4_000;
+      const sample = () => {
+        tokens.add(token.textContent ?? "");
+        if (demo.dataset.phase === "inserted") {
+          resolve([...tokens]);
+          return;
+        }
+        if (Date.now() >= deadline) {
+          reject(new Error("Hero demo did not finish."));
+          return;
+        }
+        window.setTimeout(sample, 40);
+      };
+      sample();
+    });
+  });
+
+  expect(observedTokens).toEqual(
+    expect.arrayContaining(["", ":", ":w", ":wa", "👋"]),
+  );
+  expect(observedTokens).not.toContain(":wave:");
+  await expect(demo).toHaveAttribute("data-phase", "inserted");
+  await expect(token).toHaveText("👋");
+});
+
+test("hero demo stays still when reduced motion is requested", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+
+  const demo = page.locator("[data-hero-demo]");
+  const token = page.locator("[data-demo-token]");
+  await expect(demo).toHaveAttribute("data-phase", "picker");
+  await expect(token).toHaveText(":wa");
+  await expect(page.getByRole("button", { name: "Play demo" })).toBeVisible();
+
+  await page.waitForTimeout(800);
+  await expect(demo).toHaveAttribute("data-phase", "picker");
+  await expect(token).toHaveText(":wa");
 });
 
 test("the demo supports keyboard selection", async ({ page }) => {
@@ -145,10 +211,15 @@ test("short viewports keep the picker below the hero copy", async ({
 
   const copyBox = await page.locator(".hero-copy").boundingBox();
   const pickerBox = await page.locator(".hero-picker-shell").boundingBox();
+  const heroBox = await page.locator(".hero").boundingBox();
   expect(copyBox).not.toBeNull();
   expect(pickerBox).not.toBeNull();
+  expect(heroBox).not.toBeNull();
   expect((copyBox?.y ?? 0) + (copyBox?.height ?? 0)).toBeLessThanOrEqual(
     pickerBox?.y ?? 0,
+  );
+  expect((pickerBox?.y ?? 0) + (pickerBox?.height ?? 0)).toBeLessThanOrEqual(
+    (heroBox?.y ?? 0) + (heroBox?.height ?? 0) + 1,
   );
 });
 

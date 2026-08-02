@@ -1,8 +1,14 @@
 ---
 import appIcon from "../../../Resources/Assets.xcassets/AppIcon.appiconset/icon-128.png";
+
+interface Props {
+  inverse?: boolean;
+}
+
+const { inverse = false } = Astro.props;
 ---
 
-<header class="site-header">
+<header class:list={["site-header", { inverse }]}>
   <a class="wordmark" href="/" aria-label="MojiPond home">
     <img src={appIcon.src} width="40" height="40" alt="" />
     <span>MojiPond</span>
@@ -29,12 +35,21 @@ import appIcon from "../../../Resources/Assets.xcassets/AppIcon.appiconset/icon-
     text-decoration: none;
   }
 
+  .inverse .wordmark {
+    color: #f5fffd;
+    text-shadow: 0 2px 14px rgb(0 20 28 / 55%);
+  }
+
   img {
     display: block;
     width: 40px;
     height: 40px;
     border-radius: 12px;
     box-shadow: 0 8px 24px rgb(6 51 61 / 20%);
+  }
+
+  .inverse img {
+    box-shadow: 0 10px 30px rgb(0 17 24 / 42%);
   }
 
   @media (max-width: 520px) {
