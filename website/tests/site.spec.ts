@@ -78,7 +78,7 @@ test("hero demo types, replaces, and sends the shortcut", async ({ page }) => {
 
       const values = new Set<string>();
       const phases = new Set<string>();
-      const deadline = Date.now() + 6_000;
+      const deadline = Date.now() + 14_000;
       const sample = () => {
         values.add(input.value);
         phases.add(demo.dataset.phase ?? "");
@@ -101,7 +101,11 @@ test("hero demo types, replaces, and sends the shortcut", async ({ page }) => {
   });
 
   expect(observed.values).toEqual(
-    expect.arrayContaining(["That fixed it :wa", "That fixed it 👋", ""]),
+    expect.arrayContaining([
+      "Yep, that fixed it — thanks for checking :wa",
+      "Yep, that fixed it — thanks for checking 👋",
+      "",
+    ]),
   );
   expect(observed.phases).toEqual(
     expect.arrayContaining(["accepting", "inserted", "sent"]),
@@ -109,7 +113,7 @@ test("hero demo types, replaces, and sends the shortcut", async ({ page }) => {
   expect(observed.sentBubbleVisible).toBe(true);
   await expect(demo).toHaveAttribute("data-phase", "sent");
   await expect(page.locator("[data-demo-message]")).toContainText(
-    "That fixed it 👋",
+    "Yep, that fixed it — thanks for checking 👋",
   );
   await expect(page.getByRole("button", { name: "Pause demo" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Play demo" })).toHaveCount(0);
@@ -125,7 +129,9 @@ test("hero demo stays still when reduced motion is requested", async ({
   const input = page.getByRole("combobox", { name: "Message" });
   await expect(demo).toHaveAttribute("data-phase", "picker");
   await expect(demo).toHaveAttribute("data-mode", "static");
-  await expect(input).toHaveValue("That fixed it :wa");
+  await expect(input).toHaveValue(
+    "Yep, that fixed it — thanks for checking :wa",
+  );
   await expect(
     page.getByRole("listbox", { name: "Emoji suggestions" }),
   ).toBeVisible();
@@ -133,7 +139,9 @@ test("hero demo stays still when reduced motion is requested", async ({
   await page.waitForTimeout(800);
   await expect(demo).toHaveAttribute("data-phase", "picker");
   await expect(demo).toHaveAttribute("data-mode", "static");
-  await expect(input).toHaveValue("That fixed it :wa");
+  await expect(input).toHaveValue(
+    "Yep, that fixed it — thanks for checking :wa",
+  );
 });
 
 test("focusing and typing permanently stops the autoplay", async ({ page }) => {
@@ -156,19 +164,43 @@ test("the demo supports keyboard selection", async ({ page }) => {
 
   const input = page.getByRole("combobox", { name: "Message" });
   const listbox = page.getByRole("listbox", { name: "Emoji suggestions" });
-  await expect(input).toHaveValue("That fixed it :wa");
+  await expect(input).toHaveValue(
+    "Yep, that fixed it — thanks for checking :wa",
+  );
   await expect(listbox).toBeVisible();
   await expect(listbox.getByRole("option")).toHaveCount(5);
 
   await input.focus();
   await page.keyboard.press("ArrowDown");
   await expect(
-    listbox.getByRole("option", { name: /:warning:/i }),
+    listbox.getByRole("option", { name: /:watch:/i }),
   ).toHaveAttribute("aria-selected", "true");
 
   await page.keyboard.press("Tab");
-  await expect(input).toHaveValue("That fixed it ⚠️");
+  await expect(input).toHaveValue(
+    "Yep, that fixed it — thanks for checking ⌚",
+  );
   await expect(listbox).toBeHidden();
+});
+
+test("the demo searches the full built-in emoji catalog", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+
+  const catalogSize = await page
+    .locator("[data-hero-demo-shell]")
+    .evaluate(
+      (root) =>
+        JSON.parse((root as HTMLElement).dataset.options ?? "[]").length,
+    );
+  expect(catalogSize).toBeGreaterThan(1_500);
+
+  const input = page.getByRole("combobox", { name: "Message" });
+  await input.focus();
+  await input.fill("Dinner is ready :taco");
+  await expect(page.getByRole("option", { name: /:taco:/i })).toBeVisible();
+  await page.keyboard.press("Tab");
+  await expect(input).toHaveValue("Dinner is ready 🌮");
 });
 
 test("the demo replaces exact shortcuts and recovers after a correction", async ({
@@ -203,13 +235,17 @@ test("Return inserts an open suggestion, then sends multiple messages", async ({
 
   await input.focus();
   await page.keyboard.press("Enter");
-  await expect(input).toHaveValue("That fixed it 👋");
+  await expect(input).toHaveValue(
+    "Yep, that fixed it — thanks for checking 👋",
+  );
   await expect(listbox).toBeHidden();
   await expect(userMessages).toHaveCount(0);
 
   await page.keyboard.press("Enter");
   await expect(userMessages).toHaveCount(1);
-  await expect(userMessages.nth(0)).toHaveText("That fixed it 👋");
+  await expect(userMessages.nth(0)).toHaveText(
+    "Yep, that fixed it — thanks for checking 👋",
+  );
   await expect(input).toHaveValue("");
   await expect(input).toBeFocused();
 
