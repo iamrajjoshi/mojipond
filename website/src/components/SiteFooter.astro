@@ -5,26 +5,34 @@ const hasExactCommit = /^[0-9a-f]{40}$/i.test(githubSHA ?? "");
 const commitURL = hasExactCommit
   ? `${repositoryURL}/commit/${githubSHA}`
   : `${repositoryURL}/commits/main`;
-const commitLabel = hasExactCommit
-  ? `commit ${githubSHA?.slice(0, 7)}`
-  : "commit history";
+const commitLabel = hasExactCommit ? githubSHA?.slice(0, 7) : "main";
+
+interface Props {
+  inverse?: boolean;
+}
+
+const { inverse = false } = Astro.props;
 ---
 
-<footer class="site-footer">
-  <a href={commitURL}>© 2026 MojiPond · {commitLabel}</a>
+<footer class:list={["site-footer", { inverse }]}>
+  <a href={commitURL}>{commitLabel}</a>
 </footer>
 
 <style>
   .site-footer {
     display: flex;
-    gap: 24px;
     align-items: center;
     justify-content: center;
-    width: var(--content-width);
-    margin: 0 auto;
-    padding: 36px 0 44px;
+    width: 100%;
+    min-height: 40px;
+    padding: 10px 24px 14px;
     color: var(--ink-muted);
     font-size: 0.82rem;
+  }
+
+  .site-footer.inverse {
+    color: rgb(235 255 251 / 70%);
+    background: #06333d;
   }
 
   a {
@@ -37,5 +45,9 @@ const commitLabel = hasExactCommit
   a:hover {
     color: var(--pond);
     text-decoration-color: currentcolor;
+  }
+
+  .inverse a:hover {
+    color: #f5fffd;
   }
 </style>

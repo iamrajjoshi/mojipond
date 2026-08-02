@@ -353,16 +353,29 @@ test("home page stays focused on the hero and demo", async ({ page }) => {
   await expect(page.getByRole("link", { name: "Terms" })).toHaveCount(0);
 });
 
-test("footer links to the deployed source revision", async ({ page }) => {
+test("source links stay minimal and point to GitHub", async ({ page }) => {
   await page.goto("/");
 
+  const repositoryLink = page.getByRole("link", { name: "GitHub" });
+  await expect(repositoryLink).toHaveAttribute(
+    "href",
+    "https://github.com/iamrajjoshi/mojipond",
+  );
+
+  const footer = page.locator(".site-footer");
   const sourceLink = page.getByRole("link", {
-    name: /© 2026 MojiPond · commit/i,
+    name: /^(?:[0-9a-f]{7}|main)$/i,
   });
   await expect(sourceLink).toHaveAttribute(
     "href",
     /^https:\/\/github\.com\/iamrajjoshi\/mojipond\/(?:commit\/[0-9a-f]{40}|commits\/main)$/i,
   );
+  await expect(footer).not.toContainText("©");
+  await expect(footer).not.toContainText(/commit/i);
+  await expect(footer).toHaveCSS("background-color", "rgb(6, 51, 61)");
+
+  const footerBox = await footer.boundingBox();
+  expect(footerBox?.height).toBeLessThanOrEqual(48);
 });
 
 test("home page has no detectable accessibility violations", async ({

@@ -3,9 +3,11 @@ import appIcon from "../../../Resources/Assets.xcassets/AppIcon.appiconset/icon-
 
 interface Props {
   inverse?: boolean;
+  showRepository?: boolean;
 }
 
-const { inverse = false } = Astro.props;
+const { inverse = false, showRepository = false } = Astro.props;
+const repositoryURL = "https://github.com/iamrajjoshi/mojipond";
 ---
 
 <header class:list={["site-header", { inverse }]}>
@@ -13,6 +15,13 @@ const { inverse = false } = Astro.props;
     <img src={appIcon.src} width="40" height="40" alt="" />
     <span>MojiPond</span>
   </a>
+  {
+    showRepository && (
+      <a class="repository-link" href={repositoryURL}>
+        GitHub
+      </a>
+    )
+  }
 </header>
 
 <style>
@@ -20,7 +29,11 @@ const { inverse = false } = Astro.props;
     position: absolute;
     top: 24px;
     left: 32px;
+    right: 32px;
     z-index: 30;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   }
 
   .wordmark {
@@ -40,6 +53,28 @@ const { inverse = false } = Astro.props;
     text-shadow: 0 2px 14px rgb(0 20 28 / 55%);
   }
 
+  .repository-link {
+    display: inline-flex;
+    min-height: 44px;
+    padding: 8px 0;
+    align-items: center;
+    color: var(--deep-water);
+    font-size: 0.95rem;
+    font-weight: 700;
+    text-decoration-color: transparent;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 5px;
+  }
+
+  .inverse .repository-link {
+    color: #f5fffd;
+    text-shadow: 0 2px 14px rgb(0 20 28 / 55%);
+  }
+
+  .repository-link:hover {
+    text-decoration-color: currentcolor;
+  }
+
   img {
     display: block;
     width: 40px;
@@ -56,6 +91,7 @@ const { inverse = false } = Astro.props;
     .site-header {
       top: 16px;
       left: 16px;
+      right: 16px;
     }
 
     .wordmark {
