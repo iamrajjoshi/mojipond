@@ -53,14 +53,13 @@ MojiPond windows or panels.
 | --- | --- |
 | ![MojiPond permission setup](docs/screenshots/onboarding-permissions-granted.png) | ![MojiPond emoji Library](docs/screenshots/library.png) |
 | ZIP import | Settings |
-| ![MojiPond ZIP import](docs/screenshots/library-import-light.png) | ![MojiPond Settings](docs/screenshots/settings.png) |
+| ![MojiPond ZIP import](docs/screenshots/library-import-dark.png) | ![MojiPond Settings](docs/screenshots/settings.png) |
 | Import review | Caret suggestions |
 | ![MojiPond import preview](docs/screenshots/import-preview.png) | ![MojiPond caret suggestions](docs/screenshots/caret-suggestions.png) |
 | Double-trigger browser | Native integration fixture |
 | ![MojiPond emoji browser in dark appearance](docs/screenshots/emoji-browser-dark.png) | ![MojiPond integration fixture](docs/screenshots/integration-fixture.png) |
 
-Additional permission states and a dark ZIP-import screenshot are in
-[`docs/screenshots`](docs/screenshots).
+Additional permission states are in [`docs/screenshots`](docs/screenshots).
 
 ## Requirements
 
