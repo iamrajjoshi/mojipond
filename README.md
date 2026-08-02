@@ -145,20 +145,23 @@ for public distribution. Developer ID and notarization instructions are in
 
 ### UI test harness
 
-`./scripts/test.sh` remains the headless unit-test suite used by CI. Run the
-macOS UI tests separately from an unlocked interactive desktop:
+`./scripts/test.sh` is the default headless suite used by CI. It does not drive
+the pointer or take focus. macOS `XCUIApplication` tests cannot run headlessly
+inside the active user session, so routine UI automation runs in the isolated
+`macOS UI` GitHub Actions workflow instead.
+
+To deliberately run that suite on a local unlocked desktop:
 
 ```sh
-xcodegen generate
-xcodebuild \
-  -project MojiPond.xcodeproj \
-  -scheme MojiPondUITests \
-  -configuration Debug \
-  -destination 'platform=macOS' \
-  -derivedDataPath .derived/ui-app \
-  test \
-  CODE_SIGN_IDENTITY=- \
-  CODE_SIGNING_REQUIRED=YES
+MOJIPOND_ALLOW_LOCAL_UI_TESTS=1 ./scripts/test-ui-remote.sh
+```
+
+The opt-in guard prevents an accidental local run from taking over the active
+screen. The remote workflow stores its `.xcresult` bundle as a downloadable
+artifact. Run the separate integration fixture only when validating system
+text fields manually:
+
+```sh
 xcodebuild \
   -project MojiPond.xcodeproj \
   -scheme MojiPondIntegrationFixture \
