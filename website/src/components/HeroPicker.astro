@@ -36,9 +36,9 @@ import { emojiOptions, waveSuggestions } from "../lib/emojiOptions";
         aria-label="Conversation with Alex"
         data-message-thread
       >
-        <li class="incoming-bubble">Did that fix it?</li>
+        <li class="incoming-bubble">Did that fix the emoji shortcut?</li>
         <li class="outgoing-bubble demo-message" data-demo-message hidden>
-          That fixed it 👋
+          Yep, that fixed it — thanks for checking 👋
         </li>
       </ol>
 
@@ -91,7 +91,7 @@ import { emojiOptions, waveSuggestions } from "../lib/emojiOptions";
           <input
             id="hero-message-input"
             type="text"
-            value="That fixed it :wa"
+            value="Yep, that fixed it — thanks for checking :wa"
             placeholder="iMessage"
             autocomplete="off"
             autocapitalize="off"
@@ -120,6 +120,8 @@ import { emojiOptions, waveSuggestions } from "../lib/emojiOptions";
     shortcode: string;
     emoji: string;
     name: string;
+    aliases: string[];
+    keywords: string[];
   }
 
   interface ActiveToken {
@@ -166,16 +168,24 @@ import { emojiOptions, waveSuggestions } from "../lib/emojiOptions";
       const reducedMotion = window.matchMedia(
         "(prefers-reduced-motion: reduce)",
       );
-      const prefix = "That fixed it ";
+      const prefix = "Yep, that fixed it — thanks for checking ";
+      const typingFrames: DemoFrame[] = Array.from(prefix, (_, index) => ({
+        value: prefix.slice(0, index + 1),
+        phase: "typing",
+        delay: 85,
+      }));
       const frames: DemoFrame[] = [
-        { value: prefix, phase: "typing", delay: 520 },
-        { value: `${prefix}:`, phase: "typing", delay: 180 },
-        { value: `${prefix}:w`, phase: "typing", delay: 220 },
-        { value: `${prefix}:wa`, phase: "picker", delay: 900 },
-        { value: `${prefix}:wa`, phase: "accepting", delay: 380 },
-        { value: `${prefix}👋`, phase: "inserted", delay: 1_050 },
-        { value: "", phase: "sent", delay: 1_450 },
+        ...typingFrames,
+        { value: `${prefix}:`, phase: "typing", delay: 480 },
+        { value: `${prefix}:w`, phase: "picker", delay: 1_000 },
+        { value: `${prefix}:wa`, phase: "picker", delay: 1_500 },
+        { value: `${prefix}:wa`, phase: "accepting", delay: 700 },
+        { value: `${prefix}👋`, phase: "inserted", delay: 1_800 },
+        { value: "", phase: "sent", delay: 2_300 },
       ];
+      const staticFrameIndex = frames.findIndex(
+        (frame) => frame.phase === "picker" && frame.value.endsWith(":wa"),
+      );
 
       let matches = options.slice(0, 5);
       let selectedIndex = 0;
@@ -215,14 +225,70 @@ import { emojiOptions, waveSuggestions } from "../lib/emojiOptions";
         };
       };
 
+      const matchScore = (option: EmojiOption, query: string) => {
+        if (!query) return { tier: 0, length: option.shortcode.length };
+        if (option.shortcode === query || option.aliases.includes(query)) {
+          return { tier: 0, length: query.length };
+        }
+        if (option.shortcode.startsWith(query)) {
+          return { tier: 1, length: option.shortcode.length };
+        }
+        const aliasPrefix = option.aliases
+          .filter((alias) => alias.startsWith(query))
+          .sort((left, right) => left.length - right.length)[0];
+        if (aliasPrefix) {
+          return { tier: 2, length: aliasPrefix.length };
+        }
+
+        const name = option.name.toLocaleLowerCase();
+        if (name.startsWith(query)) return { tier: 3, length: name.length };
+        const namePrefix = name
+          .split(/\s+/)
+          .filter((word) => word.startsWith(query))
+          .sort((left, right) => left.length - right.length)[0];
+        if (namePrefix) return { tier: 4, length: namePrefix.length };
+        const keywordPrefix = option.keywords
+          .filter((keyword) => keyword.startsWith(query))
+          .sort((left, right) => left.length - right.length)[0];
+        if (keywordPrefix) {
+          return { tier: 5, length: keywordPrefix.length };
+        }
+        if (
+          option.shortcode.includes(query) ||
+          option.aliases.some((alias) => alias.includes(query))
+        ) {
+          return { tier: 6, length: option.shortcode.length };
+        }
+        if (name.includes(query)) return { tier: 7, length: name.length };
+        const keywordMatch = option.keywords
+          .filter((keyword) => keyword.includes(query))
+          .sort((left, right) => left.length - right.length)[0];
+        if (keywordMatch) return { tier: 8, length: keywordMatch.length };
+        return null;
+      };
+
       const matchingOptions = (query: string) =>
         options
+          .map((option, index) => ({
+            option,
+            index,
+            score: matchScore(option, query),
+          }))
           .filter(
-            (option) =>
-              option.shortcode.startsWith(query) ||
-              option.name.toLocaleLowerCase().includes(query),
+            (
+              candidate,
+            ): candidate is typeof candidate & {
+              score: { tier: number; length: number };
+            } => candidate.score !== null,
           )
-          .slice(0, 5);
+          .sort(
+            (left, right) =>
+              left.score.tier - right.score.tier ||
+              left.score.length - right.score.length ||
+              left.index - right.index,
+          )
+          .slice(0, 5)
+          .map((candidate) => candidate.option);
 
       const updateSendState = () => {
         sendButton.disabled = input.value.trim().length === 0;
@@ -309,8 +375,8 @@ import { emojiOptions, waveSuggestions } from "../lib/emojiOptions";
         }
 
         if (activeToken.closed) {
-          const exactMatch = options.find(
-            (option) => option.shortcode === activeToken?.query,
+          const exactMatch = options.find((option) =>
+            option.aliases.includes(activeToken?.query ?? ""),
           );
           if (exactMatch) {
             insertOption(exactMatch);
@@ -412,7 +478,7 @@ import { emojiOptions, waveSuggestions } from "../lib/emojiOptions";
       const showStaticFrame = () => {
         clearTimer();
         demo.dataset.mode = "static";
-        frameIndex = 3;
+        frameIndex = staticFrameIndex;
         renderFrame(frames[frameIndex]);
       };
 
@@ -494,7 +560,7 @@ import { emojiOptions, waveSuggestions } from "../lib/emojiOptions";
         if (reducedMotion.matches) {
           showStaticFrame();
         } else {
-          startAuto(3);
+          startAuto(staticFrameIndex);
         }
       });
 
@@ -514,7 +580,7 @@ import { emojiOptions, waveSuggestions } from "../lib/emojiOptions";
       if (reducedMotion.matches) {
         showStaticFrame();
       } else {
-        startAuto(3);
+        startAuto();
       }
     }
   }
