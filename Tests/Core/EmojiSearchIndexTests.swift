@@ -43,7 +43,7 @@ final class EmojiSearchIndexTests: XCTestCase {
         )
     }
 
-    func testPackPriorityPrecedesRecencyWithinSameTextMatch() {
+    func testRecencyPrecedesPackPriorityWithinSameTextMatch() {
         let highPriority = CoreTestFixtures.item(
             id: "high",
             shortcode: "cat_a",
@@ -66,7 +66,39 @@ final class EmojiSearchIndexTests: XCTestCase {
         let results = EmojiSearchIndex(items: [recentlyUsed, highPriority])
             .search("cat", usage: usage)
 
-        XCTAssertEqual(results.map(\.item.id), ["high", "recent"])
+        XCTAssertEqual(results.map(\.item.id), ["recent", "high"])
+    }
+
+    func testUsedSubstringCanOutrankUnusedPrefixButNotExactMatch() {
+        let exact = CoreTestFixtures.item(
+            id: "exact",
+            shortcode: "wave"
+        )
+        let prefix = CoreTestFixtures.item(
+            id: "prefix",
+            shortcode: "wave_hello"
+        )
+        let usedSubstring = CoreTestFixtures.item(
+            id: "used-substring",
+            shortcode: "bufo-wave"
+        )
+        let usage = EmojiUsageSnapshot(
+            statisticsByItemID: [
+                "used-substring": EmojiUsageStatistics(
+                    useCount: 4,
+                    lastUsedAt: Date(timeIntervalSince1970: 10_000)
+                )
+            ]
+        )
+
+        let results = EmojiSearchIndex(
+            items: [prefix, usedSubstring, exact]
+        ).search("wave", usage: usage)
+
+        XCTAssertEqual(
+            results.map(\.item.id),
+            ["exact", "used-substring", "prefix"]
+        )
     }
 
     func testRecencyThenUseCountBreakTiesWithinPack() {

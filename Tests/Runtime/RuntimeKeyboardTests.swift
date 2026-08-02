@@ -938,6 +938,120 @@ final class RuntimeKeyboardTests: XCTestCase {
         )
     }
 
+    func testPreservingHiddenPredictionKeepsRecoveryRevisionCurrent() throws {
+        let gate = RuntimeInterceptionGate()
+        gate.configureExactCommitPrediction(
+            trigger: ":",
+            isEnabled: true,
+            exactTokens: ["frog"]
+        )
+        gate.setCaptureEnabled(true)
+        let opening = gate.outcome(
+            for: snapshot(keyCode: 41, characters: ":")
+        )
+        for character in "fro" {
+            _ = gate.outcome(
+                for: snapshot(
+                    keyCode: 0,
+                    characters: String(character)
+                )
+            )
+        }
+        XCTAssertTrue(
+            gate.verifyExactCommitPrediction(
+                generation: opening.predictionGeneration,
+                expectedToken: ":fro"
+            )
+        )
+        gate.setMode(
+            .suggestions,
+            acceptsTab: true,
+            acceptsReturn: true
+        )
+
+        let invalid = gate.outcome(
+            for: snapshot(keyCode: 49, characters: " ")
+        )
+        let hiddenRevision = try XCTUnwrap(
+            invalid.interactionRevision
+        )
+        XCTAssertEqual(gate.mode, .hidden)
+
+        gate.setMode(
+            .hidden,
+            acceptsTab: true,
+            acceptsReturn: true,
+            preservingExactCommitPrediction: true
+        )
+        XCTAssertEqual(gate.interactionRevision, hiddenRevision)
+
+        let recovery = gate.outcome(
+            for: snapshot(keyCode: RuntimeKeyboardKeyCode.delete)
+        )
+        XCTAssertEqual(recovery.interactionRevision, hiddenRevision)
+        XCTAssertTrue(
+            gate.expectPresentation(
+                revision: 1,
+                interactionRevision: hiddenRevision
+            )
+        )
+    }
+
+    func testEscapePreservesPredictionForTheNextTokenEdit() throws {
+        let gate = RuntimeInterceptionGate()
+        gate.configureExactCommitPrediction(
+            trigger: ":",
+            isEnabled: true,
+            exactTokens: ["frog"]
+        )
+        gate.setCaptureEnabled(true)
+        let opening = gate.outcome(
+            for: snapshot(keyCode: 41, characters: ":")
+        )
+        let generation = try XCTUnwrap(opening.predictionGeneration)
+        _ = gate.outcome(
+            for: snapshot(keyCode: 3, characters: "f")
+        )
+        XCTAssertTrue(
+            gate.verifyExactCommitPrediction(
+                generation: generation,
+                expectedToken: ":f"
+            )
+        )
+        gate.setMode(
+            .suggestions,
+            acceptsTab: true,
+            acceptsReturn: true
+        )
+
+        let escape = gate.outcome(
+            for: snapshot(keyCode: RuntimeKeyboardKeyCode.escape)
+        )
+        let hiddenRevision = try XCTUnwrap(escape.interactionRevision)
+        XCTAssertEqual(escape.predictionGeneration, generation)
+        XCTAssertEqual(gate.mode, .hidden)
+
+        gate.setMode(
+            .hidden,
+            acceptsTab: true,
+            acceptsReturn: true,
+            preservingExactCommitPrediction: true
+        )
+        XCTAssertEqual(gate.interactionRevision, hiddenRevision)
+
+        let resumed = gate.outcome(
+            for: snapshot(keyCode: 15, characters: "r")
+        )
+        XCTAssertEqual(resumed.predictionGeneration, generation)
+        XCTAssertEqual(resumed.interactionRevision, hiddenRevision)
+        XCTAssertTrue(
+            gate.verifyExactCommitPrediction(
+                generation: generation,
+                expectedToken: ":fr"
+            )
+        )
+    }
+
     func testTriggerStartsFreshPredictionDuringInvalidSuffix() throws {
         let gate = RuntimeInterceptionGate()
         gate.configureExactCommitPrediction(

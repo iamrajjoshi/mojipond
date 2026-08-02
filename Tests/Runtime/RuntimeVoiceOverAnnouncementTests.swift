@@ -184,11 +184,42 @@ final class RuntimeVoiceOverAnnouncementTests: XCTestCase {
             CGSize(width: 380, height: 279)
         )
         XCTAssertEqual(overflowingSuggestions.visibleRows.count, 6)
+        let selectedOverflowingSuggestion = RuntimeSuggestionPanelSnapshot(
+            revision: 9,
+            transactionID: ParserTransactionID(rawValue: 3),
+            mode: .suggestions,
+            rows: (0..<8).map { index in
+                RuntimeSuggestionRow(
+                    id: "row.\(index)",
+                    glyph: "🐸",
+                    shortcode: "pond_\(index)",
+                    name: "Pond \(index)"
+                )
+            },
+            selectedIndex: 6,
+            query: nil
+        )
+        XCTAssertEqual(
+            selectedOverflowingSuggestion.selectedRow?.shortcode,
+            "pond_6"
+        )
+        XCTAssertEqual(
+            RuntimeSuggestionPanelController.preferredSize(
+                for: selectedOverflowingSuggestion
+            ),
+            CGSize(width: 380, height: 279)
+        )
+        XCTAssertEqual(
+            RuntimeVoiceOverAnnouncement.suggestions(
+                selectedOverflowingSuggestion
+            ),
+            "8 emoji suggestions. Selected Pond 6, colon pond_6 colon."
+        )
         XCTAssertEqual(
             RuntimeVoiceOverAnnouncement.suggestions(
                 overflowingSuggestions
             ),
-            "6 emoji suggestions. Selected Waving hand, colon wave colon."
+            "7 emoji suggestions. Selected Waving hand, colon wave colon."
         )
         XCTAssertEqual(
             RuntimeSuggestionPanelController.preferredSize(

@@ -219,45 +219,69 @@ final class ShortcodeParserTests: XCTestCase {
         )
     }
 
-    func testMaximumLengthIsCappedAndOverflowResetsAggressively() {
+    func testMaximumLengthOverflowRemainsRecoverableAfterArbitrarySuffix() {
         var parser = ShortcodeParser(
             configuration: ShortcodeParserConfiguration(maximumTokenLength: 3)
         )
         parser.handle(.character(":"), at: start)
-        parser.handle(.character("a"), at: start)
-        parser.handle(.character("b"), at: start)
-        parser.handle(.character("c"), at: start)
+        for character in "abc" {
+            parser.handle(.character(character), at: start)
+        }
 
         let overflow = parser.handle(.character("d"), at: start)
-
-        XCTAssertEqual(overflow.currentState, .idle)
+        XCTAssertEqual(overflow.currentState.session?.query, "abc")
+        XCTAssertEqual(
+            overflow.currentState.session?.recoverableSuffixLength,
+            1
+        )
         XCTAssertEqual(
             overflow.actions,
             [
-                .reset(
-                    transactionID: ParserTransactionID(rawValue: 1),
-                    reason: .maximumLengthExceeded
+                .hideSuggestions(
+                    transactionID: ParserTransactionID(rawValue: 1)
                 )
             ]
         )
-    }
 
-    func testDefaultMaximumAllowsExactly64CharactersAndRejectsThe65th() {
-        var parser = ShortcodeParser()
-        parser.handle(.character(":"), at: start)
-        for _ in 0..<Shortcode.maximumLength {
-            parser.handle(.character("a"), at: start)
+        for character in "efg" {
+            parser.handle(.character(character), at: start)
         }
-
-        XCTAssertEqual(parser.state.session?.query.count, 64)
-        let overflow = parser.handle(.character("a"), at: start)
-        XCTAssertEqual(overflow.currentState, .idle)
+        XCTAssertEqual(parser.state.session?.query, "abc")
         XCTAssertEqual(
-            overflow.actions,
+            parser.state.session?.recoverableSuffixLength,
+            4
+        )
+
+        for _ in 0..<4 {
+            parser.handle(.backspace(), at: start)
+        }
+        XCTAssertEqual(parser.state.session?.query, "abc")
+        XCTAssertEqual(parser.state.session?.recoverableSuffixLength, 0)
+
+        parser.handle(.backspace(), at: start)
+        parser.handle(.backspace(), at: start)
+        let bareTrigger = parser.handle(.backspace(), at: start)
+        XCTAssertEqual(
+            bareTrigger.actions,
             [
-                .reset(
+                .hideSuggestions(
+                    transactionID: ParserTransactionID(rawValue: 1)
+                )
+            ]
+        )
+
+        let newQuery = parser.handle(.character("f"), at: start)
+        XCTAssertEqual(
+            newQuery.actions,
+            [
+                .updateSuggestions(
                     transactionID: ParserTransactionID(rawValue: 1),
-                    reason: .maximumLengthExceeded
+                    query: "f",
+                    token: ParsedShortcodeToken(
+                        trigger: .colon,
+                        query: "f",
+                        isClosed: false
+                    )
                 )
             ]
         )
@@ -437,7 +461,32 @@ final class ShortcodeParserTests: XCTestCase {
         parser.handle(.character("b"), at: start)
         let escaped = parser.handle(.escape, at: start)
         XCTAssertTrue(escaped.shouldConsumeEvent)
-        XCTAssertEqual(escaped.currentState, .idle)
+        XCTAssertEqual(escaped.currentState.session?.query, "b")
+        XCTAssertEqual(
+            escaped.actions,
+            [
+                .hideSuggestions(
+                    transactionID: ParserTransactionID(rawValue: 2)
+                )
+            ]
+        )
+
+        let resumed = parser.handle(.character("u"), at: start)
+        XCTAssertEqual(resumed.currentState.session?.query, "bu")
+        XCTAssertEqual(
+            resumed.actions,
+            [
+                .updateSuggestions(
+                    transactionID: ParserTransactionID(rawValue: 2),
+                    query: "bu",
+                    token: ParsedShortcodeToken(
+                        trigger: .colon,
+                        query: "bu",
+                        isClosed: false
+                    )
+                )
+            ]
+        )
     }
 
     func testDisabledAcceptanceAndBareTriggerDoNotStealKeys() {

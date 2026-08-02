@@ -85,7 +85,6 @@ struct RuntimeSuggestionPanelSnapshot: Equatable, Sendable {
     }
 
     var selectedRow: RuntimeSuggestionRow? {
-        let rows = visibleRows
         return rows.indices.contains(selectedIndex)
             ? rows[selectedIndex]
             : nil
@@ -178,7 +177,7 @@ enum RuntimeVoiceOverAnnouncement {
                 .filter { !$0.isEmpty }
                 .joined(separator: " ")
         }
-        let count = snapshot.visibleRows.count
+        let count = snapshot.rows.count
         let word = count == 1 ? "suggestion" : "suggestions"
         return ["\(count) emoji \(word).", selected]
             .filter { !$0.isEmpty }
@@ -659,21 +658,23 @@ struct RuntimeSuggestionPanelView: View {
                 }
                 }
 
-                if snapshot.mode == .browser {
+                if snapshot.mode == .browser
+                    || snapshot.mode == .suggestions {
                     ScrollViewReader { proxy in
                         ScrollView {
                             LazyVStack(alignment: .leading, spacing: 0) {
                                 rows
                             }
                         }
+                        .scrollIndicators(.hidden)
                         .onAppear {
                             if let selected = snapshot.selectedRow {
-                                proxy.scrollTo(selected.id, anchor: .center)
+                                scrollToSelection(selected, with: proxy)
                             }
                         }
-                        .onChange(of: snapshot.selectedRow?.id) {
+                        .onChange(of: snapshot.revision) {
                             if let selected = snapshot.selectedRow {
-                                proxy.scrollTo(selected.id, anchor: .center)
+                                scrollToSelection(selected, with: proxy)
                             }
                         }
                     }
@@ -738,8 +739,10 @@ struct RuntimeSuggestionPanelView: View {
 
     @ViewBuilder
     private var rows: some View {
-        let visibleRows = snapshot.visibleRows
-        if visibleRows.isEmpty {
+        let rows = snapshot.mode == .suggestions
+            ? snapshot.rows
+            : snapshot.visibleRows
+        if rows.isEmpty {
             Text("No matching emoji")
                 .foregroundStyle(.secondary)
                 .frame(
@@ -752,7 +755,7 @@ struct RuntimeSuggestionPanelView: View {
                 )
         } else {
             let selectedID = snapshot.selectedRow?.id
-            ForEach(visibleRows) { row in
+            ForEach(rows) { row in
                 RuntimeSuggestionRowView(
                     row: row,
                     isSelected: row.id == selectedID,
@@ -762,6 +765,16 @@ struct RuntimeSuggestionPanelView: View {
                 .id(row.id)
             }
         }
+    }
+
+    private func scrollToSelection(
+        _ selected: RuntimeSuggestionRow,
+        with proxy: ScrollViewProxy
+    ) {
+        proxy.scrollTo(
+            selected.id,
+            anchor: snapshot.mode == .browser ? .center : nil
+        )
     }
 }
 

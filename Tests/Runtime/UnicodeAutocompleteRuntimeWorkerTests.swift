@@ -4,16 +4,22 @@ import XCTest
 
 @MainActor
 final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
-    func testSuggestionLimitMatchesVisiblePanelCapacity() {
+    func testSuggestionLimitRetainsEnoughRowsToScrollWithoutGrowingPanel() {
         XCTAssertEqual(
             UnicodeAutocompleteRuntimeConfiguration().suggestionLimit,
-            6
+            60
         )
         XCTAssertEqual(
             UnicodeAutocompleteRuntimeConfiguration(
                 suggestionLimit: 99
             ).suggestionLimit,
-            6
+            99
+        )
+        XCTAssertEqual(
+            UnicodeAutocompleteRuntimeConfiguration(
+                suggestionLimit: 101
+            ).suggestionLimit,
+            100
         )
         XCTAssertEqual(
             UnicodeAutocompleteRuntimeConfiguration(
@@ -745,6 +751,213 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         XCTAssertTrue(selectedInserted)
     }
 
+    func testSuggestionSelectionContinuesPastVisibleRowsAndClampsAtEnds()
+        async throws
+    {
+        let items = (0..<8).map { index in
+            emoji(
+                shortcode: "pond_\(index)",
+                value: "selected-\(index)"
+            )
+        }
+        let harness = try makeHarness(
+            items: items,
+            targetText: ":pond"
+        )
+        harness.worker.setCaptureEnabled(true)
+        type(":pond", into: harness.worker)
+
+        let suggestionsShown = await eventually {
+            harness.presenter.latestShown?.rows.count == items.count
+                && harness.presenter.latestShown?.selectedIndex == 0
+        }
+        XCTAssertTrue(suggestionsShown)
+        let initial = try XCTUnwrap(harness.presenter.latestShown)
+        XCTAssertEqual(initial.visibleRows.count, 6)
+
+        let updateCountBeforeClampedUp = harness.presenter.updates.count
+        harness.worker.enqueue(
+            keySnapshot(keyCode: RuntimeKeyboardKeyCode.upArrow)
+        )
+        let clampedAtFirstResult = await eventually {
+            harness.presenter.updates.count > updateCountBeforeClampedUp
+                && harness.presenter.latestShown?.selectedIndex == 0
+        }
+        XCTAssertTrue(clampedAtFirstResult)
+
+        for _ in 0..<20 {
+            harness.worker.enqueue(
+                keySnapshot(keyCode: RuntimeKeyboardKeyCode.downArrow)
+            )
+        }
+        let clampedAtLastResult = await eventually {
+            harness.presenter.latestShown?.selectedIndex == items.count - 1
+        }
+        XCTAssertTrue(clampedAtLastResult)
+        let last = try XCTUnwrap(harness.presenter.latestShown)
+        XCTAssertEqual(last.selectedRow?.shortcode, "pond_7")
+        XCTAssertEqual(last.visibleRows.count, 6)
+
+        for _ in 0..<items.count - 1 {
+            harness.worker.enqueue(
+                keySnapshot(keyCode: RuntimeKeyboardKeyCode.upArrow)
+            )
+        }
+        let selectedFirstResult = await eventually {
+            harness.presenter.latestShown?.selectedIndex == 0
+        }
+        XCTAssertTrue(selectedFirstResult)
+
+        for _ in 0..<6 {
+            harness.worker.enqueue(
+                keySnapshot(keyCode: RuntimeKeyboardKeyCode.downArrow)
+            )
+        }
+        let selectedSeventhResult = await eventually {
+            harness.presenter.latestShown?.selectedIndex == 6
+        }
+        XCTAssertTrue(selectedSeventhResult)
+        let seventh = try XCTUnwrap(harness.presenter.latestShown)
+        XCTAssertEqual(seventh.selectedRow?.shortcode, "pond_6")
+
+        harness.worker.enqueue(
+            keySnapshot(keyCode: RuntimeKeyboardKeyCode.tab)
+        )
+        let selectedInserted = await eventually {
+            harness.system.text == "selected-6"
+        }
+        XCTAssertTrue(selectedInserted)
+    }
+
+    func testEscapeDismissesCurrentSuggestionsButTypingResumesThem()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":fr"
+        )
+        harness.worker.setCaptureEnabled(true)
+        deliver(":f", into: harness)
+        let initiallyShown = await eventually {
+            harness.gate.mode == .suggestions
+        }
+        XCTAssertTrue(initiallyShown)
+
+        let escape = keySnapshot(keyCode: RuntimeKeyboardKeyCode.escape)
+        let escapeOutcome = harness.gate.outcome(for: escape)
+        XCTAssertEqual(escapeOutcome.decision, .intercept)
+        harness.worker.enqueue(escape.delivered(with: escapeOutcome))
+        let dismissed = await eventually {
+            guard case .hide? = harness.presenter.updates.last else {
+                return false
+            }
+            return harness.gate.mode == .hidden
+        }
+        XCTAssertTrue(dismissed)
+
+        deliver("r", into: harness)
+        let resumed = await eventually {
+            harness.gate.mode == .suggestions
+                && harness.presenter.latestShown?.rows.map(\.shortcode)
+                    == ["frog"]
+        }
+        XCTAssertTrue(resumed)
+    }
+
+    func testHorizontalCaretMovementDismissesSuggestions() async throws {
+        for keyCode in [
+            RuntimeKeyboardKeyCode.leftArrow,
+            RuntimeKeyboardKeyCode.rightArrow
+        ] {
+            let harness = try makeHarness(
+                items: [emoji(shortcode: "frog", value: "🐸")],
+                targetText: ":f"
+            )
+            harness.worker.setCaptureEnabled(true)
+            deliver(":f", into: harness)
+            let initiallyShown = await eventually {
+                harness.gate.mode == .suggestions
+            }
+            XCTAssertTrue(initiallyShown)
+
+            let movement = keySnapshot(keyCode: keyCode)
+            let outcome = harness.gate.outcome(for: movement)
+            XCTAssertEqual(outcome.decision, .passThrough)
+            XCTAssertEqual(harness.gate.mode, .hidden)
+            harness.worker.enqueue(movement.delivered(with: outcome))
+
+            let dismissed = await eventually {
+                guard case .hide? = harness.presenter.updates.last else {
+                    return false
+                }
+                return true
+            }
+            XCTAssertTrue(dismissed)
+        }
+    }
+
+    func testHorizontalCaretMovementCannotBeRepaintedByStaleRefresh()
+        async throws
+    {
+        for keyCode in [
+            RuntimeKeyboardKeyCode.leftArrow,
+            RuntimeKeyboardKeyCode.rightArrow
+        ] {
+            let harness = try makeHarness(
+                items: [emoji(shortcode: "frog", value: "🐸")],
+                targetText: ":fr",
+                presentationDelayMilliseconds: 80
+            )
+            harness.worker.setCaptureEnabled(true)
+            deliver(":f", into: harness)
+            let initiallyShown = await eventually(
+                timeout: .milliseconds(300)
+            ) {
+                harness.gate.mode == .suggestions
+            }
+            XCTAssertTrue(initiallyShown)
+
+            let updateStart = harness.presenter.updates.count
+            deliver("r", into: harness)
+            let refreshRetained = await eventually {
+                harness.presenter.updates.dropFirst(updateStart).contains {
+                    guard case .retain = $0 else {
+                        return false
+                    }
+                    return true
+                }
+            }
+            XCTAssertTrue(refreshRetained)
+
+            let movement = keySnapshot(keyCode: keyCode)
+            let outcome = harness.gate.outcome(for: movement)
+            XCTAssertEqual(outcome.decision, .passThrough)
+            harness.worker.enqueue(movement.delivered(with: outcome))
+
+            let hidden = await eventually {
+                guard case .hide? = harness.presenter.updates.last else {
+                    return false
+                }
+                return harness.gate.mode == .hidden
+            }
+            XCTAssertTrue(hidden)
+            let hideIndex = harness.presenter.updates.count - 1
+            try? await Task.sleep(for: .milliseconds(140))
+            XCTAssertFalse(
+                harness.presenter.updates.dropFirst(hideIndex + 1).contains {
+                    guard case .show = $0 else {
+                        return false
+                    }
+                    return true
+                }
+            )
+            guard case .hide? = harness.presenter.updates.last else {
+                XCTFail("A stale refresh replaced the dismissal")
+                continue
+            }
+        }
+    }
+
     func testSuggestionRefreshKeepsVisiblePanelAndInterceptionUntilUpdated()
         async throws
     {
@@ -1057,6 +1270,56 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
                 return true
             }
         )
+    }
+
+    func testBackspacingLongNoMatchToTriggerRestoresNewSuggestions()
+        async throws
+    {
+        let longQuery = String(
+            repeating: "z",
+            count: Shortcode.maximumLength
+        )
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":\(longQuery)"
+        )
+        harness.worker.setCaptureEnabled(true)
+        type(":\(longQuery)", into: harness.worker)
+        let noMatchShown = await eventually {
+            harness.presenter.latestShown?.rows.isEmpty == true
+                && harness.gate.mode == .suggestions
+        }
+        XCTAssertTrue(noMatchShown)
+
+        let overflowCount = Shortcode.maximumLength + 1
+        var recoverySnapshots: [KeyboardEventSnapshot] = []
+        for _ in 0..<overflowCount {
+            recoverySnapshots.append(
+                keySnapshot(keyCode: 6, characters: "z")
+            )
+        }
+        for _ in 0..<(Shortcode.maximumLength + overflowCount) {
+            recoverySnapshots.append(
+                keySnapshot(keyCode: RuntimeKeyboardKeyCode.delete)
+            )
+        }
+        recoverySnapshots.append(
+            keySnapshot(keyCode: 3, characters: "f")
+        )
+        let deliveredSnapshots = recoverySnapshots.map { snapshot in
+            snapshot.delivered(
+                with: harness.gate.outcome(for: snapshot)
+            )
+        }
+        for snapshot in deliveredSnapshots {
+            harness.worker.enqueue(snapshot)
+        }
+
+        let restored = await eventually {
+            harness.presenter.latestShown?.rows.map(\.shortcode) == ["frog"]
+                && harness.gate.mode == .suggestions
+        }
+        XCTAssertTrue(restored)
     }
 
     func testSuggestionRefreshCaptureFailureHidesVisiblePanelAndDisablesInterception()
