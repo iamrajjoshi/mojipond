@@ -1,9 +1,8 @@
 ---
 import { getImage } from "astro:assets";
-import "@fontsource-variable/manrope/wght.css";
+import "@fontsource-variable/nunito/wght.css";
 import favicon from "../../../Resources/Assets.xcassets/AppIcon.appiconset/icon-32.png";
 import socialImageSource from "../assets/pond-hero-desktop.png";
-import SiteFooter from "../components/SiteFooter.astro";
 import SiteHeader from "../components/SiteHeader.astro";
 import "../styles/global.css";
 
@@ -26,7 +25,7 @@ const socialImageURL = new URL(socialImage.src, Astro.site);
 ---
 
 <!doctype html>
-<html lang="en">
+<html lang="en" class:list={{ "home-page": isHome }}>
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width" />
@@ -51,12 +50,11 @@ const socialImageURL = new URL(socialImage.src, Astro.site);
     <meta name="twitter:image" content={socialImageURL} />
     <title>{title}</title>
   </head>
-  <body>
+  <body class:list={{ "home-page": isHome }}>
     <a class="skip-link" href="#main-content">Skip to content</a>
-    <SiteHeader inverse={isHome} showRepository={isHome} />
+    <SiteHeader inverse={isHome} showSourceLinks={isHome} />
     <main id="main-content">
       <slot />
     </main>
-    <SiteFooter inverse={isHome} />
   </body>
 </html>
