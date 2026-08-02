@@ -1,103 +1,188 @@
 ---
-import { waveSuggestions } from "../lib/emojiOptions";
+import { emojiOptions, waveSuggestions } from "../lib/emojiOptions";
 ---
 
-<div class="hero-demo-shell" data-hero-demo-shell>
-  <p class="sr-only">
-    Demo: type colon wave, choose Waving hand, and press Tab to replace the
-    shortcut.
+<div
+  class="hero-demo-shell"
+  data-hero-demo-shell
+  data-options={JSON.stringify(emojiOptions)}
+>
+  <p class="sr-only" id="hero-demo-instructions">
+    Interactive Messages demo. Type a colon and an emoji name, choose a result,
+    then send the message.
   </p>
 
   <div
     class="messages-demo"
     data-hero-demo
+    data-mode="auto"
     data-phase="picker"
-    aria-hidden="true"
   >
-    <div class="window-bar">
-      <span class="traffic-lights">
-        <i></i><i></i><i></i>
-      </span>
+    <div class="window-bar" aria-hidden="true">
+      <span class="traffic-lights"><i></i><i></i><i></i></span>
       <strong>Messages</strong>
       <span class="window-balance"></span>
     </div>
 
     <div class="conversation">
-      <div class="contact">
+      <div class="contact" aria-hidden="true">
         <span class="avatar">A</span>
-        <span>Alex</span>
+        <strong>Alex</strong>
+        <small>iMessage</small>
       </div>
-      <p class="incoming-bubble">Did that fix it?</p>
 
-      <figure class="hero-picker">
-        <ul>
+      <ol
+        class="message-thread"
+        aria-label="Conversation with Alex"
+        data-message-thread
+      >
+        <li class="incoming-bubble">Did that fix it?</li>
+        <li class="outgoing-bubble demo-message" data-demo-message hidden>
+          That fixed it 👋
+        </li>
+      </ol>
+
+      <div class="hero-picker" data-picker>
+        <div
+          class="suggestions"
+          id="hero-suggestions"
+          role="listbox"
+          aria-label="Emoji suggestions"
+          data-shortcode-suggestions
+        >
           {
-            waveSuggestions.map((suggestion, index) => (
-              <li class:list={{ selected: index === 0 }}>
-                <span class="emoji">{suggestion.emoji}</span>
-                <span class="copy">
-                  <strong>:{suggestion.shortcode}:</strong>
-                  <small>{suggestion.name}</small>
+            waveSuggestions.map((option, index) => (
+              <button
+                id={`hero-option-${option.shortcode}`}
+                class:list={["suggestion", { selected: index === 0 }]}
+                type="button"
+                role="option"
+                aria-selected={index === 0 ? "true" : "false"}
+                tabindex="-1"
+                data-option={option.shortcode}
+              >
+                <span class="emoji" aria-hidden="true">
+                  {option.emoji}
                 </span>
-                <span class="check">{index === 0 ? "✓" : ""}</span>
-              </li>
+                <span class="suggestion-copy">
+                  <strong>:{option.shortcode}:</strong>
+                  <small>{option.name}</small>
+                </span>
+                <span class="selected-mark" aria-hidden="true">
+                  ✓
+                </span>
+              </button>
             ))
           }
-        </ul>
-        <figcaption>
-          <span>↑↓ choose</span>
-          <span class="accept-cue"><kbd>Tab</kbd> insert</span>
-          <span>Esc close</span>
-        </figcaption>
-      </figure>
-
-      <div class="composer-row">
-        <div class="composer-field">
-          <span>That fixed it </span><strong data-demo-token>:wa</strong><i
-            class="caret"></i>
         </div>
-        <span class="send-button">↑</span>
+
+        <div class="picker-keys" aria-hidden="true">
+          <span><kbd>↑</kbd><kbd>↓</kbd> choose</span>
+          <span class="accept-cue"
+            ><kbd>Tab</kbd> or <kbd>Return</kbd> insert</span
+          >
+          <span><kbd>Esc</kbd> close</span>
+        </div>
       </div>
+
+      <form class="composer-row" data-composer>
+        <label class="sr-only" for="hero-message-input">Message</label>
+        <div class="composer-field">
+          <input
+            id="hero-message-input"
+            type="text"
+            value="That fixed it :wa"
+            placeholder="iMessage"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded="true"
+            aria-controls="hero-suggestions"
+            aria-activedescendant="hero-option-wave"
+            aria-describedby="hero-demo-instructions"
+            data-shortcode-input
+          />
+        </div>
+        <button class="send-button" type="submit" aria-label="Send message">
+          <span aria-hidden="true">↑</span>
+        </button>
+      </form>
     </div>
   </div>
 
-  <button class="motion-toggle" type="button" data-hero-toggle>
-    <span class="toggle-icon" aria-hidden="true">Ⅱ</span>
-    <span data-toggle-label>Pause demo</span>
-  </button>
+  <p class="sr-only" aria-live="polite" data-shortcode-status></p>
 </div>
 
 <script>
+  interface EmojiOption {
+    shortcode: string;
+    emoji: string;
+    name: string;
+  }
+
+  interface ActiveToken {
+    start: number;
+    end: number;
+    query: string;
+    closed: boolean;
+  }
+
   interface DemoFrame {
-    token: string;
-    phase: "typing" | "picker" | "accepting" | "inserted";
+    value: string;
+    phase: "typing" | "picker" | "accepting" | "inserted" | "sent";
     delay: number;
   }
 
-  const shell = document.querySelector<HTMLElement>("[data-hero-demo-shell]");
+  const root = document.querySelector("[data-hero-demo-shell]");
 
-  if (shell) {
-    const demo = shell.querySelector<HTMLElement>("[data-hero-demo]");
-    const token = shell.querySelector<HTMLElement>("[data-demo-token]");
-    const toggle = shell.querySelector<HTMLButtonElement>("[data-hero-toggle]");
-    const toggleLabel = shell.querySelector<HTMLElement>("[data-toggle-label]");
-    const toggleIcon = shell.querySelector<HTMLElement>(".toggle-icon");
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const frames: DemoFrame[] = [
-      { token: "", phase: "typing", delay: 560 },
-      { token: ":", phase: "typing", delay: 170 },
-      { token: ":w", phase: "typing", delay: 220 },
-      { token: ":wa", phase: "picker", delay: 1_000 },
-      { token: ":wa", phase: "accepting", delay: 460 },
-      { token: "👋", phase: "inserted", delay: 1_700 },
-    ];
+  if (root instanceof HTMLElement) {
+    const demo = root.querySelector("[data-hero-demo]");
+    const form = root.querySelector("[data-composer]");
+    const input = root.querySelector("[data-shortcode-input]");
+    const picker = root.querySelector("[data-picker]");
+    const listbox = root.querySelector("[data-shortcode-suggestions]");
+    const status = root.querySelector("[data-shortcode-status]");
+    const thread = root.querySelector("[data-message-thread]");
+    const demoMessage = root.querySelector("[data-demo-message]");
+    const sendButton = root.querySelector(".send-button");
+    const parsedOptions: unknown = JSON.parse(root.dataset.options ?? "[]");
+    const options = Array.isArray(parsedOptions)
+      ? (parsedOptions as EmojiOption[])
+      : [];
 
-    if (demo && token && toggle && toggleLabel && toggleIcon) {
+    if (
+      demo instanceof HTMLElement &&
+      form instanceof HTMLFormElement &&
+      input instanceof HTMLInputElement &&
+      picker instanceof HTMLElement &&
+      listbox instanceof HTMLElement &&
+      status instanceof HTMLParagraphElement &&
+      thread instanceof HTMLOListElement &&
+      demoMessage instanceof HTMLLIElement &&
+      sendButton instanceof HTMLButtonElement
+    ) {
+      const reducedMotion = window.matchMedia(
+        "(prefers-reduced-motion: reduce)",
+      );
+      const prefix = "That fixed it ";
+      const frames: DemoFrame[] = [
+        { value: prefix, phase: "typing", delay: 520 },
+        { value: `${prefix}:`, phase: "typing", delay: 180 },
+        { value: `${prefix}:w`, phase: "typing", delay: 220 },
+        { value: `${prefix}:wa`, phase: "picker", delay: 900 },
+        { value: `${prefix}:wa`, phase: "accepting", delay: 380 },
+        { value: `${prefix}👋`, phase: "inserted", delay: 1_050 },
+        { value: "", phase: "sent", delay: 1_450 },
+      ];
+
+      let matches = options.slice(0, 5);
+      let selectedIndex = 0;
+      let activeToken: ActiveToken | null = null;
       let frameIndex = 0;
       let timer: number | undefined;
-      let paused = reducedMotion.matches;
-      let playOnce = false;
-      let completed = false;
+      let userControlled = false;
       let suspendedByVisibility = false;
 
       const clearTimer = () => {
@@ -107,91 +192,320 @@ import { waveSuggestions } from "../lib/emojiOptions";
         }
       };
 
-      const updateControl = () => {
-        toggleLabel.textContent = paused
-          ? completed
-            ? "Replay demo"
-            : "Play demo"
-          : "Pause demo";
-        toggleIcon.textContent = paused ? "▶" : "Ⅱ";
+      const findActiveToken = (): ActiveToken | null => {
+        const caret = input.selectionStart ?? input.value.length;
+        const beforeCaret = input.value.slice(0, caret);
+        const match = beforeCaret.match(/(^|[\s([{\"'])(:[a-z0-9_+\-]*:?)$/i);
+        if (!match) return null;
+
+        const rawToken = match[2];
+        const closed = rawToken.length > 1 && rawToken.endsWith(":");
+        const suffix = closed
+          ? ""
+          : (input.value.slice(caret).match(/^[a-z0-9_+\-]*:?/i)?.[0] ?? "");
+        const query = rawToken
+          .slice(1, closed ? -1 : undefined)
+          .toLocaleLowerCase();
+
+        return {
+          start: caret - rawToken.length,
+          end: caret + suffix.length,
+          query,
+          closed,
+        };
       };
 
-      const render = (frame: DemoFrame) => {
-        token.textContent = frame.token;
-        demo.dataset.phase = frame.phase;
+      const matchingOptions = (query: string) =>
+        options
+          .filter(
+            (option) =>
+              option.shortcode.startsWith(query) ||
+              option.name.toLocaleLowerCase().includes(query),
+          )
+          .slice(0, 5);
+
+      const updateSendState = () => {
+        sendButton.disabled = input.value.trim().length === 0;
       };
 
-      const showStaticFrame = () => {
+      const closeSuggestions = () => {
+        matches = [];
+        activeToken = null;
+        picker.hidden = true;
+        input.setAttribute("aria-expanded", "false");
+        input.removeAttribute("aria-activedescendant");
+      };
+
+      const renderSuggestions = () => {
+        if (matches.length === 0) {
+          closeSuggestions();
+          return;
+        }
+
+        const rows = matches.map((option, index) => {
+          const row = document.createElement("button");
+          const emoji = document.createElement("span");
+          const copy = document.createElement("span");
+          const shortcode = document.createElement("strong");
+          const name = document.createElement("small");
+          const selectedMark = document.createElement("span");
+          const isSelected = index === selectedIndex;
+
+          row.id = `hero-option-${option.shortcode}`;
+          row.className = `suggestion${isSelected ? " selected" : ""}`;
+          row.type = "button";
+          row.tabIndex = -1;
+          row.setAttribute("role", "option");
+          row.setAttribute("aria-selected", String(isSelected));
+          row.dataset.option = option.shortcode;
+
+          emoji.className = "emoji";
+          emoji.setAttribute("aria-hidden", "true");
+          emoji.textContent = option.emoji;
+
+          copy.className = "suggestion-copy";
+          shortcode.textContent = `:${option.shortcode}:`;
+          name.textContent = option.name;
+          copy.append(shortcode, name);
+
+          selectedMark.className = "selected-mark";
+          selectedMark.setAttribute("aria-hidden", "true");
+          selectedMark.textContent = "✓";
+
+          row.append(emoji, copy, selectedMark);
+          return row;
+        });
+
+        listbox.replaceChildren(...rows);
+        picker.hidden = false;
+        input.setAttribute("aria-expanded", "true");
+        input.setAttribute("aria-activedescendant", rows[selectedIndex].id);
+      };
+
+      const insertOption = (option: EmojiOption) => {
+        if (!activeToken) return;
+
+        input.setRangeText(
+          option.emoji,
+          activeToken.start,
+          activeToken.end,
+          "end",
+        );
+        closeSuggestions();
+        updateSendState();
+        if (userControlled) {
+          status.textContent = `Inserted ${option.name}.`;
+          input.focus();
+        }
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      };
+
+      const updateSuggestions = () => {
+        activeToken = findActiveToken();
+        if (!activeToken) {
+          closeSuggestions();
+          updateSendState();
+          return;
+        }
+
+        if (activeToken.closed) {
+          const exactMatch = options.find(
+            (option) => option.shortcode === activeToken?.query,
+          );
+          if (exactMatch) {
+            insertOption(exactMatch);
+            return;
+          }
+        }
+
+        matches = matchingOptions(activeToken.query);
+        selectedIndex = 0;
+        renderSuggestions();
+        updateSendState();
+        if (userControlled) {
+          status.textContent =
+            matches.length === 0
+              ? "No emoji suggestions."
+              : `${matches.length} emoji suggestion${matches.length === 1 ? "" : "s"}.`;
+        }
+      };
+
+      const moveSelection = (offset: number) => {
+        selectedIndex =
+          (selectedIndex + offset + matches.length) % matches.length;
+        renderSuggestions();
+        const selected = matches[selectedIndex];
+        status.textContent = `${selected.name}, ${selectedIndex + 1} of ${matches.length}.`;
+        document
+          .getElementById(`hero-option-${selected.shortcode}`)
+          ?.scrollIntoView({ block: "nearest" });
+      };
+
+      const takeControl = () => {
+        if (userControlled) return;
+
+        userControlled = true;
+        suspendedByVisibility = false;
         clearTimer();
-        paused = true;
-        completed = false;
-        frameIndex = 3;
-        render(frames[frameIndex]);
-        updateControl();
+        demo.dataset.mode = "interactive";
+        demo.dataset.phase = "typing";
+        demoMessage.hidden = true;
+      };
+
+      const sendMessage = () => {
+        const message = input.value.trim();
+        if (!message) return;
+
+        const bubble = document.createElement("li");
+        bubble.className = "outgoing-bubble user-message";
+        bubble.dataset.userMessage = "";
+        bubble.textContent = message;
+        thread.append(bubble);
+
+        input.value = "";
+        closeSuggestions();
+        updateSendState();
+        status.textContent = "Message sent.";
+        input.focus();
+        window.requestAnimationFrame(() => {
+          thread.scrollTop = thread.scrollHeight;
+        });
+      };
+
+      const renderFrame = (frame: DemoFrame) => {
+        input.value = frame.value;
+        input.setSelectionRange(input.value.length, input.value.length);
+        demo.dataset.phase = frame.phase;
+        demoMessage.hidden = frame.phase !== "sent";
+
+        if (frame.phase === "picker" || frame.phase === "accepting") {
+          activeToken = findActiveToken();
+          matches = matchingOptions(activeToken?.query ?? "");
+          selectedIndex = 0;
+          renderSuggestions();
+        } else {
+          closeSuggestions();
+        }
+        updateSendState();
       };
 
       const schedule = () => {
-        if (paused || suspendedByVisibility) return;
+        if (userControlled || reducedMotion.matches || suspendedByVisibility) {
+          return;
+        }
 
         const frame = frames[frameIndex];
-        render(frame);
+        renderFrame(frame);
         timer = window.setTimeout(() => {
-          frameIndex += 1;
-          if (frameIndex >= frames.length) {
-            if (playOnce) {
-              paused = true;
-              completed = true;
-              playOnce = false;
-              frameIndex = frames.length - 1;
-              updateControl();
-              return;
-            }
-            frameIndex = 0;
-          }
+          frameIndex = (frameIndex + 1) % frames.length;
           schedule();
         }, frame.delay);
       };
 
-      const start = (once = false, initialFrame = 0) => {
+      const startAuto = (initialFrame = 0) => {
         clearTimer();
-        paused = false;
-        playOnce = once;
-        completed = false;
+        demo.dataset.mode = "auto";
         frameIndex = initialFrame;
-        updateControl();
         schedule();
       };
 
-      const stop = () => {
+      const showStaticFrame = () => {
         clearTimer();
-        paused = true;
-        completed = false;
-        updateControl();
+        demo.dataset.mode = "static";
+        frameIndex = 3;
+        renderFrame(frames[frameIndex]);
       };
 
-      toggle.addEventListener("click", () => {
-        if (paused) {
-          start(reducedMotion.matches);
-        } else {
-          stop();
+      input.addEventListener("focus", () => {
+        takeControl();
+        updateSuggestions();
+      });
+      input.addEventListener("input", () => {
+        takeControl();
+        updateSuggestions();
+      });
+      input.addEventListener("click", () => {
+        takeControl();
+        updateSuggestions();
+      });
+      input.addEventListener("select", updateSuggestions);
+
+      document.addEventListener("selectionchange", () => {
+        if (userControlled && document.activeElement === input) {
+          updateSuggestions();
         }
       });
 
+      input.addEventListener("keydown", (event) => {
+        if (
+          matches.length === 0 ||
+          input.getAttribute("aria-expanded") !== "true"
+        ) {
+          return;
+        }
+
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          moveSelection(event.key === "ArrowDown" ? 1 : -1);
+          return;
+        }
+
+        if (event.key === "Tab" || event.key === "Enter") {
+          event.preventDefault();
+          insertOption(matches[selectedIndex]);
+          return;
+        }
+
+        if (event.key === "Escape") {
+          event.preventDefault();
+          closeSuggestions();
+          status.textContent = "Suggestions closed.";
+        }
+      });
+
+      listbox.addEventListener("pointerdown", (event) => {
+        takeControl();
+        event.preventDefault();
+      });
+      listbox.addEventListener("click", (event) => {
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        const row = target.closest<HTMLElement>("[data-option]");
+        const option = options.find(
+          (candidate) => candidate.shortcode === row?.dataset.option,
+        );
+        if (option) insertOption(option);
+      });
+
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        takeControl();
+        if (
+          matches.length > 0 &&
+          input.getAttribute("aria-expanded") === "true"
+        ) {
+          insertOption(matches[selectedIndex]);
+        }
+        sendMessage();
+      });
+
       reducedMotion.addEventListener("change", () => {
+        if (userControlled) return;
         if (reducedMotion.matches) {
           showStaticFrame();
         } else {
-          start();
+          startAuto(3);
         }
       });
 
       document.addEventListener("visibilitychange", () => {
-        if (document.hidden && !paused) {
+        if (userControlled || reducedMotion.matches) return;
+        if (document.hidden) {
           suspendedByVisibility = true;
           clearTimer();
           return;
         }
-        if (!document.hidden && suspendedByVisibility) {
+        if (suspendedByVisibility) {
           suspendedByVisibility = false;
           schedule();
         }
@@ -200,7 +514,7 @@ import { waveSuggestions } from "../lib/emojiOptions";
       if (reducedMotion.matches) {
         showStaticFrame();
       } else {
-        start(false, 3);
+        startAuto(3);
       }
     }
   }
@@ -208,51 +522,48 @@ import { waveSuggestions } from "../lib/emojiOptions";
 
 <style>
   .hero-demo-shell {
-    display: grid;
     width: 100%;
-    justify-items: center;
   }
 
   .messages-demo {
     width: 100%;
     overflow: hidden;
-    color: #172d32;
-    background: rgb(250 252 251 / 96%);
-    border: 1px solid rgb(207 241 236 / 42%);
-    border-radius: 22px;
+    color: #202124;
+    background: rgb(250 252 251 / 97%);
+    border: 1px solid rgb(218 244 240 / 52%);
+    border-radius: 26px;
     box-shadow:
-      0 28px 80px rgb(0 15 20 / 38%),
-      inset 0 1px rgb(255 255 255 / 76%);
-    backdrop-filter: blur(22px) saturate(1.08);
+      0 34px 100px rgb(0 15 20 / 42%),
+      inset 0 1px rgb(255 255 255 / 82%);
+    backdrop-filter: blur(24px) saturate(1.08);
   }
 
   .window-bar {
     display: grid;
-    grid-template-columns: 76px minmax(0, 1fr) 76px;
-    min-height: 46px;
-    padding: 0 14px;
+    grid-template-columns: 84px minmax(0, 1fr) 84px;
+    min-height: 50px;
+    padding: 0 16px;
     align-items: center;
-    color: #29474c;
-    font-size: 0.78rem;
-    background: rgb(235 241 239 / 88%);
+    color: #33484d;
+    font-size: 0.82rem;
+    background: rgb(239 243 242 / 94%);
     border-bottom: 1px solid rgb(6 51 61 / 10%);
   }
 
   .window-bar > strong {
-    font-family: var(--font-display);
-    font-weight: 650;
+    font-weight: 680;
     text-align: center;
   }
 
   .traffic-lights {
     display: flex;
-    gap: 7px;
+    gap: 8px;
   }
 
   .traffic-lights i {
     display: block;
-    width: 10px;
-    height: 10px;
+    width: 11px;
+    height: 11px;
     background: #ff5f57;
     border: 1px solid rgb(0 0 0 / 8%);
     border-radius: 50%;
@@ -267,154 +578,207 @@ import { waveSuggestions } from "../lib/emojiOptions";
   }
 
   .conversation {
-    padding: 12px;
-    background: linear-gradient(180deg, #f8faf9, #fff);
+    display: flex;
+    min-height: 526px;
+    padding: 14px 18px 18px;
+    flex-direction: column;
+    background: linear-gradient(180deg, #fbfcfc, #fff);
   }
 
   .contact {
     display: grid;
-    gap: 4px;
-    margin-bottom: 8px;
+    gap: 1px;
+    margin-bottom: 10px;
     justify-items: center;
-    color: #66777a;
-    font-size: 0.68rem;
-    font-weight: 650;
+    color: #61666b;
+    font-size: 0.7rem;
+    line-height: 1.1;
+  }
+
+  .contact strong {
+    margin-top: 2px;
+    color: #303438;
+    font-size: 0.75rem;
+  }
+
+  .contact small {
+    color: #8b9095;
+    font-size: 0.62rem;
   }
 
   .avatar {
     display: grid;
-    width: 30px;
-    height: 30px;
+    width: 36px;
+    height: 36px;
     place-items: center;
     color: white;
+    font-size: 0.78rem;
+    font-weight: 700;
     background: linear-gradient(145deg, #f08b72, #cc4f65);
     border-radius: 50%;
   }
 
-  .incoming-bubble {
+  .message-thread {
+    display: flex;
+    min-height: 70px;
+    max-height: 126px;
+    padding: 2px 0 12px;
+    margin: 0;
+    overflow-y: auto;
+    flex-direction: column;
+    gap: 8px;
+    list-style: none;
+    scrollbar-width: thin;
+  }
+
+  .incoming-bubble,
+  .outgoing-bubble,
+  :global(.user-message) {
     width: max-content;
-    max-width: 70%;
-    padding: 7px 11px;
-    margin: 0 0 9px;
+    max-width: min(78%, 520px);
+    padding: 8px 12px;
+    margin: 0;
+    font-size: 0.88rem;
+    line-height: 1.25;
+  }
+
+  .incoming-bubble {
+    align-self: flex-start;
     color: #1f2526;
-    font-size: 0.82rem;
-    line-height: 1.2;
-    background: #e8e8ed;
-    border-radius: 13px 13px 13px 4px;
+    background: #e9e9ee;
+    border-radius: 15px 15px 15px 5px;
+  }
+
+  .outgoing-bubble,
+  :global(.user-message) {
+    align-self: flex-end;
+    color: white;
+    background: #0a84ff;
+    border-radius: 15px 15px 5px;
   }
 
   .hero-picker {
     width: 100%;
-    margin: 0 0 10px;
+    margin-bottom: 12px;
     overflow: hidden;
-    background: rgb(255 255 255 / 98%);
+    background: rgb(255 255 255 / 99%);
     border: 1px solid rgb(6 51 61 / 16%);
-    border-radius: 12px;
-    box-shadow: 0 12px 32px rgb(6 51 61 / 14%);
-    transform: translateY(0) scale(1);
-    transition:
-      opacity 220ms ease,
-      transform 220ms ease;
+    border-radius: 16px;
+    box-shadow: 0 16px 40px rgb(6 51 61 / 16%);
   }
 
-  ul {
+  .suggestions {
     display: grid;
-    gap: 1px;
-    padding: 4px;
-    margin: 0;
-    list-style: none;
+    gap: 2px;
+    padding: 5px;
   }
 
-  li {
+  .suggestions :global(.suggestion) {
     display: grid;
-    grid-template-columns: 34px minmax(0, 1fr) 18px;
-    gap: 8px;
-    min-height: 42px;
-    padding: 4px 8px;
+    grid-template-columns: 42px minmax(0, 1fr) 20px;
+    gap: 10px;
+    width: 100%;
+    min-height: 48px;
+    padding: 4px 10px;
     align-items: center;
-    border-radius: 8px;
+    color: var(--deep-water);
+    font: inherit;
+    text-align: left;
+    background: transparent;
+    border: 0;
+    border-radius: 11px;
+    cursor: pointer;
   }
 
-  li.selected {
+  .suggestions :global(.suggestion:hover:not(.selected)) {
+    background: #edf3f1;
+  }
+
+  .suggestions :global(.suggestion.selected) {
     color: white;
     background: var(--deep-water);
   }
 
-  .emoji {
+  .suggestions :global(.emoji) {
     display: grid;
-    width: 32px;
-    height: 32px;
+    width: 38px;
+    height: 38px;
     place-items: center;
     font-family: system-ui, sans-serif;
-    font-size: 1.3rem;
-    background: rgb(255 255 255 / 84%);
-    border: 1px solid rgb(6 51 61 / 9%);
-    border-radius: 8px;
+    font-size: 1.45rem;
+    background: rgb(255 255 255 / 86%);
+    border: 1px solid rgb(6 51 61 / 8%);
+    border-radius: 10px;
   }
 
-  .copy {
+  .suggestions :global(.suggestion-copy) {
     display: grid;
-    gap: 1px;
+    gap: 2px;
     min-width: 0;
   }
 
-  .copy strong {
+  .suggestions :global(.suggestion-copy strong) {
     overflow: hidden;
     font-family: var(--font-mono);
-    font-size: 0.82rem;
+    font-size: 0.9rem;
     line-height: 1;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .copy small {
+  .suggestions :global(.suggestion-copy small) {
     overflow: hidden;
     color: #617174;
-    font-size: 0.7rem;
+    font-size: 0.75rem;
     line-height: 1.05;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .selected .copy small {
+  .suggestions :global(.selected .suggestion-copy small) {
     color: #cfe4e2;
   }
 
-  .check {
+  .suggestions :global(.selected-mark) {
+    visibility: hidden;
     font-size: 0.8rem;
     font-weight: 750;
     text-align: center;
   }
 
-  figcaption {
+  .suggestions :global(.selected .selected-mark) {
+    visibility: visible;
+  }
+
+  .picker-keys {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px 13px;
-    min-height: 28px;
-    padding: 6px 10px;
+    gap: 7px 16px;
+    min-height: 34px;
+    padding: 7px 12px;
     align-items: center;
-    color: #627477;
-    font-size: 0.64rem;
+    color: #69797c;
+    font-size: 0.68rem;
     font-weight: 650;
     background: #eef3f1;
     border-top: 1px solid rgb(6 51 61 / 9%);
   }
 
-  figcaption span {
+  .picker-keys span {
     white-space: nowrap;
   }
 
   kbd {
     display: inline-grid;
-    min-width: 27px;
-    min-height: 18px;
+    min-width: 26px;
+    min-height: 19px;
     padding: 1px 5px;
     place-items: center;
     font-family: var(--font-mono);
-    font-size: 0.6rem;
+    font-size: 0.62rem;
     background: white;
     border: 1px solid rgb(6 51 61 / 18%);
-    border-radius: 4px;
+    border-radius: 5px;
     box-shadow: 0 1px rgb(6 51 61 / 12%);
     transition:
       color 180ms ease,
@@ -424,53 +788,73 @@ import { waveSuggestions } from "../lib/emojiOptions";
 
   .composer-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 32px;
-    gap: 8px;
+    grid-template-columns: minmax(0, 1fr) 42px;
+    gap: 9px;
+    margin-top: auto;
     align-items: center;
   }
 
   .composer-field {
-    display: flex;
-    min-height: 36px;
-    padding: 7px 12px;
-    align-items: center;
-    color: #202728;
-    font-size: 0.82rem;
+    min-width: 0;
     background: white;
-    border: 1px solid #d8ddde;
-    border-radius: 18px;
+    border: 1px solid #d2d5d8;
+    border-radius: 22px;
+    transition:
+      border-color 180ms ease,
+      box-shadow 180ms ease;
   }
 
-  .composer-field > strong {
-    color: var(--pond);
-    font-family: var(--font-mono);
-    font-weight: 700;
+  .composer-field:focus-within {
+    border-color: #0a84ff;
+    box-shadow: 0 0 0 3px rgb(10 132 255 / 15%);
   }
 
-  .caret {
-    width: 1px;
-    height: 17px;
-    margin-left: 1px;
-    background: #1988a1;
-    animation: caret-blink 900ms steps(1) infinite;
+  input {
+    width: 100%;
+    min-height: 42px;
+    padding: 8px 14px;
+    color: #202124;
+    caret-color: #0a84ff;
+    font: inherit;
+    font-size: 0.9rem;
+    background: transparent;
+    border: 0;
+    outline: 0;
+  }
+
+  [data-mode="auto"] input {
+    caret-color: transparent;
+  }
+
+  input::placeholder {
+    color: #858b90;
   }
 
   .send-button {
     display: grid;
-    width: 30px;
-    height: 30px;
+    width: 42px;
+    height: 42px;
+    padding: 0;
     place-items: center;
     color: white;
-    font-size: 1rem;
+    font: inherit;
+    font-size: 1.15rem;
     font-weight: 750;
     background: #0a84ff;
+    border: 0;
     border-radius: 50%;
+    cursor: pointer;
   }
 
-  [data-phase="typing"] .hero-picker {
-    visibility: hidden;
-    opacity: 0;
-    transform: translateY(6px) scale(0.985);
+  .send-button:hover:not(:disabled) {
+    background: #0074e8;
+    transform: translateY(-1px);
+  }
+
+  .send-button:disabled {
+    color: #9a9da1;
+    background: #e5e5ea;
+    cursor: default;
   }
 
   [data-phase="accepting"] .accept-cue kbd {
@@ -479,98 +863,114 @@ import { waveSuggestions } from "../lib/emojiOptions";
     transform: translateY(1px) scale(0.94);
   }
 
-  [data-phase="inserted"] .hero-picker {
-    visibility: hidden;
-    opacity: 0;
-    transform: translateY(6px) scale(0.985);
-  }
-
-  [data-phase="inserted"] .composer-field > strong {
-    color: inherit;
-    font-family: system-ui, sans-serif;
-    font-size: 1rem;
-  }
-
-  .motion-toggle {
-    display: inline-flex;
-    gap: 7px;
-    min-height: 32px;
-    padding: 6px 10px;
-    margin-top: 10px;
-    align-items: center;
-    color: rgb(235 251 248 / 88%);
-    font: inherit;
-    font-size: 0.72rem;
-    font-weight: 650;
-    background: rgb(2 31 38 / 58%);
-    border: 1px solid rgb(190 241 233 / 22%);
-    border-radius: 999px;
-    cursor: pointer;
-    backdrop-filter: blur(14px);
-  }
-
-  .motion-toggle:hover {
-    color: white;
-    background: rgb(5 49 57 / 82%);
-  }
-
-  .toggle-icon {
-    width: 12px;
-    font-size: 0.65rem;
-    text-align: center;
-  }
-
-  @keyframes caret-blink {
-    0%,
-    45% {
-      opacity: 1;
-    }
-
-    46%,
-    100% {
-      opacity: 0;
-    }
-  }
-
   @media (max-width: 520px) {
     .messages-demo {
-      border-radius: 18px;
+      border-radius: 20px;
     }
 
     .window-bar {
-      grid-template-columns: 64px minmax(0, 1fr) 64px;
-      min-height: 42px;
-      padding-inline: 10px;
+      grid-template-columns: 68px minmax(0, 1fr) 68px;
+      min-height: 44px;
+      padding-inline: 12px;
     }
 
     .conversation {
-      padding: 8px;
+      min-height: 486px;
+      padding: 10px;
     }
 
     .contact {
-      margin-bottom: 6px;
+      margin-bottom: 8px;
     }
 
-    .incoming-bubble {
-      margin-bottom: 7px;
+    .message-thread {
+      min-height: 64px;
+      max-height: 112px;
+      padding-bottom: 9px;
     }
 
-    li {
-      grid-template-columns: 32px minmax(0, 1fr) 16px;
+    .suggestions :global(.suggestion) {
+      grid-template-columns: 38px minmax(0, 1fr) 18px;
+      gap: 8px;
+      min-height: 44px;
+      padding-inline: 7px;
+    }
+
+    .suggestions :global(.emoji) {
+      width: 34px;
+      height: 34px;
+      font-size: 1.25rem;
+    }
+
+    .picker-keys {
+      gap: 6px 10px;
+      padding-inline: 9px;
+      font-size: 0.64rem;
+    }
+
+    .composer-row {
+      grid-template-columns: minmax(0, 1fr) 40px;
       gap: 7px;
+    }
+
+    .send-button {
+      width: 40px;
+      height: 40px;
+    }
+  }
+
+  @media (max-height: 850px) and (min-width: 521px) {
+    .conversation {
+      min-height: 468px;
+      padding: 10px 14px 14px;
+    }
+
+    .contact {
+      grid-template-rows: 1fr 1fr;
+      grid-template-columns: 28px auto;
+      column-gap: 6px;
+      margin-bottom: 4px;
+      justify-content: center;
+      justify-items: start;
+    }
+
+    .contact strong {
+      margin-top: 0;
+      align-self: end;
+      font-size: 0.68rem;
+    }
+
+    .contact small {
+      align-self: start;
+      font-size: 0.58rem;
+    }
+
+    .avatar {
+      grid-row: 1 / 3;
+      width: 28px;
+      height: 28px;
+      font-size: 0.65rem;
+    }
+
+    .message-thread {
+      min-height: 52px;
+      padding-bottom: 6px;
+    }
+
+    .suggestions :global(.suggestion) {
+      grid-template-columns: 36px minmax(0, 1fr) 18px;
       min-height: 40px;
-      padding-inline: 6px;
     }
 
-    .emoji {
-      width: 30px;
-      height: 30px;
-      font-size: 1.15rem;
+    .suggestions :global(.emoji) {
+      width: 32px;
+      height: 32px;
+      font-size: 1.2rem;
     }
 
-    figcaption {
-      gap: 5px 10px;
-      padding-inline: 8px;
+    .picker-keys {
+      min-height: 28px;
+      padding: 4px 10px;
     }
   }
 </style>

@@ -22,7 +22,6 @@ test("home page is a full-screen product landing page", async ({ page }) => {
       name: /type :wave:.+get 👋/i,
     }),
   ).toBeVisible();
-  await expect(page.getByRole("link", { name: /try it/i })).toBeVisible();
   await expect(page.getByText("Mac app in final testing.")).toHaveCount(0);
   await expect(page.getByText(/Native macOS app/i)).toHaveCount(0);
   await expect(page.getByText(/typing analytics/i)).toHaveCount(0);
@@ -48,38 +47,47 @@ test("home page is a full-screen product landing page", async ({ page }) => {
     page.locator('.pond-scene source[media="(max-width: 700px)"]'),
   ).toHaveAttribute("srcset", /2160w/);
   await expect(page.locator(".hero-picker-shell img")).toHaveCount(0);
-  await expect(page.locator(".hero-picker-shell li")).toHaveCount(5);
-  await expect(page.locator(".hero-picker-shell li").last()).toBeVisible();
-  await expect(page.locator(".hero-picker-shell figcaption")).toBeVisible();
+  await expect(page.getByRole("option")).toHaveCount(5);
+  await expect(page.getByRole("option").last()).toBeVisible();
+  await expect(page.locator(".picker-keys")).toBeVisible();
   await expectNoHorizontalOverflow(page);
 });
 
-test("hero demo types and replaces the shortcut", async ({ page }) => {
+test("hero demo types, replaces, and sends the shortcut", async ({ page }) => {
   await page.goto("/");
 
   const demo = page.locator("[data-hero-demo]");
-  const token = page.locator("[data-demo-token]");
-  const toggle = page.getByRole("button", { name: "Pause demo" });
-
-  await toggle.click();
-  await expect(page.getByRole("button", { name: "Play demo" })).toBeVisible();
-  await page.getByRole("button", { name: "Play demo" }).click();
-  const observedTokens = await page.evaluate(() => {
+  const observed = await page.evaluate(() => {
     const demo = document.querySelector<HTMLElement>("[data-hero-demo]");
-    const token = document.querySelector<HTMLElement>("[data-demo-token]");
+    const input = document.querySelector<HTMLInputElement>(
+      "[data-shortcode-input]",
+    );
+    const demoMessage = document.querySelector<HTMLElement>(
+      "[data-demo-message]",
+    );
 
-    return new Promise<string[]>((resolve, reject) => {
-      if (!demo || !token) {
+    return new Promise<{
+      values: string[];
+      phases: string[];
+      sentBubbleVisible: boolean;
+    }>((resolve, reject) => {
+      if (!demo || !input || !demoMessage) {
         reject(new Error("Hero demo is missing."));
         return;
       }
 
-      const tokens = new Set<string>();
-      const deadline = Date.now() + 4_000;
+      const values = new Set<string>();
+      const phases = new Set<string>();
+      const deadline = Date.now() + 6_000;
       const sample = () => {
-        tokens.add(token.textContent ?? "");
-        if (demo.dataset.phase === "inserted") {
-          resolve([...tokens]);
+        values.add(input.value);
+        phases.add(demo.dataset.phase ?? "");
+        if (demo.dataset.phase === "sent") {
+          resolve({
+            values: [...values],
+            phases: [...phases],
+            sentBubbleVisible: !demoMessage.hidden,
+          });
           return;
         }
         if (Date.now() >= deadline) {
@@ -92,12 +100,19 @@ test("hero demo types and replaces the shortcut", async ({ page }) => {
     });
   });
 
-  expect(observedTokens).toEqual(
-    expect.arrayContaining(["", ":", ":w", ":wa", "👋"]),
+  expect(observed.values).toEqual(
+    expect.arrayContaining(["That fixed it :wa", "That fixed it 👋", ""]),
   );
-  expect(observedTokens).not.toContain(":wave:");
-  await expect(demo).toHaveAttribute("data-phase", "inserted");
-  await expect(token).toHaveText("👋");
+  expect(observed.phases).toEqual(
+    expect.arrayContaining(["accepting", "inserted", "sent"]),
+  );
+  expect(observed.sentBubbleVisible).toBe(true);
+  await expect(demo).toHaveAttribute("data-phase", "sent");
+  await expect(page.locator("[data-demo-message]")).toContainText(
+    "That fixed it 👋",
+  );
+  await expect(page.getByRole("button", { name: "Pause demo" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Play demo" })).toHaveCount(0);
 });
 
 test("hero demo stays still when reduced motion is requested", async ({
@@ -107,18 +122,37 @@ test("hero demo stays still when reduced motion is requested", async ({
   await page.goto("/");
 
   const demo = page.locator("[data-hero-demo]");
-  const token = page.locator("[data-demo-token]");
+  const input = page.getByRole("combobox", { name: "Message" });
   await expect(demo).toHaveAttribute("data-phase", "picker");
-  await expect(token).toHaveText(":wa");
-  await expect(page.getByRole("button", { name: "Play demo" })).toBeVisible();
+  await expect(demo).toHaveAttribute("data-mode", "static");
+  await expect(input).toHaveValue("That fixed it :wa");
+  await expect(
+    page.getByRole("listbox", { name: "Emoji suggestions" }),
+  ).toBeVisible();
 
   await page.waitForTimeout(800);
   await expect(demo).toHaveAttribute("data-phase", "picker");
-  await expect(token).toHaveText(":wa");
+  await expect(demo).toHaveAttribute("data-mode", "static");
+  await expect(input).toHaveValue("That fixed it :wa");
+});
+
+test("focusing and typing permanently stops the autoplay", async ({ page }) => {
+  await page.goto("/");
+
+  const demo = page.locator("[data-hero-demo]");
+  const input = page.getByRole("combobox", { name: "Message" });
+  await input.focus();
+  await input.fill("My own message");
+
+  await expect(demo).toHaveAttribute("data-mode", "interactive");
+  await page.waitForTimeout(2_200);
+  await expect(input).toHaveValue("My own message");
+  await expect(demo).toHaveAttribute("data-mode", "interactive");
 });
 
 test("the demo supports keyboard selection", async ({ page }) => {
-  await page.goto("/#try");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
 
   const input = page.getByRole("combobox", { name: "Message" });
   const listbox = page.getByRole("listbox", { name: "Emoji suggestions" });
@@ -140,7 +174,8 @@ test("the demo supports keyboard selection", async ({ page }) => {
 test("the demo replaces exact shortcuts and recovers after a correction", async ({
   page,
 }) => {
-  await page.goto("/#try");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
 
   const input = page.getByRole("combobox", { name: "Message" });
   const listbox = page.getByRole("listbox", { name: "Emoji suggestions" });
@@ -156,20 +191,78 @@ test("the demo replaces exact shortcuts and recovers after a correction", async 
   await expect(listbox.getByRole("option", { name: /:frog:/i })).toBeVisible();
 });
 
-test("demo presets open the matching suggestion", async ({ page }) => {
-  await page.goto("/#try");
+test("Return inserts an open suggestion, then sends multiple messages", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
 
-  await page.getByRole("button", { name: ":sparkles:" }).click();
-  await expect(page.getByRole("combobox", { name: "Message" })).toHaveValue(
-    "That fixed it :spa",
-  );
-  const sparkles = page.getByRole("option", { name: /:sparkles:/i });
-  await expect(sparkles).toHaveAttribute("aria-selected", "true");
-  await sparkles.click();
-  await expect(page.getByRole("combobox", { name: "Message" })).toHaveValue(
-    "That fixed it ✨",
-  );
-  await expect(page.getByRole("combobox", { name: "Message" })).toBeFocused();
+  const input = page.getByRole("combobox", { name: "Message" });
+  const listbox = page.getByRole("listbox", { name: "Emoji suggestions" });
+  const userMessages = page.locator("[data-user-message]");
+
+  await input.focus();
+  await page.keyboard.press("Enter");
+  await expect(input).toHaveValue("That fixed it 👋");
+  await expect(listbox).toBeHidden();
+  await expect(userMessages).toHaveCount(0);
+
+  await page.keyboard.press("Enter");
+  await expect(userMessages).toHaveCount(1);
+  await expect(userMessages.nth(0)).toHaveText("That fixed it 👋");
+  await expect(input).toHaveValue("");
+  await expect(input).toBeFocused();
+
+  await input.fill("Nice :frog:");
+  await expect(input).toHaveValue("Nice 🐸");
+  await page.keyboard.press("Enter");
+  await expect(userMessages).toHaveCount(2);
+  await expect(userMessages.nth(1)).toHaveText("Nice 🐸");
+  await expect(input).toHaveValue("");
+  await expect(input).toBeFocused();
+});
+
+test("the send button resolves a suggestion and keeps every message", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+
+  const input = page.getByRole("combobox", { name: "Message" });
+  const send = page.getByRole("button", { name: "Send message" });
+  const userMessages = page.locator("[data-user-message]");
+
+  await input.fill("Ship it :frog");
+  await send.click();
+  await expect(userMessages).toHaveText(["Ship it 🐸"]);
+
+  for (let index = 1; index <= 5; index += 1) {
+    await input.fill(`Message ${index}`);
+    await send.click();
+  }
+
+  await expect(userMessages).toHaveCount(6);
+  await expect(userMessages.last()).toHaveText("Message 5");
+});
+
+test("moving the caret refreshes the active shortcut", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+
+  const input = page.getByRole("combobox", { name: "Message" });
+  const listbox = page.getByRole("listbox", { name: "Emoji suggestions" });
+  await input.fill("Use :wave here");
+  await input.evaluate((element: HTMLInputElement) => {
+    element.setSelectionRange(4, 4);
+  });
+  await expect(listbox).toBeHidden();
+
+  await input.evaluate((element: HTMLInputElement) => {
+    element.setSelectionRange(8, 8);
+  });
+  await expect(listbox).toBeVisible();
+  await page.keyboard.press("Tab");
+  await expect(input).toHaveValue("Use 👋 here");
 });
 
 test("home page stays focused on the hero and demo", async ({ page }) => {
@@ -185,6 +278,13 @@ test("home page stays focused on the hero and demo", async ({ page }) => {
     await expect(page.getByText(question, { exact: true })).toHaveCount(0);
   }
   await expect(page.locator(".details-section")).toHaveCount(0);
+  await expect(page.locator(".demo-section")).toHaveCount(0);
+  await expect(page.locator("#try")).toHaveCount(0);
+  await expect(page.locator("[data-hero-demo-shell]")).toHaveCount(1);
+  await expect(page.getByRole("combobox", { name: "Message" })).toHaveCount(1);
+  await expect(
+    page.getByRole("button", { name: /(?:pause|play) demo/i }),
+  ).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Privacy" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Terms" })).toHaveCount(0);
 });
