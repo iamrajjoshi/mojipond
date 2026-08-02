@@ -15,6 +15,7 @@ interface Props {
 
 const { title, description, noindex = false } = Astro.props;
 const canonicalURL = new URL(Astro.url.pathname, Astro.site);
+const isHome = Astro.url.pathname === "/";
 const socialImage = await getImage({
   src: socialImageSource,
   width: 1200,
@@ -29,7 +30,7 @@ const socialImageURL = new URL(socialImage.src, Astro.site);
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width" />
-    <meta name="theme-color" content="#f5f7f0" />
+    <meta name="theme-color" content={isHome ? "#06333d" : "#f5f7f0"} />
     <meta name="description" content={description} />
     {noindex && <meta name="robots" content="noindex" />}
     <link rel="canonical" href={canonicalURL} />
@@ -42,7 +43,7 @@ const socialImageURL = new URL(socialImage.src, Astro.site);
     <meta property="og:image" content={socialImageURL} />
     <meta
       property="og:image:alt"
-      content="A quiet sculpted pond created for MojiPond"
+      content="Deep teal pond ripples with green lily pads and a coral lotus"
     />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
@@ -52,7 +53,7 @@ const socialImageURL = new URL(socialImage.src, Astro.site);
   </head>
   <body>
     <a class="skip-link" href="#main-content">Skip to content</a>
-    <SiteHeader />
+    <SiteHeader inverse={isHome} />
     <main id="main-content">
       <slot />
     </main>

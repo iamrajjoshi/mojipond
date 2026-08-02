@@ -23,6 +23,11 @@ settings:
     GCC_TREAT_WARNINGS_AS_ERRORS: YES
     SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
 
+packages:
+  Sentry:
+    url: https://github.com/getsentry/sentry-cocoa.git
+    exactVersion: 9.24.0
+
 targets:
   MojiPond:
     type: application
@@ -35,6 +40,8 @@ targets:
           - Info.plist
           - MojiPond.entitlements
         buildPhase: resources
+    dependencies:
+      - package: Sentry
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.rajjoshi.MojiPond

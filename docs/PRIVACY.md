@@ -1,8 +1,10 @@
 # Privacy
 
-MojiPond processes autocomplete locally. Online sticker search and update
-checks are separate opt-in features. This document describes the current source
-implementation; it does not replace macOS’s permission dialogs.
+MojiPond processes autocomplete locally. Crash and hang reporting is enabled
+by default and can be disabled at any time in **Settings → Privacy**.
+Online sticker search and update checks are separate opt-in features. This
+document describes the current source implementation; it does not replace
+macOS’s permission dialogs.
 
 ## What MojiPond observes
 
@@ -71,6 +73,7 @@ MojiPond stores:
 | Import staging | `~/Library/Application Support/MojiPond/Import Staging/` | App-owned preparation area |
 | Recency and use counts | `~/Library/Application Support/MojiPond/usage.json` | Local ranking and recents |
 | Online Noto media cache | `~/Library/Caches/MojiPond/Media/` | Bounded on-demand storage for selected Noto originals |
+| Sentry diagnostic cache | `~/Library/Caches/MojiPond/Sentry/io.sentry/` | Pending crash and hang diagnostics stored by Sentry Cocoa |
 | Verified update staging | Private `0700` directory below the macOS temporary directory | Verified ZIP stored with `0400` permissions and an extracted candidate app awaiting explicit installation or discard |
 | Preferences and permission-request history | macOS `UserDefaults` for `com.rajjoshi.MojiPond` | Settings and permission UI state |
 
@@ -86,7 +89,7 @@ are removed even if Keychain is temporarily unavailable; the completion marker
 stays unset so Keychain cleanup retries on the next launch.
 
 Deleting the application does not automatically delete its Application Support
-data, cache, or preferences. When upgrading from an older development build,
+data, caches, or preferences. When upgrading from an older development build,
 launch the current app once to run the legacy Keychain cleanup before deleting
 it. Remove the remaining locations separately if you want to erase all local
 state.
@@ -116,13 +119,27 @@ permanently so the user can paste the copied media manually.
 
 ## Network features
 
-Every online feature has an independent preference and defaults to off.
+Online sticker search and update checks each have an independent preference
+and default to off. Crash and hang reporting defaults to on and can be turned
+off in **Settings → Privacy**. Turning it off stops future collection; a report
+captured before opt-out may still be queued or finish sending, and a report
+already transmitted cannot be recalled.
 
 | Feature | Data sent | Destination |
 | --- | --- | --- |
+| Crash and hang reporting | Crash or hang diagnostics, including stack traces and app/runtime context | Sentry |
 | Online sticker search | No query; MojiPond downloads a fixed Noto Animated Emoji manifest, filters it locally, and requests only the selected asset | Google’s Noto Animated Emoji manifest and asset hosts |
 | Signed update check | Standard HTTPS request metadata | The separately configured update-feed host |
 | Verified update download | Standard HTTPS request metadata, only after the user selects **Download & Verify** | The download host authenticated by the signed feed metadata, including HTTPS redirect destinations |
+
+MojiPond does not attach typing, clipboard contents, screenshots, view
+hierarchy, or emoji files to Sentry reports. The SDK is configured not to send
+usage analytics, performance tracing, profiling, default PII, network
+breadcrumbs, failed-request capture,
+sessions, client outcome reports, metrics, or logs. Sentry’s network transport
+necessarily receives standard request metadata, including the source IP
+address. IP storage is a separate Sentry project setting and must be disabled
+there; the app cannot enforce that server-side setting.
 
 The current import UI accepts one local ZIP at a time and makes no network
 request. The archive may contain a portable manifest, a simple image folder, or
@@ -162,12 +179,15 @@ online Noto asset or update is accepted. Import paths and archive expansion are
 validated before installation. Selected ZIPs are prepared only from a private,
 read-only staging snapshot that is removed afterward.
 
-## Telemetry and logging
+## Crash reporting and local diagnostics
 
-MojiPond has no first-party analytics or telemetry endpoint. Runtime
-diagnostics are coarse states such as permission unavailable, unsupported
-target, excluded context, or event-tap timeout. They do not include the typed
-token or document text.
+MojiPond does not operate a first-party analytics endpoint or collect usage
+analytics. It uses Sentry Cocoa 9.24.0 for opt-out crash and hang reporting.
+The setting is available in **Settings → Privacy**.
+
+Runtime diagnostics kept inside the app are coarse states such as permission
+unavailable, unsupported target, excluded context, or event-tap timeout. They
+do not include the typed token or document text.
 
 ## Safety defaults
 

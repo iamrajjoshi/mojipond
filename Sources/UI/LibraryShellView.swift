@@ -8,6 +8,7 @@ struct LibraryShellView: View {
     @State private var selectedItem: LibraryDisplayItem?
     @State private var packDetails: PackDetailSelection?
     @State private var isDropTargeted = false
+    @State private var dropTargetPackID: UUID?
     @FocusState private var focusedSidebarScope: LibraryScope?
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -256,6 +257,49 @@ struct LibraryShellView: View {
                 + (pack.isEnabled ? "enabled" : "disabled")
         )
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityIdentifier("library.sidebar.pack.\(pack.id.uuidString)")
+        .help("Drag to reorder packs")
+        .draggable(pack.id.uuidString) {
+            Label(pack.name, systemImage: "shippingbox")
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(.regularMaterial)
+                .clipShape(
+                    RoundedRectangle(
+                        cornerRadius: PondDesign.compactCornerRadius
+                    )
+                )
+        }
+        .dropDestination(for: String.self) { values, _ in
+            handlePackDrop(values, onto: pack.id)
+        } isTargeted: { isTargeted in
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.12)) {
+                if isTargeted {
+                    dropTargetPackID = pack.id
+                } else if dropTargetPackID == pack.id {
+                    dropTargetPackID = nil
+                }
+            }
+        }
+        .overlay {
+            if dropTargetPackID == pack.id {
+                RoundedRectangle(
+                    cornerRadius: PondDesign.compactCornerRadius
+                )
+                .stroke(PondDesign.pond, lineWidth: 2)
+                .allowsHitTesting(false)
+            }
+        }
+        .accessibilityAction(named: "Move Up") {
+            Task {
+                await viewModel.movePack(pack.id, by: -1)
+            }
+        }
+        .accessibilityAction(named: "Move Down") {
+            Task {
+                await viewModel.movePack(pack.id, by: 1)
+            }
+        }
         .contextMenu {
             Button(pack.isEnabled ? "Disable Pack" : "Enable Pack") {
                 Task {
@@ -269,15 +313,35 @@ struct LibraryShellView: View {
                 packDetails = PackDetailSelection(id: pack.id)
             }
             Divider()
-            LibraryPackMoveButtons(
-                viewModel: viewModel,
-                packID: pack.id
-            )
-            Divider()
             Button("Remove Pack…", role: .destructive) {
                 viewModel.requestRemovePack(pack)
             }
         }
+    }
+
+    private func handlePackDrop(
+        _ values: [String],
+        onto destinationPackID: UUID
+    ) -> Bool {
+        defer {
+            dropTargetPackID = nil
+        }
+        guard
+            let value = values.first,
+            let sourcePackID = UUID(uuidString: value),
+            sourcePackID != destinationPackID,
+            viewModel.packs.contains(where: { $0.id == sourcePackID })
+        else {
+            return false
+        }
+
+        Task {
+            await viewModel.movePack(
+                sourcePackID,
+                toPack: destinationPackID
+            )
+        }
+        return true
     }
 
     private func moveSidebarSelection(_ direction: MoveCommandDirection) {

@@ -42,6 +42,12 @@ these environment secrets after joining the paid Apple Developer Program:
 | `APPLE_NOTARY_KEY_P8_BASE64` | Base64 of a team App Store Connect API private key |
 | `APPLE_NOTARY_KEY_ID` | App Store Connect API key ID |
 | `APPLE_NOTARY_ISSUER_ID` | App Store Connect API issuer ID |
+| `SENTRY_AUTH_TOKEN` | Sentry organization token with `org:ci` access for `flash-corp/mojipond` |
+
+The Release workflow uses that token to upload the archive's dSYMs. It does
+not upload source files. A local `.sentryclirc` may be used by the Sentry
+wizard, but it is ignored and must never be committed. The DSN embedded in the
+app is a public client identifier, not an auth token.
 
 Add these repository variables:
 
@@ -65,9 +71,9 @@ Actions. After the workflow creates its draft release:
    Mac, then publish the draft.
 
 Publishing triggers the Pages workflow. It copies the release assets into the
-public site so anonymous app downloads and update checks do not depend on
-access to the private repository. If any check fails, leave the release as a
-draft and fix the source with a higher build number.
+public site so anonymous app downloads and update checks use stable release
+URLs rather than raw repository files. If any check fails, leave the release
+as a draft and fix the source with a higher build number.
 
 ## 1. Prepare the source
 
@@ -606,6 +612,8 @@ replacement. Every other safety failure remains a hard failure.
 - [ ] Light, dark, reduced-motion, keyboard, and VoiceOver UI audits complete.
 - [ ] Compatibility ledger updated with exact evidence.
 - [ ] Release notes and third-party attributions reviewed.
+- [ ] Sentry's **Prevent Storing of IP Addresses** project setting is enabled,
+      the dSYM upload succeeds, and a reviewed test crash is symbolicated.
 - [ ] AppIcon renditions reviewed against the first-party source artwork at
       `Resources/Branding/MojiPond-AppIcon-Source.png`.
 - [ ] Signed update metadata published only if the feed-generation and trusted

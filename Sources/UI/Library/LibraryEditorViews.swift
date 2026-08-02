@@ -546,6 +546,23 @@ struct LibraryPackDetailView: View {
         if let pack = viewModel.library.packs.first(where: { $0.id == packID }) {
             VStack(spacing: 0) {
                 HStack(alignment: .top, spacing: 14) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(width: 28, height: 28)
+                            .background(
+                                PondDesign.surface,
+                                in: Circle()
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityLabel("Close")
+                    .accessibilityIdentifier("library.packDetails.close")
+                    .help("Close")
+
                     ZStack {
                         Circle()
                             .fill(PondDesign.pond.opacity(0.12))
@@ -576,60 +593,47 @@ struct LibraryPackDetailView: View {
                 Form {
                     Section("Pack") {
                         LabeledContent("Emoji", value: pack.items.count.formatted())
-                        LabeledContent("Version", value: pack.manifest.version)
-                        if let description = pack.manifest.description {
+                        if let description = metadataValue(
+                            pack.manifest.description
+                        ) {
                             LabeledContent("Description", value: description)
                         }
                     }
 
-                    Section("Attribution") {
-                        LabeledContent("Author", value: pack.manifest.author ?? "Not provided")
-                        LabeledContent("License", value: pack.manifest.license ?? "Not provided")
-                        if let sourceURL = pack.manifest.sourceURL {
-                            Link("Open source page", destination: sourceURL)
-                        }
-                    }
-
-                    Section("Source") {
-                        LabeledContent("Imported from", value: viewModel.sourceSummary(for: pack))
-                        LabeledContent(
-                            "Installed",
-                            value: pack.updateMetadata.installedAt.formatted(
-                                date: .abbreviated,
-                                time: .shortened
-                            )
-                        )
-                        LabeledContent(
-                            "Last changed",
-                            value: pack.updateMetadata.lastUpdatedAt.formatted(
-                                date: .abbreviated,
-                                time: .shortened
-                            )
-                        )
-                        DisclosureGroup("Technical Details") {
-                            LabeledContent(
-                                "Pack ID",
-                                value: pack.manifest.packID.rawValue
-                            )
-                            if let revision = pack.updateMetadata.sourceRevision {
-                                LabeledContent("Revision", value: revision)
+                    if hasManifestDetails(pack) {
+                        Section("Details") {
+                            if let author = metadataValue(pack.manifest.author) {
+                                LabeledContent("Author", value: author)
+                            }
+                            if let license = metadataValue(pack.manifest.license) {
+                                LabeledContent("License", value: license)
+                            }
+                            if let sourceURL = pack.manifest.sourceURL {
+                                Link("Open source page", destination: sourceURL)
                             }
                         }
                     }
 
-                    Section("Actions") {
-                        Button("Export Pack…") {
-                            export(pack)
-                        }
-                        Button("Show Pack Files") {
-                            reveal(pack)
-                        }
+                    Section("Manage") {
                         Button("Replace from ZIP…") {
                             chooseReplacementZIP(for: pack)
                         }
                         .help(
                             "Review one ZIP archive before replacing this pack."
                         )
+                        Button("Show Pack Files") {
+                            reveal(pack)
+                        }
+                        Button("Export Pack…") {
+                            export(pack)
+                        }
+                    }
+
+                    Section {
+                        Button("Remove Pack…", role: .destructive) {
+                            viewModel.requestRemovePack(pack)
+                            dismiss()
+                        }
                     }
 
                     if let notice = viewModel.notice {
@@ -645,27 +649,11 @@ struct LibraryPackDetailView: View {
                     }
                 }
                 .formStyle(.grouped)
-
-                Divider()
-
-                HStack {
-                    Button("Remove Pack…", role: .destructive) {
-                        viewModel.requestRemovePack(pack)
-                        dismiss()
-                    }
-                    Spacer()
-                    LibraryPackMoveButtons(
-                        viewModel: viewModel,
-                        packID: pack.id
-                    )
-                    Button("Done") {
-                        dismiss()
-                    }
-                    .keyboardShortcut(.defaultAction)
-                }
-                .padding(14)
             }
-            .frame(width: 600, height: 600)
+            .frame(
+                width: 540,
+                height: hasManifestDetails(pack) ? 500 : 430
+            )
         } else {
             ContentUnavailableView(
                 "Pack removed",
@@ -674,6 +662,22 @@ struct LibraryPackDetailView: View {
             )
             .frame(width: 520, height: 360)
         }
+    }
+
+    private func hasManifestDetails(_ pack: EmojiPack) -> Bool {
+        metadataValue(pack.manifest.author) != nil
+            || metadataValue(pack.manifest.license) != nil
+            || pack.manifest.sourceURL != nil
+    }
+
+    private func metadataValue(_ value: String?) -> String? {
+        guard let value else {
+            return nil
+        }
+        let trimmed = value.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private func export(_ pack: EmojiPack) {

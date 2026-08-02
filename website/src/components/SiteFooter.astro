@@ -1,5 +1,17 @@
+---
+const repositoryURL = "https://github.com/iamrajjoshi/mojipond";
+const githubSHA = process.env.GITHUB_SHA?.trim();
+const hasExactCommit = /^[0-9a-f]{40}$/i.test(githubSHA ?? "");
+const commitURL = hasExactCommit
+  ? `${repositoryURL}/commit/${githubSHA}`
+  : `${repositoryURL}/commits/main`;
+const commitLabel = hasExactCommit
+  ? `commit ${githubSHA?.slice(0, 7)}`
+  : "commit history";
+---
+
 <footer class="site-footer">
-  <span>© 2026 MojiPond</span>
+  <a href={commitURL}>© 2026 MojiPond · {commitLabel}</a>
 </footer>
 
 <style>
@@ -13,5 +25,17 @@
     padding: 36px 0 44px;
     color: var(--ink-muted);
     font-size: 0.82rem;
+  }
+
+  a {
+    color: inherit;
+    text-decoration-color: rgb(75 101 104 / 36%);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 4px;
+  }
+
+  a:hover {
+    color: var(--pond);
+    text-decoration-color: currentcolor;
   }
 </style>

@@ -17,6 +17,7 @@ final class MojiPondPreferencesTests: XCTestCase {
         XCTAssertNil(preferences.defaultSkinTone)
         XCTAssertFalse(preferences.network.allowsStickerSearch)
         XCTAssertFalse(preferences.network.allowsUpdateChecks)
+        XCTAssertTrue(preferences.network.allowsCrashReports)
     }
 
     func testDefaultExclusionsCoverSelfSensitiveAppsTerminalsRemoteToolsAndChat() {
@@ -112,6 +113,22 @@ final class MojiPondPreferencesTests: XCTestCase {
             XCTAssertEqual(decoded, preferences)
             XCTAssertEqual(ShortcodeTrigger(character: trigger.character), trigger)
         }
+    }
+
+    func testLegacyNetworkPreferencesDefaultCrashReportsOn() throws {
+        let data = Data(
+            #"{"allowsStickerSearch":true,"allowsUpdateChecks":false}"#
+                .utf8
+        )
+
+        let preferences = try JSONDecoder().decode(
+            NetworkPreferences.self,
+            from: data
+        )
+
+        XCTAssertTrue(preferences.allowsStickerSearch)
+        XCTAssertFalse(preferences.allowsUpdateChecks)
+        XCTAssertTrue(preferences.allowsCrashReports)
     }
 
     func testPositiveTimeoutAndParserMaximumAreBounded() {

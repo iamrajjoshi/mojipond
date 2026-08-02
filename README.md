@@ -40,7 +40,9 @@ a Messages-only sticker command.
   single Developer ID-signed, hardened, Gatekeeper-accepted app. MojiPond
   installs only after **Install & Relaunch**, with a locked atomic swap,
   post-launch readiness acknowledgement, and rollback.
-- No accounts, message-database access, telemetry, or cloud storage.
+- No accounts, message-database access, or usage analytics. Crash and hang
+  reporting is enabled by default and can be disabled at any time in
+  **Settings → Privacy**.
 
 ## Product tour
 
@@ -91,8 +93,8 @@ The site uses reviewed app screenshots from `docs/screenshots/`. Before the
 first notarized release, its primary action links to the product tour and says
 that the public build is waiting for Apple signing. After a GitHub release is
 published, the Pages workflow copies the final DMG, ZIP, checksums, and signed
-update feed into the public site. It does not expose assets from the private
-repository directly.
+update feed into the public site. It serves versioned release assets instead of
+linking to raw repository files.
 
 Local development is available at `http://localhost:4321`:
 
@@ -145,20 +147,23 @@ for public distribution. Developer ID and notarization instructions are in
 
 ### UI test harness
 
-`./scripts/test.sh` remains the headless unit-test suite used by CI. Run the
-macOS UI tests separately from an unlocked interactive desktop:
+`./scripts/test.sh` is the default headless suite used by CI. It does not drive
+the pointer or take focus. macOS `XCUIApplication` tests cannot run headlessly
+inside the active user session, so routine UI automation runs in the isolated
+`macOS UI` GitHub Actions workflow instead.
+
+To deliberately run that suite on a local unlocked desktop:
 
 ```sh
-xcodegen generate
-xcodebuild \
-  -project MojiPond.xcodeproj \
-  -scheme MojiPondUITests \
-  -configuration Debug \
-  -destination 'platform=macOS' \
-  -derivedDataPath .derived/ui-app \
-  test \
-  CODE_SIGN_IDENTITY=- \
-  CODE_SIGNING_REQUIRED=YES
+MOJIPOND_ALLOW_LOCAL_UI_TESTS=1 ./scripts/test-ui-remote.sh
+```
+
+The opt-in guard prevents an accidental local run from taking over the active
+screen. The remote workflow stores its `.xcresult` bundle as a downloadable
+artifact. Run the separate integration fixture only when validating system
+text fields manually:
+
+```sh
 xcodebuild \
   -project MojiPond.xcodeproj \
   -scheme MojiPondIntegrationFixture \
@@ -222,9 +227,10 @@ With the default settings:
 - The popup is not shown for a bare `:` until that setting is enabled.
 
 Settings let you pause MojiPond, launch it at login, change the trigger and
-acceptance keys, opt into online Noto stickers or signed update checks, and
-manage app or website exclusions. Password managers, terminals,
-virtual-machine clients, Slack, and Discord are excluded by default.
+acceptance keys, turn crash and hang reporting off, opt into online Noto
+stickers or signed update checks, and manage app or website exclusions.
+Password managers, terminals, virtual-machine clients, Slack, and Discord are
+excluded by default.
 
 After onboarding, normal and login-item launches stay in the menu bar without
 opening the Library. Open it from the status menu, or launch with
@@ -378,3 +384,12 @@ The public `knobiknows/all-the-bufo` repository is an importer-engine
 compatibility fixture, not a source exposed by the current ZIP-only UI or
 bundled content. Its 2026-07-28 audit found no detected license or redistribution
 grant, so MojiPond does not bundle or redistribute its artwork.
+
+## License
+
+MojiPond is available under the [MIT License](LICENSE). Third-party components
+and assets remain subject to the licenses listed in `ThirdParty/` and
+`Resources/THIRD-PARTY-NOTICES.txt`.
+
+Please report suspected vulnerabilities through the private process in
+[SECURITY.md](SECURITY.md).
