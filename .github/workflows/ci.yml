@@ -34,6 +34,7 @@ jobs:
               | awk '
                   /(^|\/)\.env\.example$/ { next }
                   /(^|\/)\.env(\..*)?$/ { print; next }
+                  /(^|\/)\.sentryclirc$/ { print; next }
                   /(^|\/)[^\/]+\.(p8|p12|pem|key|mobileprovision|cer)$/ { print; next }
                   /(^|\/)[^\/]*(private|signing)[_-]?key[^\/]*$/ { print }
                 '
@@ -53,6 +54,18 @@ jobs:
             grep_status=$?
             if (( grep_status != 1 )); then
               echo "The private-key scan failed with status ${grep_status}." >&2
+              exit "${grep_status}"
+            fi
+          fi
+
+          if git grep -I -n -E 'sntrys_[A-Za-z0-9_=-]{20,}' -- .
+          then
+            echo "A Sentry auth token must never be committed."
+            exit 1
+          else
+            grep_status=$?
+            if (( grep_status != 1 )); then
+              echo "The Sentry-token scan failed with status ${grep_status}." >&2
               exit "${grep_status}"
             fi
           fi

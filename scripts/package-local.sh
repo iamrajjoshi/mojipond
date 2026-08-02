@@ -218,13 +218,26 @@ if [[ -z "${APPLICATION_VERSION}" || -z "${APPLICATION_BUILD}" ]]; then
 fi
 
 NOTICE_PATH="${APPLICATION_PATH}/Contents/Resources/THIRD-PARTY-NOTICES.txt"
+SENTRY_NOTICE_PATH="${APPLICATION_PATH}/Contents/Resources/SENTRY-THIRD-PARTY-NOTICES.txt"
 if [[ ! -s "${NOTICE_PATH}" ]]; then
   echo "Archive is missing the bundled third-party notices." >&2
   exit 65
 fi
 if ! /usr/bin/grep -q "Copyright (c) 2019 GitHub, Inc." "${NOTICE_PATH}" \
+    || ! /usr/bin/grep -q "Copyright (c) 2015 Sentry" "${NOTICE_PATH}" \
     || ! /usr/bin/grep -q "Creative Commons Attribution 4.0" "${NOTICE_PATH}"; then
   echo "Archive contains incomplete third-party notices." >&2
+  exit 65
+fi
+if [[ ! -s "${SENTRY_NOTICE_PATH}" ]]; then
+  echo "Archive is missing the bundled Sentry transitive notices." >&2
+  exit 65
+fi
+if ! /usr/bin/grep -q "Karl Stenerud" "${SENTRY_NOTICE_PATH}" \
+    || ! /usr/bin/grep -q "YANDEX LLC" "${SENTRY_NOTICE_PATH}" \
+    || ! /usr/bin/grep -q "Facebook, Inc." "${SENTRY_NOTICE_PATH}" \
+    || ! /usr/bin/grep -q "Apple Public Source License" "${SENTRY_NOTICE_PATH}"; then
+  echo "Archive contains incomplete Sentry transitive notices." >&2
   exit 65
 fi
 

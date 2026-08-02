@@ -280,6 +280,18 @@ final class MojiPondUITests: XCTestCase {
         )
 
         application.descendants(matching: .any)["Privacy"].click()
+        let crashReports = application.checkBoxes[
+            "Share crash reports"
+        ]
+        XCTAssertTrue(crashReports.waitForExistence(timeout: 2))
+        let crashReportsInitialValue = String(
+            describing: crashReports.value
+        )
+        crashReports.click()
+        XCTAssertNotEqual(
+            String(describing: crashReports.value),
+            crashReportsInitialValue
+        )
         XCTAssertTrue(
             application.staticTexts["Accessibility"]
                 .waitForExistence(timeout: 2)

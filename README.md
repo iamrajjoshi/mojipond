@@ -40,7 +40,9 @@ a Messages-only sticker command.
   single Developer ID-signed, hardened, Gatekeeper-accepted app. MojiPond
   installs only after **Install & Relaunch**, with a locked atomic swap,
   post-launch readiness acknowledgement, and rollback.
-- No accounts, message-database access, telemetry, or cloud storage.
+- No accounts, message-database access, or usage analytics. Crash and hang
+  reporting is enabled by default and can be disabled at any time in
+  **Settings → Privacy**.
 
 ## Product tour
 
@@ -225,9 +227,10 @@ With the default settings:
 - The popup is not shown for a bare `:` until that setting is enabled.
 
 Settings let you pause MojiPond, launch it at login, change the trigger and
-acceptance keys, opt into online Noto stickers or signed update checks, and
-manage app or website exclusions. Password managers, terminals,
-virtual-machine clients, Slack, and Discord are excluded by default.
+acceptance keys, turn crash and hang reporting off, opt into online Noto
+stickers or signed update checks, and manage app or website exclusions.
+Password managers, terminals, virtual-machine clients, Slack, and Discord are
+excluded by default.
 
 After onboarding, normal and login-item launches stay in the menu bar without
 opening the Library. Open it from the status menu, or launch with

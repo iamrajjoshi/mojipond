@@ -6,6 +6,7 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let appState: AppState
 
+    private let crashReporting = CrashReportingController()
     private var statusItem: NSStatusItem?
     private var onboardingWindow: NSWindow?
     private var libraryWindow: NSWindow?
@@ -96,6 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        configureCrashReportingIfAllowed()
         if
             ProcessInfo.processInfo.environment[
                 "XCTestConfigurationFilePath"
@@ -825,6 +827,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func observeApplicationState() {
+        if CrashReportingLaunchPolicy.allowsReporting(
+            isUITesting: launchConfiguration.isUITesting,
+            environment: ProcessInfo.processInfo.environment
+        ) {
+            appState.$preferences
+                .map { $0.network.allowsCrashReports }
+                .removeDuplicates()
+                .sink { [weak self] enabled in
+                    self?.crashReporting.setEnabled(enabled)
+                }
+                .store(in: &cancellables)
+        }
+
         appState.$preferences
             .removeDuplicates()
             .sink { [weak self] preferences in
@@ -893,6 +908,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.resetUsageRanking()
         }
         .store(in: &cancellables)
+    }
+
+    private func configureCrashReportingIfAllowed() {
+        guard CrashReportingLaunchPolicy.allowsReporting(
+            isUITesting: launchConfiguration.isUITesting,
+            environment: ProcessInfo.processInfo.environment
+        ) else {
+            return
+        }
+        crashReporting.setEnabled(
+            appState.preferences.network.allowsCrashReports
+        )
     }
 
     func resetUsageRanking() {

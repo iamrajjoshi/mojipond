@@ -56,3 +56,5 @@ Secrets.xcconfig
 *-signing-key.*
 sparkle_private_key*
 notarytool-profile*
+# Local Sentry CLI credentials
+.sentryclirc
