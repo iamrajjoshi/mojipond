@@ -47,7 +47,6 @@ enum ParserResetReason: Equatable, Sendable {
     case permissionLost
     case secureInput
     case deadKeyOrIME
-    case maximumLengthExceeded
     case openingTriggerDeleted
     case exactReplacementDisabled
     case doubleTriggerDisabled
@@ -165,6 +164,7 @@ struct ShortcodeParser: Sendable {
     var configuration: ShortcodeParserConfiguration
 
     private var nextTransactionID: UInt64
+    private var dismissedTransactionID: ParserTransactionID? = nil
 
     init(
         configuration: ShortcodeParserConfiguration = ShortcodeParserConfiguration(),
@@ -206,7 +206,19 @@ struct ShortcodeParser: Sendable {
 
         case .escape:
             let shouldConsume = panelIsVisible
-            reset(.escape, actions: &actions)
+            if
+                shouldConsume,
+                let session = state.session
+            {
+                dismissedTransactionID = session.transactionID
+                actions.append(
+                    .hideSuggestions(
+                        transactionID: session.transactionID
+                    )
+                )
+            } else {
+                reset(.escape, actions: &actions)
+            }
             return transition(from: originalState, actions: actions, shouldConsume: shouldConsume)
 
         case let .reset(reason):
@@ -235,6 +247,7 @@ struct ShortcodeParser: Sendable {
             }
             return
         }
+        dismissedTransactionID = nil
 
         if session.recoverableSuffixLength > 0 {
             if
@@ -245,14 +258,9 @@ struct ShortcodeParser: Sendable {
                 beginSession(at: date, actions: &actions)
                 return
             }
-            guard
-                session.recoverableSuffixLength
-                    < configuration.maximumTokenLength
-            else {
-                reset(.maximumLengthExceeded, actions: &actions)
-                return
+            if session.recoverableSuffixLength < Int.max {
+                session.recoverableSuffixLength += 1
             }
-            session.recoverableSuffixLength += 1
             session.lastInputAt = date
             state = .collecting(session)
             actions.append(
@@ -280,7 +288,14 @@ struct ShortcodeParser: Sendable {
             return
         }
         guard session.query.utf8.count < configuration.maximumTokenLength else {
-            reset(.maximumLengthExceeded, actions: &actions)
+            session.recoverableSuffixLength = 1
+            session.lastInputAt = date
+            state = .collecting(session)
+            actions.append(
+                .hideSuggestions(
+                    transactionID: session.transactionID
+                )
+            )
             return
         }
 
@@ -329,6 +344,7 @@ struct ShortcodeParser: Sendable {
         guard case var .collecting(session) = state else {
             return
         }
+        dismissedTransactionID = nil
         if modifiers.containsUnsupportedTypingModifier {
             reset(.unsupportedModifiers, actions: &actions)
             return
@@ -427,6 +443,7 @@ struct ShortcodeParser: Sendable {
             query: "",
             recoverableSuffixLength: 0
         )
+        dismissedTransactionID = nil
         nextTransactionID &+= 1
         state = .collecting(session)
         actions.append(.began(session))
@@ -482,6 +499,7 @@ struct ShortcodeParser: Sendable {
             return
         }
         state = .idle
+        dismissedTransactionID = nil
         actions.append(.reset(transactionID: session.transactionID, reason: reason))
     }
 
@@ -489,7 +507,8 @@ struct ShortcodeParser: Sendable {
         guard case let .collecting(session) = state else {
             return false
         }
-        return session.recoverableSuffixLength == 0
+        return dismissedTransactionID != session.transactionID
+            && session.recoverableSuffixLength == 0
             && (
                 configuration.preferences.showsSuggestionsOnBareTrigger
                     || !session.query.isEmpty

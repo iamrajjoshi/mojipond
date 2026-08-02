@@ -207,11 +207,13 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
     func setMode(
         _ mode: RuntimeInterceptionMode,
         acceptsTab: Bool,
-        acceptsReturn: Bool
+        acceptsReturn: Bool,
+        preservingExactCommitPrediction: Bool = false
     ) {
         lock.withLock {
             let invalidatesInteraction =
                 mode == .hidden
+                    && !preservingExactCommitPrediction
                     && (
                         state.mode != .hidden
                             || state.exactCommitPrediction != nil
@@ -704,7 +706,6 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
                 || state.mode == .media
         {
             let generation = state.exactCommitPrediction?.generation
-            state.exactCommitPrediction = nil
             state.mode = .hidden
             clearCommitIntent(state: &state)
             state.presentationRevision &+= 1
@@ -797,15 +798,9 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
                 state.exactCommitPrediction = replacement
                 return replacement.generation
             }
-            guard
-                prediction.recoverableSuffixLength
-                    < Shortcode.maximumLength
-            else {
-                let generation = prediction.generation
-                invalidatePassThroughContext(state: &state)
-                return generation
+            if prediction.recoverableSuffixLength < Int.max {
+                prediction.recoverableSuffixLength += 1
             }
-            prediction.recoverableSuffixLength += 1
             state.exactCommitPrediction = prediction
             suspendPassThroughContext(state: &state)
             return prediction.generation
@@ -859,9 +854,10 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
         guard
             prediction.token.utf8.count < Shortcode.maximumLength
         else {
-            let generation = prediction.generation
-            invalidatePassThroughContext(state: &state)
-            return generation
+            prediction.recoverableSuffixLength = 1
+            state.exactCommitPrediction = prediction
+            suspendPassThroughContext(state: &state)
+            return prediction.generation
         }
         prediction.token.append(
             contentsOf: EmojiAliasSyntax.normalizedToken(String(character))

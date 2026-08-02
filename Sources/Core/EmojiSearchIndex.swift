@@ -146,14 +146,15 @@ struct EmojiSearchIndex: Sendable {
         _ rhs: EmojiSearchResult,
         usage: EmojiUsageSnapshot
     ) -> Bool {
-        if lhs.matchKind != rhs.matchKind {
+        let lhsIsExact = lhs.matchKind == .exactShortcode
+            || lhs.matchKind == .exactAlias
+        let rhsIsExact = rhs.matchKind == .exactShortcode
+            || rhs.matchKind == .exactAlias
+        if
+            (lhsIsExact || rhsIsExact),
+            lhs.matchKind != rhs.matchKind
+        {
             return lhs.matchKind < rhs.matchKind
-        }
-        if lhs.matchDistance != rhs.matchDistance {
-            return lhs.matchDistance < rhs.matchDistance
-        }
-        if lhs.item.packPriority != rhs.item.packPriority {
-            return lhs.item.packPriority > rhs.item.packPriority
         }
 
         let lhsFavorite = usage.isFavorite(lhs.item.id)
@@ -170,6 +171,15 @@ struct EmojiSearchIndex: Sendable {
         }
         if lhsStatistics.useCount != rhsStatistics.useCount {
             return lhsStatistics.useCount > rhsStatistics.useCount
+        }
+        if lhs.matchKind != rhs.matchKind {
+            return lhs.matchKind < rhs.matchKind
+        }
+        if lhs.matchDistance != rhs.matchDistance {
+            return lhs.matchDistance < rhs.matchDistance
+        }
+        if lhs.item.packPriority != rhs.item.packPriority {
+            return lhs.item.packPriority > rhs.item.packPriority
         }
 
         let lhsOrder = lhs.item.order ?? .max

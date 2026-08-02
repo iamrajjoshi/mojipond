@@ -29,8 +29,7 @@ struct UnicodeAutocompleteRuntimeConfiguration: Equatable, Sendable {
 
     init(
         preferences: MojiPondPreferences = .defaults,
-        suggestionLimit: Int =
-            RuntimeSuggestionPresentationMetrics.maximumVisibleRows,
+        suggestionLimit: Int = 60,
         accessibilitySettleDelayMilliseconds: Int = 12,
         accessibilityRetryLimit: Int = 2,
         mediaSearchDebounceMilliseconds: Int = 140,
@@ -40,7 +39,7 @@ struct UnicodeAutocompleteRuntimeConfiguration: Equatable, Sendable {
         self.preferences = preferences
         self.suggestionLimit = min(
             max(1, suggestionLimit),
-            RuntimeSuggestionPresentationMetrics.maximumVisibleRows
+            100
         )
         self.accessibilitySettleDelayMilliseconds = min(
             max(0, accessibilitySettleDelayMilliseconds),
@@ -1699,7 +1698,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                     query,
                     usage: usageSnapshot,
                     limit: max(configuration.suggestionLimit, 1)
-                ).prefix(configuration.suggestionLimit)
+                )
             ),
             in: &transaction
         )
@@ -1838,8 +1837,10 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             return
         }
         let count = transaction.results.count
-        transaction.selectedIndex =
-            (transaction.selectedIndex + delta + count) % count
+        transaction.selectedIndex = min(
+            max(transaction.selectedIndex + delta, 0),
+            count - 1
+        )
         if let processingInteractionRevision {
             transaction.presentationInteractionRevision =
                 processingInteractionRevision
@@ -3030,7 +3031,9 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                 .hidden,
                 acceptsTab: configuration.preferences.shortcode.acceptsTab,
                 acceptsReturn:
-                    configuration.preferences.shortcode.acceptsReturn
+                    configuration.preferences.shortcode.acceptsReturn,
+                preservingExactCommitPrediction:
+                    preservingExactCommitPrediction
             )
         }
         let update = RuntimeSuggestionPanelUpdate.hide(revision: uiRevision)
