@@ -189,6 +189,18 @@ test("home page stays focused on the hero and demo", async ({ page }) => {
   await expect(page.getByRole("link", { name: "Terms" })).toHaveCount(0);
 });
 
+test("footer links to the deployed source revision", async ({ page }) => {
+  await page.goto("/");
+
+  const sourceLink = page.getByRole("link", {
+    name: /© 2026 MojiPond · commit/i,
+  });
+  await expect(sourceLink).toHaveAttribute(
+    "href",
+    /^https:\/\/github\.com\/iamrajjoshi\/mojipond\/(?:commit\/[0-9a-f]{40}|commits\/main)$/i,
+  );
+});
+
 test("home page has no detectable accessibility violations", async ({
   page,
 }) => {

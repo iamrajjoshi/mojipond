@@ -2,6 +2,22 @@ import Foundation
 import XCTest
 
 final class ThirdPartyNoticesTests: XCTestCase {
+    func testDistributableBundleContainsMojiPondLicense() throws {
+        let licenseURL = try XCTUnwrap(
+            Bundle.main.url(
+                forResource: "MOJIPOND-LICENSE",
+                withExtension: "txt"
+            )
+        )
+        let license = try String(contentsOf: licenseURL, encoding: .utf8)
+
+        XCTAssertTrue(license.contains("MIT License"))
+        XCTAssertTrue(license.contains("Copyright (c) 2026 Raj Joshi"))
+        XCTAssertTrue(
+            license.contains("Permission is hereby granted, free of charge")
+        )
+    }
+
     func testDistributableBundleContainsRequiredNotices() throws {
         let noticeURL = try XCTUnwrap(
             Bundle.main.url(

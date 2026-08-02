@@ -93,8 +93,8 @@ The site uses reviewed app screenshots from `docs/screenshots/`. Before the
 first notarized release, its primary action links to the product tour and says
 that the public build is waiting for Apple signing. After a GitHub release is
 published, the Pages workflow copies the final DMG, ZIP, checksums, and signed
-update feed into the public site. It does not expose assets from the private
-repository directly.
+update feed into the public site. It serves versioned release assets instead of
+linking to raw repository files.
 
 Local development is available at `http://localhost:4321`:
 
@@ -384,3 +384,12 @@ The public `knobiknows/all-the-bufo` repository is an importer-engine
 compatibility fixture, not a source exposed by the current ZIP-only UI or
 bundled content. Its 2026-07-28 audit found no detected license or redistribution
 grant, so MojiPond does not bundle or redistribute its artwork.
+
+## License
+
+MojiPond is available under the [MIT License](LICENSE). Third-party components
+and assets remain subject to the licenses listed in `ThirdParty/` and
+`Resources/THIRD-PARTY-NOTICES.txt`.
+
+Please report suspected vulnerabilities through the private process in
+[SECURITY.md](SECURITY.md).

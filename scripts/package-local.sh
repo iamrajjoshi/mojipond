@@ -219,6 +219,13 @@ fi
 
 NOTICE_PATH="${APPLICATION_PATH}/Contents/Resources/THIRD-PARTY-NOTICES.txt"
 SENTRY_NOTICE_PATH="${APPLICATION_PATH}/Contents/Resources/SENTRY-THIRD-PARTY-NOTICES.txt"
+LICENSE_PATH="${APPLICATION_PATH}/Contents/Resources/MOJIPOND-LICENSE.txt"
+if [[ ! -s "${LICENSE_PATH}" ]] \
+    || ! /usr/bin/grep -q "MIT License" "${LICENSE_PATH}" \
+    || ! /usr/bin/grep -q "Copyright (c) 2026 Raj Joshi" "${LICENSE_PATH}"; then
+  echo "Archive is missing the bundled MojiPond license." >&2
+  exit 65
+fi
 if [[ ! -s "${NOTICE_PATH}" ]]; then
   echo "Archive is missing the bundled third-party notices." >&2
   exit 65

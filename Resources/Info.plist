@@ -37,7 +37,7 @@
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
-	<string>Copyright © 2026 Raj Joshi. All rights reserved.</string>
+	<string>Copyright © 2026 Raj Joshi.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>

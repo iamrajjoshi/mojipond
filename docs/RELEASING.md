@@ -71,9 +71,9 @@ Actions. After the workflow creates its draft release:
    Mac, then publish the draft.
 
 Publishing triggers the Pages workflow. It copies the release assets into the
-public site so anonymous app downloads and update checks do not depend on
-access to the private repository. If any check fails, leave the release as a
-draft and fix the source with a higher build number.
+public site so anonymous app downloads and update checks use stable release
+URLs rather than raw repository files. If any check fails, leave the release
+as a draft and fix the source with a higher build number.
 
 ## 1. Prepare the source
 
