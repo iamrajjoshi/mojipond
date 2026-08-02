@@ -53,6 +53,34 @@ test("home page is a full-screen product landing page", async ({ page }) => {
   await expectNoHorizontalOverflow(page);
 });
 
+test("headline types and resolves once on load", async ({ page }) => {
+  await page.goto("/");
+
+  const demo = page.locator("[data-heading-demo]");
+  const finalHeading = page.locator("[data-heading-final]");
+  await expect(demo).toHaveCSS("animation-iteration-count", "1");
+  await expect(finalHeading).toHaveCSS("animation-iteration-count", "1");
+
+  await expect
+    .poll(() => demo.evaluate((element) => getComputedStyle(element).opacity))
+    .toBe("0");
+  await expect(finalHeading).toHaveCSS("opacity", "1");
+
+  await page.waitForTimeout(500);
+  await expect(demo).toHaveCSS("opacity", "0");
+  await expect(finalHeading).toHaveCSS("opacity", "1");
+});
+
+test("headline skips animation when reduced motion is requested", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+
+  await expect(page.locator("[data-heading-demo]")).toBeHidden();
+  await expect(page.locator("[data-heading-final]")).toHaveCSS("opacity", "1");
+});
+
 test("hero demo types, replaces, and sends the shortcut", async ({ page }) => {
   await page.goto("/");
 
