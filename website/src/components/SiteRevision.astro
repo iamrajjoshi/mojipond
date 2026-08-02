@@ -1,0 +1,57 @@
+---
+const repositoryURL = "https://github.com/iamrajjoshi/mojipond";
+const githubSHA = process.env.GITHUB_SHA?.trim();
+const hasExactCommit = /^[0-9a-f]{40}$/i.test(githubSHA ?? "");
+const revisionURL = hasExactCommit
+  ? `${repositoryURL}/commit/${githubSHA}`
+  : `${repositoryURL}/commits/main`;
+const revisionLabel = hasExactCommit ? githubSHA?.slice(0, 7) : "main";
+---
+
+<nav class="site-revision-nav" aria-label="Revision">
+  <a
+    class="site-revision"
+    href={revisionURL}
+    aria-label={`Revision ${revisionLabel}`}
+  >
+    {revisionLabel}
+  </a>
+</nav>
+
+<style>
+  .site-revision-nav {
+    position: fixed;
+    bottom: 16px;
+    left: 24px;
+    z-index: 30;
+  }
+
+  .site-revision {
+    display: inline-flex;
+    min-height: 32px;
+    padding: 6px 9px;
+    align-items: center;
+    color: rgb(235 255 251 / 70%);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1;
+    text-decoration-color: transparent;
+    text-underline-offset: 4px;
+    background: rgb(0 25 32 / 24%);
+    border: 1px solid rgb(235 255 251 / 12%);
+    border-radius: 999px;
+    backdrop-filter: blur(10px);
+  }
+
+  .site-revision:hover {
+    color: #f5fffd;
+    text-decoration-color: currentcolor;
+  }
+
+  @media (max-width: 520px) {
+    .site-revision-nav {
+      display: none;
+    }
+  }
+</style>
