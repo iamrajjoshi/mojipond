@@ -29,8 +29,6 @@ const revisionLabel = hasExactCommit ? githubSHA?.slice(0, 7) : "main";
 
   .site-revision {
     display: inline-flex;
-    min-height: 32px;
-    padding: 6px 9px;
     align-items: center;
     color: rgb(235 255 251 / 70%);
     font-family: var(--font-mono);
@@ -39,10 +37,6 @@ const revisionLabel = hasExactCommit ? githubSHA?.slice(0, 7) : "main";
     line-height: 1;
     text-decoration-color: transparent;
     text-underline-offset: 4px;
-    background: rgb(0 25 32 / 24%);
-    border: 1px solid rgb(235 255 251 / 12%);
-    border-radius: 999px;
-    backdrop-filter: blur(10px);
   }
 
   .site-revision:hover {

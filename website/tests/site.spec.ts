@@ -420,6 +420,8 @@ test("source links stay minimal and point to GitHub", async ({
     /^https:\/\/github\.com\/iamrajjoshi\/mojipond\/(?:commit\/[0-9a-f]{40}|commits\/main)$/i,
   );
   await expect(sourceLink).toHaveClass(/site-revision/);
+  await expect(sourceLink).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(sourceLink).toHaveCSS("border-top-width", "0px");
 
   if (isMobile) {
     await expect(sourceLink).toBeHidden();
