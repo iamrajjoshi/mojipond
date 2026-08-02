@@ -208,5 +208,11 @@ final class AppLaunchConfigurationTests: XCTestCase {
             ),
             .library
         )
+        XCTAssertEqual(
+            configuration.initialPresentation(
+                hasCompletedOnboarding: false
+            ),
+            .onboarding
+        )
     }
 }

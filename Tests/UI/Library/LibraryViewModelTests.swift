@@ -286,6 +286,63 @@ final class LibraryViewModelTests: XCTestCase {
         )
     }
 
+    func testMovesPackToSidebarDropTargetAndSupportsUndo() async throws {
+        let fixture = try await makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.workspace) }
+        let frog = try TestSupport.writeImage(
+            to: fixture.workspace.appendingPathComponent("frog.png")
+        )
+        let toad = try TestSupport.writeImage(
+            to: fixture.workspace.appendingPathComponent("toad.png")
+        )
+        let first = try await install(
+            files: [frog],
+            name: "First Pack",
+            into: fixture.store
+        )
+        let second = try await install(
+            files: [toad],
+            name: "Second Pack",
+            into: fixture.store
+        )
+        var mutationCount = 0
+        let viewModel = makeViewModel(
+            fixture,
+            onMutation: { _ in
+                mutationCount += 1
+            }
+        )
+        await viewModel.reload()
+
+        await viewModel.movePack(first.id, toPack: second.id)
+
+        XCTAssertEqual(viewModel.packs.map(\.id), [second.id, first.id])
+        XCTAssertEqual(viewModel.packs.map(\.priority), [0, 1])
+        XCTAssertEqual(mutationCount, 1)
+        let persisted = try await fixture.store.snapshot()
+        XCTAssertEqual(persisted.packs.map(\.id), [second.id, first.id])
+
+        await viewModel.undoLastMutation()
+
+        XCTAssertEqual(viewModel.packs.map(\.id), [first.id, second.id])
+        XCTAssertEqual(mutationCount, 2)
+
+        await viewModel.movePack(second.id, toPack: first.id)
+
+        XCTAssertEqual(viewModel.packs.map(\.id), [second.id, first.id])
+        XCTAssertEqual(mutationCount, 3)
+
+        await viewModel.undoLastMutation()
+
+        XCTAssertEqual(viewModel.packs.map(\.id), [first.id, second.id])
+        XCTAssertEqual(mutationCount, 4)
+
+        await viewModel.movePack(first.id, toPack: first.id)
+
+        XCTAssertEqual(viewModel.packs.map(\.id), [first.id, second.id])
+        XCTAssertEqual(mutationCount, 4)
+    }
+
     func testImportPreviewProtectsBuiltInPrimaryAndAliasClaims()
         async throws
     {

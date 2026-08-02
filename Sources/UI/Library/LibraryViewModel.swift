@@ -371,6 +371,35 @@ final class LibraryViewModel: ObservableObject {
         guard packs.indices.contains(destination) else {
             return
         }
+        await movePack(
+            packID,
+            from: sourceIndex,
+            to: destination
+        )
+    }
+
+    func movePack(_ packID: UUID, toPack destinationPackID: UUID) async {
+        guard
+            packID != destinationPackID,
+            let sourceIndex = packs.firstIndex(where: { $0.id == packID }),
+            let destination = packs.firstIndex(where: {
+                $0.id == destinationPackID
+            })
+        else {
+            return
+        }
+        await movePack(
+            packID,
+            from: sourceIndex,
+            to: destination
+        )
+    }
+
+    private func movePack(
+        _ packID: UUID,
+        from sourceIndex: Int,
+        to destination: Int
+    ) async {
         do {
             try await store.movePack(packID, to: destination)
             try await finishMutation(
@@ -767,13 +796,6 @@ final class LibraryViewModel: ObservableObject {
         paths.libraryRoot
             .appendingPathComponent("assets", isDirectory: true)
             .appendingPathComponent(pack.id.uuidString.lowercased(), isDirectory: true)
-    }
-
-    func canMovePack(_ packID: UUID, by offset: Int) -> Bool {
-        guard let source = packs.firstIndex(where: { $0.id == packID }) else {
-            return false
-        }
-        return packs.indices.contains(source + offset)
     }
 
     func item(packID: UUID, itemID: UUID) -> LibraryEmoji? {

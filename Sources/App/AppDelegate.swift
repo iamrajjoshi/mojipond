@@ -198,11 +198,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusItem = item
         }
         item.button?.image = NSImage(
-            systemSymbolName: statusSymbolName,
+            systemSymbolName: "water.waves",
             accessibilityDescription: "MojiPond"
         )
-        item.button?.toolTip = "MojiPond — \(appState.statusSummary)"
+        item.button?.toolTip = "MojiPond"
 
+        item.menu = makeStatusMenu()
+    }
+
+    func makeStatusMenu() -> NSMenu {
         let menu = NSMenu()
         let enabledItem = NSMenuItem(
             title: "Enabled",
@@ -216,20 +220,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             action: nil,
             keyEquivalent: ""
         ).isEnabled = false
-        if let notice = appState.runtimeNotice {
-            menu.addItem(
-                withTitle: notice,
-                action: nil,
-                keyEquivalent: ""
-            ).isEnabled = false
-        }
-        if let denialNotice = appState.runtimeDenialNotice {
-            menu.addItem(
-                withTitle: denialNotice,
-                action: nil,
-                keyEquivalent: ""
-            ).isEnabled = false
-        }
         if pendingMediaCopyFallback?.payload != nil {
             menu.addItem(
                 withTitle: "Copy Media Instead",
@@ -255,11 +245,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             action: #selector(showOnboarding),
             keyEquivalent: ""
         )
-        menu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
+        let settingsItem = menu.addItem(
+            withTitle: "Settings…",
+            action: #selector(showSettings),
+            keyEquivalent: ","
+        )
+        settingsItem.target = self
         addUpdateItems(to: menu)
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Quit MojiPond", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        item.menu = menu
+        menu.addItem(
+            withTitle: "Quit MojiPond",
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        )
+        return menu
     }
 
     @objc
@@ -284,7 +283,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         )
         let window = NSWindow(contentViewController: controller)
-        window.title = "Set Up MojiPond"
+        window.title = "MojiPond"
         window.styleMask = [
             .titled,
             .closable,
@@ -319,7 +318,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let controller = NSHostingController(rootView: rootView)
         let window = NSWindow(contentViewController: controller)
-        window.title = "MojiPond Library"
+        window.title = "MojiPond"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.setContentSize(NSSize(width: 920, height: 620))
         window.minSize = NSSize(width: 780, height: 520)
@@ -336,17 +335,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settingsWindow.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
-        }
-
-        if !launchConfiguration.isUITesting {
-            NSApp.activate(ignoringOtherApps: true)
-            if NSApp.sendAction(
-                Selector(("showSettingsWindow:")),
-                to: nil,
-                from: nil
-            ) {
-                return
-            }
         }
 
         let controller = NSHostingController(
@@ -703,32 +691,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureStatusItem()
     }
 
-    private var statusSymbolName: String {
-        if !appState.isEnabled {
-            return "pause.circle"
-        }
-        if !appState.canMonitorTyping {
-            return "exclamationmark.circle"
-        }
-        if case .failed = appState.runtimeState {
-            return "exclamationmark.triangle"
-        }
-        if case let .contextSuspended(denial) = appState.runtimeState {
-            switch denial {
-            case .excludedApplication, .excludedDomain:
-                return "nosign"
-            case .secureEventInput, .secureField, .secureStatusUnknown:
-                return "lock.circle"
-            case .applicationUnknown, .domainUnknown, .permissionUnavailable:
-                return "exclamationmark.circle"
-            }
-        }
-        if case .sessionLocked = appState.runtimeState {
-            return "lock.circle"
-        }
-        return "water.waves"
-    }
-
     @discardableResult
     private func configureApplicationServices() -> Bool {
         do {
@@ -831,7 +793,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Task {
                     do {
                         let pack = try await library.createPack(
-                            name: "ZIP Only Pack"
+                            name: "ZIP Only Pack",
+                            source: PackSource(
+                                kind: .zipArchive,
+                                displayLocation: "pond-pack.zip"
+                            )
                         )
                         await viewModel.reload()
                         viewModel.scope = .pack(pack.id)

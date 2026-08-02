@@ -23,7 +23,7 @@ final class MojiPondUITests: XCTestCase {
         XCTAssertFalse(
             application.staticTexts["Send & Media Pasting"].exists
         )
-        let onboardingWindow = application.windows["Set Up MojiPond"]
+        let onboardingWindow = application.windows["MojiPond"]
         XCTAssertTrue(onboardingWindow.waitForExistence(timeout: 2))
         attachScreen(
             named: "onboarding-setup",
@@ -57,7 +57,7 @@ final class MojiPondUITests: XCTestCase {
         application.buttons["Continue Without Shortcuts"].click()
         XCTAssertTrue(
             application.windows[
-                "MojiPond Library"
+                "MojiPond"
             ].waitForExistence(timeout: 5)
         )
     }
@@ -73,7 +73,7 @@ final class MojiPondUITests: XCTestCase {
         }
 
         assertLibraryIsReady(application)
-        let libraryWindow = application.windows["MojiPond Library"]
+        let libraryWindow = application.windows["MojiPond"]
         parkPointer(in: libraryWindow)
         attachScreen(
             named: "library-initial",
@@ -108,10 +108,8 @@ final class MojiPondUITests: XCTestCase {
             application.terminate()
         }
 
-        XCTAssertTrue(
-            application.windows["MojiPond Library"]
-                .waitForExistence(timeout: 5)
-        )
+        let libraryWindow = application.windows["MojiPond"]
+        XCTAssertTrue(libraryWindow.waitForExistence(timeout: 5))
         XCTAssertTrue(
             application.buttons["Import ZIP"].waitForExistence(timeout: 5)
         )
@@ -130,11 +128,23 @@ final class MojiPondUITests: XCTestCase {
                 .waitForExistence(timeout: 2)
         )
         application.buttons["Pack Details"].click()
+        let detailsSheet = libraryWindow.sheets.firstMatch
+        XCTAssertTrue(detailsSheet.waitForExistence(timeout: 2))
         XCTAssertTrue(
-            application.buttons["Export Pack…"]
+            detailsSheet.buttons["Export Pack…"]
                 .waitForExistence(timeout: 2)
         )
-        application.buttons["Done"].click()
+        XCTAssertTrue(detailsSheet.buttons["Show Pack Files"].exists)
+        XCTAssertTrue(detailsSheet.buttons["Replace from ZIP…"].exists)
+        XCTAssertTrue(detailsSheet.staticTexts["ZIP · pond-pack.zip"].exists)
+        XCTAssertFalse(detailsSheet.buttons["Done"].exists)
+        XCTAssertFalse(detailsSheet.buttons["Move Up"].exists)
+        XCTAssertFalse(detailsSheet.buttons["Move Down"].exists)
+        XCTAssertFalse(detailsSheet.staticTexts["Technical Details"].exists)
+        XCTAssertFalse(detailsSheet.staticTexts["Not provided"].exists)
+        XCTAssertFalse(detailsSheet.staticTexts["Installed"].exists)
+        XCTAssertFalse(detailsSheet.staticTexts["Last changed"].exists)
+        detailsSheet.buttons["library.packDetails.close"].click()
         XCTAssertTrue(
             application.staticTexts["No emoji in this view"]
                 .waitForExistence(timeout: 2)
@@ -359,7 +369,7 @@ final class MojiPondUITests: XCTestCase {
         application.buttons["Open MojiPond Library"].click()
         XCTAssertTrue(
             application.windows[
-                "MojiPond Library"
+                "MojiPond"
             ].waitForExistence(timeout: 5)
         )
     }
@@ -439,7 +449,7 @@ final class MojiPondUITests: XCTestCase {
         XCTAssertTrue(manageAliases.waitForExistence(timeout: 2))
         manageAliases.click()
 
-        let libraryWindow = application.windows["MojiPond Library"]
+        let libraryWindow = application.windows["MojiPond"]
         XCTAssertTrue(libraryWindow.waitForExistence(timeout: 5))
         XCTAssertTrue(
             libraryWindow.staticTexts["Aliases"]
@@ -570,7 +580,7 @@ final class MojiPondUITests: XCTestCase {
         ] {
             XCTAssertFalse(application.buttons[removedControl].exists)
         }
-        let libraryWindow = application.windows["MojiPond Library"]
+        let libraryWindow = application.windows["MojiPond"]
         parkPointer(in: libraryWindow)
         return attachScreen(
             named: screenshotName,
@@ -699,7 +709,7 @@ final class MojiPondUITests: XCTestCase {
                 ].exists
             )
         }
-        let window = application.windows["Set Up MojiPond"]
+        let window = application.windows["MojiPond"]
         XCTAssertTrue(window.waitForExistence(timeout: 2))
         attachScreen(named: screenshotName, element: window)
     }
@@ -709,7 +719,7 @@ final class MojiPondUITests: XCTestCase {
     ) {
         XCTAssertTrue(
             application.windows[
-                "MojiPond Library"
+                "MojiPond"
             ].waitForExistence(timeout: 5)
         )
         XCTAssertTrue(
