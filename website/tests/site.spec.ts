@@ -26,6 +26,10 @@ test("home page is a full-screen product landing page", async ({ page }) => {
   await expect(page.getByText(/Native macOS app/i)).toHaveCount(0);
   await expect(page.getByText(/typing analytics/i)).toHaveCount(0);
   await expect(page.getByText(/built-in Unicode catalog/i)).toHaveCount(0);
+  await expect(page.locator(".hero-summary > span")).toHaveText([
+    "MojiPond puts emoji suggestions beside your cursor.",
+    "Pick one and keep typing.",
+  ]);
 
   const heroBox = await page.locator(".hero").boundingBox();
   const viewport = page.viewportSize();
@@ -34,6 +38,16 @@ test("home page is a full-screen product landing page", async ({ page }) => {
   expect(heroBox?.x).toBeLessThanOrEqual(1);
   expect(heroBox?.width).toBeGreaterThanOrEqual((viewport?.width ?? 0) - 1);
   expect(heroBox?.height).toBeGreaterThanOrEqual((viewport?.height ?? 0) - 1);
+
+  await expect(page.locator(".pond-scene source").last()).toHaveAttribute(
+    "srcset",
+    /3840w/,
+  );
+  await expect(
+    page.locator('.pond-scene source[media="(max-width: 700px)"]'),
+  ).toHaveAttribute("srcset", /2160w/);
+  await expect(page.locator(".hero-picker-shell img")).toHaveCount(0);
+  await expect(page.locator(".hero-picker-shell li")).toHaveCount(5);
   await expectNoHorizontalOverflow(page);
 });
 
@@ -92,7 +106,7 @@ test("demo presets open the matching suggestion", async ({ page }) => {
   await expect(page.getByRole("combobox", { name: "Message" })).toBeFocused();
 });
 
-test("home page keeps the five practical answers", async ({ page }) => {
+test("home page stays focused on the hero and demo", async ({ page }) => {
   await page.goto("/");
 
   for (const question of [
@@ -102,9 +116,11 @@ test("home page keeps the five practical answers", async ({ page }) => {
     "Why does it need macOS permissions?",
     "Where does it work?",
   ]) {
-    await expect(page.getByText(question, { exact: true })).toBeVisible();
+    await expect(page.getByText(question, { exact: true })).toHaveCount(0);
   }
-  await expect(page.locator("#privacy")).toHaveCount(0);
+  await expect(page.locator(".details-section")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Privacy" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Terms" })).toHaveCount(0);
 });
 
 test("home page has no detectable accessibility violations", async ({
@@ -128,7 +144,7 @@ test("short viewports keep the picker below the hero copy", async ({
   await page.goto("/");
 
   const copyBox = await page.locator(".hero-copy").boundingBox();
-  const pickerBox = await page.locator(".hero-picker").boundingBox();
+  const pickerBox = await page.locator(".hero-picker-shell").boundingBox();
   expect(copyBox).not.toBeNull();
   expect(pickerBox).not.toBeNull();
   expect((copyBox?.y ?? 0) + (copyBox?.height ?? 0)).toBeLessThanOrEqual(
@@ -136,11 +152,13 @@ test("short viewports keep the picker below the hero copy", async ({
   );
 });
 
-test("legal pages and the branded 404 are reachable", async ({ page }) => {
+test("removed legal routes use the branded 404", async ({ page }) => {
   for (const path of ["/privacy/", "/terms/"]) {
     const response = await page.goto(path);
-    expect(response?.ok()).toBe(true);
-    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    expect(response?.status()).toBe(404);
+    await expect(
+      page.getByRole("heading", { name: "That shortcut leads nowhere." }),
+    ).toBeVisible();
   }
 
   const response = await page.goto("/missing-page/");
@@ -148,11 +166,4 @@ test("legal pages and the branded 404 are reachable", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "That shortcut leads nowhere." }),
   ).toBeVisible();
-});
-
-test("privacy page describes local Noto filtering", async ({ page }) => {
-  await page.goto("/privacy/");
-
-  await expect(page.getByText(/filters it on your Mac/)).toBeVisible();
-  await expect(page.getByText(/doesn't send your search query/)).toBeVisible();
 });
