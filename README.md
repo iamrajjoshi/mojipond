@@ -1,41 +1,61 @@
-# MojiPond
+<p align="center">
+  <a href="https://mojipond.com">
+    <img src="Resources/Assets.xcassets/AppIcon.appiconset/icon-128.png" width="112" height="112" alt="MojiPond app icon">
+  </a>
+</p>
 
-**Type `:wave:`. Get 👋.**
+<h1 align="center">MojiPond</h1>
 
-MojiPond is a native macOS menu-bar app that adds Slack-style emoji
-autocomplete beside the text cursor. It includes the standard Unicode catalog
-and a local library for custom emoji packs.
+<p align="center"><strong>Type <code>:wave:</code> Get 👋</strong></p>
 
-[Website](https://mojipond.com) ·
-[Compatibility](docs/COMPATIBILITY.md) ·
-[Privacy](docs/PRIVACY.md)
+<p align="center">
+  Slack-style emoji autocomplete for macOS, with the Unicode catalog and your own custom packs.
+</p>
 
+<p align="center">
+  <a href="https://github.com/iamrajjoshi/mojipond/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/iamrajjoshi/mojipond/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <a href="#build-from-source"><img alt="macOS 14 or newer" src="https://img.shields.io/badge/macOS-14%2B-000000?logo=apple&logoColor=white"></a>
+  <a href="https://www.swift.org/"><img alt="Swift 6" src="https://img.shields.io/badge/Swift-6.0-F05138?logo=swift&logoColor=white"></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/github/license/iamrajjoshi/mojipond"></a>
+</p>
+
+<p align="center">
+  <a href="https://mojipond.com">Website</a> ·
+  <a href="docs/COMPATIBILITY.md">Compatibility</a> ·
+  <a href="docs/PRIVACY.md">Privacy</a> ·
+  <a href="SECURITY.md">Security</a>
+</p>
+
+<p align="center">
+  <a href="https://mojipond.com">
+    <img src="docs/assets/mojipond-demo.gif" width="740" alt="MojiPond typing an emoji shortcut, opening suggestions, inserting a waving hand, and sending the message">
+  </a>
+</p>
+
+> [!NOTE]
 > **Pre-release:** MojiPond does not have a notarized public download yet.
-> Source builds are for development and local testing; the compatibility ledger
-> records what has and has not been checked in real macOS apps.
-
-| Suggestions beside the cursor                                         | Emoji library                                           |
-| --------------------------------------------------------------------- | ------------------------------------------------------- |
-| ![MojiPond emoji suggestions](docs/screenshots/caret-suggestions.png) | ![MojiPond emoji library](docs/screenshots/library.png) |
+> Source builds are for development and local testing. The
+> [compatibility ledger](docs/COMPATIBILITY.md) records what has been checked in
+> real macOS apps.
 
 ## What it does
 
 - Opens a five-item picker beside the cursor when you type a colon and part of
-  an emoji name. Arrow keys move through the results; Tab or Return inserts the
-  selected emoji.
-- Ships with Unicode emoji, aliases, skin-tone variants, recents, and local
-  search ranking. Typing an exact token such as `:wave:` replaces it
-  immediately, while `::` opens the full browser.
-- Imports ZIP packs built from image folders, a `mojipond.json` manifest, or a
-  Slack `emoji.json` file with local artwork. Every import gets a review step
-  before it changes the library.
-- Inserts custom image emoji in Messages. On macOS 15 or newer, MojiPond turns
-  static artwork and the first frame of an animation into an inline glyph; the
-  original file stays unchanged in the library.
-- Includes an offline Noto Animated Emoji set for the Messages-only `/sticker`
-  command. Downloading the larger online set is optional and off by default.
-- Skips secure fields, password managers, terminals, remote-desktop and virtual
-  machine clients, Slack, Discord, and anything added to the exclusion list.
+  an emoji name. Use the arrow keys to choose, then Tab or Return to insert.
+- Includes Unicode emoji, aliases, skin-tone variants, recents, and local
+  search ranking. Exact tokens such as `:wave:` replace immediately, while `::`
+  opens the full browser.
+- Imports ZIP packs made from image folders, a `mojipond.json` manifest, or a
+  Slack `emoji.json` file with local artwork. You review names and conflicts
+  before installation.
+- Inserts custom image emoji in Messages. On macOS 15 or newer, static artwork
+  and the first frame of an animation become inline glyphs; the original file
+  stays in the library.
+- Keeps shortcut matching and pack processing on the Mac. It skips secure
+  fields, terminals, remote desktop apps, Slack, Discord, and apps or websites
+  on your exclusion list.
+- Includes a small offline Noto Animated Emoji set for the Messages-only
+  `/sticker` command. Downloading the larger set is optional and off by default.
 
 ## Build from source
 
@@ -50,12 +70,14 @@ cd mojipond
 ./scripts/install-local.sh
 ```
 
-`install-local.sh` builds MojiPond, checks the bundle, installs it at
-`/Applications/MojiPond.app`, and launches it. The script uses the sole valid
-Apple Development identity in your Keychain when one is available; otherwise
-it uses an ad-hoc signature. If Keychain contains more than one valid identity,
-set `MOJIPOND_SIGNING_IDENTITY` to the one you want. A changed signing identity
-can make macOS ask for permissions again.
+`install-local.sh` builds MojiPond, checks the app bundle, installs it at
+`/Applications/MojiPond.app`, and launches it. It uses the sole valid Apple
+Development identity in your Keychain when one is available; otherwise it uses
+an ad-hoc signature. If more than one valid identity is present, set
+`MOJIPOND_SIGNING_IDENTITY` to the one you want.
+
+macOS ties privacy permissions to the app's signing identity. Changing that
+identity can make the system ask for access again.
 
 To build without installing:
 
@@ -63,49 +85,45 @@ To build without installing:
 ./scripts/build.sh Debug
 ```
 
-Local builds are not suitable for distribution. Developer ID signing,
-notarization, and release packaging are covered in
-[docs/RELEASING.md](docs/RELEASING.md).
+Local builds are not ready for distribution. Developer ID signing,
+notarization, and release packaging are covered in the
+[release guide](docs/RELEASING.md).
 
 ## First use
 
 1. Open **MojiPond → Setup & Permissions** from the menu bar.
 2. Grant Input Monitoring and Accessibility.
-3. Type `:wa` in a supported text field, then use Up or Down Arrow.
-4. Press Tab or Return to insert the selected result.
+3. Type `:wa` in a supported text field.
+4. Choose with Up or Down Arrow, then press Tab or Return.
 
-These are the default shortcuts:
+| Input                       | Result                                      |
+| --------------------------- | ------------------------------------------- |
+| `:wa`                       | Opens matching suggestions                  |
+| `:wave:`                    | Inserts the exact Unicode match             |
+| `::`                        | Opens the searchable emoji browser          |
+| `/sticker frog` in Messages | Opens the sticker picker                    |
+| Escape                      | Closes the picker without changing the text |
 
-| Input                       | Result                                             |
-| --------------------------- | -------------------------------------------------- |
-| `:wa`                       | Opens matching suggestions                         |
-| `:wave:`                    | Inserts the exact Unicode match                    |
-| `::`                        | Opens the searchable emoji browser                 |
-| `/sticker frog` in Messages | Opens the sticker picker                           |
-| Escape                      | Closes the active picker without changing the text |
-
-Waiting while you type leaves the picker open. Settings can change the trigger,
-acceptance keys, login behavior, exclusions, and whether a bare colon shows
-suggestions.
+Settings let you change the trigger, acceptance keys, login behavior,
+exclusions, and whether a bare colon shows suggestions.
 
 ## Permissions and privacy
 
-| Permission                              | Why MojiPond needs it                                                                             |
+| Permission                              | Why it is needed                                                                                  |
 | --------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | Input Monitoring                        | Notices the trigger and picker navigation keys while another app is active                        |
 | Accessibility                           | Finds the active editable field, places the picker by the cursor, and replaces the selected token |
 | Image emoji in Messages (Event Posting) | Optionally posts paste and Return events for custom images in Messages                            |
 
-Unicode replacement does not need Event Posting when the target supports direct
-Accessibility replacement. MojiPond does not request Screen Recording, Full
-Disk Access, Contacts, or access to the Messages database.
+Unicode replacement does not need Event Posting when the target supports
+direct Accessibility replacement. MojiPond does not request Screen Recording,
+Full Disk Access, Contacts, or access to the Messages database.
 
 Autocomplete and pack processing stay on the Mac. There are no accounts or
-usage analytics. Crash and hang reporting through Sentry is enabled by default
-and can be turned off under **Settings → Privacy**; online Noto downloads and
-automatic update checks are separate opt-ins. The
-[privacy document](docs/PRIVACY.md) lists the data, storage locations, and
-network behavior.
+usage analytics. Sentry crash and hang reporting is on by default and can be
+turned off under **Settings → Privacy**. Online Noto downloads and update checks
+are separate opt-ins. The [privacy document](docs/PRIVACY.md) lists stored data
+and network behavior.
 
 ## Custom emoji packs
 
@@ -115,50 +133,84 @@ The Library imports one local ZIP at a time. A ZIP can contain:
 - a portable `mojipond.json` pack with image or Unicode entries;
 - a Slack `emoji.json` file whose artwork is included in the archive.
 
-MojiPond shows normalized names, ignored files, duplicate artwork, and naming
-conflicts before installation. The public import UI does not fetch remote pack
-assets. See [docs/PACK_FORMAT.md](docs/PACK_FORMAT.md) for the manifest schema,
-image limits, path rules, and export format.
+Before installation, MojiPond shows normalized names, ignored files, duplicate
+artwork, and naming conflicts. The import UI does not fetch remote pack assets.
+See the [pack format](docs/PACK_FORMAT.md) for the manifest schema, image limits,
+path rules, and export format.
+
+## Screenshots
+
+| Emoji library                                           | Import review                                                       |
+| ------------------------------------------------------- | ------------------------------------------------------------------- |
+| ![MojiPond emoji library](docs/screenshots/library.png) | ![MojiPond pack import review](docs/screenshots/import-preview.png) |
 
 ## Troubleshooting
 
-### The picker does not appear
+<details>
+<summary><strong>The picker does not appear</strong></summary>
 
-- Confirm that MojiPond says **Enabled** in the menu bar and has both required
-  permissions.
+- Confirm that the menu bar says **Enabled** and both required permissions are
+  granted.
 - Try TextEdit or Notes. Some custom editors do not expose enough Accessibility
   information for safe replacement.
 - Check the app and website exclusion lists. Secure fields are always skipped.
 
-### Permissions disappear after a rebuild
+</details>
 
-Development and ad-hoc signatures can change the app identity macOS associates
-with a permission. Install the copy at `/Applications/MojiPond.app`; if a stale
+<details>
+<summary><strong>Permissions disappear after a rebuild</strong></summary>
+
+Development and ad-hoc signatures can change the identity macOS associates
+with a permission. Install the copy at `/Applications/MojiPond.app`. If a stale
 entry remains, remove it from the relevant Privacy & Security list, add the
 installed app again, and relaunch.
 
-### A custom image will not insert
+</details>
 
-Image emoji work only in Messages and need the optional Event Posting access.
-When automatic insertion cannot run safely, use **Copy Media Instead** from the
-MojiPond menu and paste it yourself.
+<details>
+<summary><strong>A custom image will not insert</strong></summary>
+
+Image emoji work only in Messages and need optional Event Posting access. When
+insertion cannot run safely, use **Copy Media Instead** from the MojiPond menu
+and paste it yourself.
+
+</details>
 
 ## Project documentation
 
 | Topic                                        | Document                                         |
 | -------------------------------------------- | ------------------------------------------------ |
 | App structure and safety boundaries          | [Architecture](docs/ARCHITECTURE.md)             |
-| Verified behavior and pending manual checks  | [Compatibility ledger](docs/COMPATIBILITY.md)    |
-| ZIP and manifest rules                       | [Portable pack format](docs/PACK_FORMAT.md)      |
-| Local data and network features              | [Privacy model](docs/PRIVACY.md)                 |
+| Verified behavior and pending manual checks  | [Compatibility](docs/COMPATIBILITY.md)           |
+| ZIP and manifest rules                       | [Pack format](docs/PACK_FORMAT.md)               |
+| Local data and network features              | [Privacy](docs/PRIVACY.md)                       |
 | Signing, notarization, updates, and releases | [Release guide](docs/RELEASING.md)               |
 | Website development                          | [Website README](website/README.md)              |
 | Artwork and third-party sources              | [Third-party assets](docs/THIRD_PARTY_ASSETS.md) |
 
+## Contributing
+
+Open an issue before a large change so the approach can be discussed. Before
+submitting code, run the checks for the part you changed.
+
+```sh
+# Native app
+./scripts/test.sh
+
+# Website
+pnpm site:format:check
+pnpm site:check
+pnpm site:build
+pnpm site:test
+```
+
+CI also scans for secrets, checks shell scripts, builds the Universal Release
+configuration, and runs the website's browser tests.
+
 ## License and security
 
-MojiPond source is available under the [MIT License](LICENSE). Third-party code
-and artwork keep the licenses listed in `ThirdParty/` and
+MojiPond is available under the [MIT License](LICENSE). Third-party code and
+artwork keep the licenses listed in `ThirdParty/` and
 `Resources/THIRD-PARTY-NOTICES.txt`.
 
 Report security problems through
