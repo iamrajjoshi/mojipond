@@ -35,7 +35,7 @@ private enum SettingsDestination: String, CaseIterable, Identifiable {
         case .library:
             "Packs, aliases, and favorites."
         case .privacy:
-            "Permissions and excluded apps."
+            "Crash reports, permissions, and exclusions."
         case .about:
             "Version and update status."
         }
@@ -597,6 +597,30 @@ struct SettingsRootView: View {
 
     private var privacy: some View {
         VStack(spacing: PondDesign.sectionSpacing) {
+            SettingsCard(
+                title: "Crash reports",
+                detail:
+                    "Help improve MojiPond when something goes wrong."
+            ) {
+                SettingsRow(
+                    icon: "stethoscope",
+                    title: "Share crash reports",
+                    detail:
+                        "Sends crash and hang stack traces, app version, and macOS version. MojiPond does not attach typing, clipboard contents, screenshots, or emoji files."
+                ) {
+                    Toggle(
+                        "Share crash reports",
+                        isOn: preference(
+                            \.network.allowsCrashReports
+                        )
+                    )
+                    .labelsHidden()
+                    .accessibilityLabel("Share crash reports")
+                    .toggleStyle(.switch)
+                    .tint(PondDesign.lily)
+                }
+            }
+
             SettingsCard(
                 title: "System permissions",
                 detail:

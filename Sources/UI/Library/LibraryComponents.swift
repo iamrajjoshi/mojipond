@@ -646,27 +646,6 @@ extension LibraryNotice.Kind {
     }
 }
 
-struct LibraryPackMoveButtons: View {
-    @ObservedObject var viewModel: LibraryViewModel
-    let packID: UUID
-
-    var body: some View {
-        Button("Move Up") {
-            Task {
-                await viewModel.movePack(packID, by: -1)
-            }
-        }
-        .disabled(!viewModel.canMovePack(packID, by: -1))
-
-        Button("Move Down") {
-            Task {
-                await viewModel.movePack(packID, by: 1)
-            }
-        }
-        .disabled(!viewModel.canMovePack(packID, by: 1))
-    }
-}
-
 struct LibraryPackEnabledToggle: View {
     @ObservedObject var viewModel: LibraryViewModel
     let pack: EmojiPack

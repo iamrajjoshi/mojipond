@@ -118,6 +118,20 @@ final class AppStateTests: XCTestCase {
             UsageRankingResetNotice.failure
         )
     }
+
+    func testStatusMenuRoutesSettingsDirectlyToAppDelegate() throws {
+        let delegate = AppDelegate()
+        let menu = delegate.makeStatusMenu()
+        let settingsItem = try XCTUnwrap(
+            menu.items.first(where: { $0.title == "Settings…" })
+        )
+
+        XCTAssertTrue(settingsItem.target === delegate)
+        XCTAssertEqual(
+            NSStringFromSelector(try XCTUnwrap(settingsItem.action)),
+            "showSettings"
+        )
+    }
 }
 
 private final class AppStateUpdateCheckHistoryStore:

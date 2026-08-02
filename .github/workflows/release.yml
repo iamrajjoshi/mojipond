@@ -124,6 +124,25 @@ jobs:
           ditto -x -k .derived/tools/xcodegen.zip .derived/tools
           echo "${GITHUB_WORKSPACE}/.derived/tools/xcodegen/bin" >> "${GITHUB_PATH}"
 
+      - name: Install pinned Sentry CLI
+        env:
+          SENTRY_CLI_VERSION: 3.6.2
+          SENTRY_CLI_SHA256: d1339bc39b2c681496d70fc0cb5263a6f4ff93939de21b1f34cffb310643ef1c
+        run: |
+          curl \
+            --fail \
+            --location \
+            --silent \
+            --show-error \
+            "https://github.com/getsentry/sentry-cli/releases/download/${SENTRY_CLI_VERSION}/sentry-cli-Darwin-universal" \
+            --output .derived/tools/sentry-cli
+          printf '%s  %s\n' \
+            "${SENTRY_CLI_SHA256}" \
+            ".derived/tools/sentry-cli" \
+            | shasum -a 256 -c -
+          chmod 0755 .derived/tools/sentry-cli
+          .derived/tools/sentry-cli --version
+
       - name: Import release credentials
         id: signing
         env:
@@ -225,6 +244,44 @@ jobs:
             exit 1
           fi
           ./scripts/package-local.sh
+
+      - name: Upload Sentry debug symbols
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: flash-corp
+          SENTRY_PROJECT: mojipond
+        shell: zsh {0}
+        run: |
+          set -euo pipefail
+          if [[ -z "${SENTRY_AUTH_TOKEN}" ]]; then
+            echo "The production release is missing SENTRY_AUTH_TOKEN." >&2
+            exit 1
+          fi
+
+          package_directories=("${PWD}"/Artifacts/releases/MojiPond-*(N))
+          if (( ${#package_directories[@]} != 1 )); then
+            echo "Expected exactly one package directory." >&2
+            exit 1
+          fi
+          archives=("${package_directories[1]}"/*.xcarchive(N))
+          if (( ${#archives[@]} != 1 )); then
+            echo "Expected exactly one release archive." >&2
+            exit 1
+          fi
+          symbol_directory="${archives[1]}/dSYMs"
+          if [[ ! -d "${symbol_directory}" ]] \
+              || [[ -z "$(/usr/bin/find "${symbol_directory}" -name '*.dSYM' -print -quit)" ]]; then
+            echo "The release archive does not contain dSYMs." >&2
+            exit 1
+          fi
+
+          .derived/tools/sentry-cli debug-files upload \
+            --org "${SENTRY_ORG}" \
+            --project "${SENTRY_PROJECT}" \
+            --type dsym \
+            --no-sources \
+            --wait-for 120 \
+            "${symbol_directory}"
 
       - name: Notarize final ZIP and DMG
         env:

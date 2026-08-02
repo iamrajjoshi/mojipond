@@ -240,10 +240,14 @@ Posting requirements.
 
 ## Network boundaries
 
-Every user-facing online feature has its own preference and defaults to off:
+Each user-facing online feature has its own preference. These features default
+to off:
 
 - online Noto sticker search;
 - signed update checks.
+
+Crash and hang reporting is controlled separately, defaults to on, and can be
+disabled in **Settings → Privacy**.
 
 The offline Noto subset and built-in Unicode catalog require no network.
 Selected online Noto originals may use the bounded on-demand disk cache. ZIP

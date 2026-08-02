@@ -1,0 +1,60 @@
+name: macOS UI
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-ui-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ui-tests:
+    name: UI tests in an isolated Mac
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned XcodeGen
+        env:
+          XCODEGEN_VERSION: 2.46.0
+          XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
+        run: |
+          mkdir -p .derived/tools
+          curl \
+            --fail \
+            --location \
+            --silent \
+            --show-error \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_VERSION}/xcodegen.zip" \
+            --output .derived/tools/xcodegen.zip
+          printf '%s  %s\n' \
+            "${XCODEGEN_SHA256}" \
+            ".derived/tools/xcodegen.zip" \
+            | shasum -a 256 -c -
+          ditto \
+            -x \
+            -k \
+            .derived/tools/xcodegen.zip \
+            .derived/tools
+          echo "${GITHUB_WORKSPACE}/.derived/tools/xcodegen/bin" \
+            >> "${GITHUB_PATH}"
+
+      - name: Run macOS UI tests
+        env:
+          CI: "true"
+        run: ./scripts/test-ui-remote.sh
+
+      - name: Upload UI test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mojipond-ui-results-${{ github.run_id }}
+          path: .derived/ui-results/*.xcresult
+          if-no-files-found: warn
+          retention-days: 14
