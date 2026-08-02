@@ -4,6 +4,7 @@ import "@fontsource-variable/nunito/wght.css";
 import favicon from "../../../Resources/Assets.xcassets/AppIcon.appiconset/icon-32.png";
 import socialImageSource from "../assets/pond-hero-desktop.png";
 import SiteHeader from "../components/SiteHeader.astro";
+import SiteRevision from "../components/SiteRevision.astro";
 import "../styles/global.css";
 
 interface Props {
@@ -52,9 +53,10 @@ const socialImageURL = new URL(socialImage.src, Astro.site);
   </head>
   <body class:list={{ "home-page": isHome }}>
     <a class="skip-link" href="#main-content">Skip to content</a>
-    <SiteHeader inverse={isHome} showSourceLinks={isHome} />
+    <SiteHeader inverse={isHome} showRepositoryLink={isHome} />
     <main id="main-content">
       <slot />
     </main>
+    {isHome && <SiteRevision />}
   </body>
 </html>

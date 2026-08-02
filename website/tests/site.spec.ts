@@ -370,25 +370,45 @@ test("home page stays focused on the hero and demo", async ({ page }) => {
   await expect(page.getByRole("link", { name: "Terms" })).toHaveCount(0);
 });
 
-test("source links stay minimal and point to GitHub", async ({ page }) => {
+test("source links stay minimal and point to GitHub", async ({
+  page,
+  isMobile,
+}) => {
   await page.goto("/");
 
+  const sourceLinks = page.locator(".source-links");
   const repositoryLink = page.getByRole("link", { name: "GitHub" });
   await expect(repositoryLink).toHaveAttribute(
     "href",
     "https://github.com/iamrajjoshi/mojipond",
   );
+  await expect(sourceLinks.getByRole("link")).toHaveCount(1);
 
-  const sourceLink = page.getByRole("link", {
-    name: /^Revision (?:[0-9a-f]{7}|main)$/i,
-  });
+  const sourceLink = page.locator(".site-revision");
+  await expect(sourceLink).toHaveAttribute(
+    "aria-label",
+    /^Revision (?:[0-9a-f]{7}|main)$/i,
+  );
   await expect(sourceLink).toHaveAttribute(
     "href",
     /^https:\/\/github\.com\/iamrajjoshi\/mojipond\/(?:commit\/[0-9a-f]{40}|commits\/main)$/i,
   );
+  await expect(sourceLink).toHaveClass(/site-revision/);
+
+  if (isMobile) {
+    await expect(sourceLink).toBeHidden();
+  } else {
+    const sourceBox = await sourceLink.boundingBox();
+    const viewport = page.viewportSize();
+    expect(sourceBox).not.toBeNull();
+    expect(viewport).not.toBeNull();
+    expect((sourceBox?.y ?? 0) + (sourceBox?.height ?? 0)).toBeGreaterThan(
+      (viewport?.height ?? 0) - 56,
+    );
+  }
   await expect(page.locator(".site-footer")).toHaveCount(0);
-  await expect(page.locator(".source-links")).not.toContainText("©");
-  await expect(page.locator(".source-links")).not.toContainText(/commit/i);
+  await expect(sourceLinks).not.toContainText("©");
+  await expect(sourceLinks).not.toContainText(/commit/i);
 });
 
 test("home page has no detectable accessibility violations", async ({
