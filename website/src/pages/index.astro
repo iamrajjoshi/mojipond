@@ -12,9 +12,25 @@ const description =
   <section class="hero" aria-labelledby="hero-title">
     <PondScene />
     <div class="hero-copy">
-      <h1 id="hero-title">
-        <span>Type <span class="shortcode">:wave:</span>.</span>
-        <span>Get 👋.</span>
+      <h1 id="hero-title" aria-label="Type :wave:. Get 👋.">
+        <span class="hero-heading-final" aria-hidden="true" data-heading-final>
+          <span>Type <span class="shortcode">:wave:</span>.</span>
+          <span>Get 👋.</span>
+        </span>
+        <span class="hero-heading-demo" aria-hidden="true" data-heading-demo>
+          <span class="heading-demo-action">
+            <span class="heading-demo-type">Type</span>
+            <span class="heading-demo-get">Get</span>
+          </span>
+          <span class="heading-demo-value">
+            <span class="heading-demo-code">
+              <span>:wave:</span><span class="heading-demo-period">.</span>
+            </span>
+            <span class="heading-demo-result"
+              ><span>👋</span><span>.</span></span
+            >
+          </span>
+        </span>
       </h1>
       <p class="hero-summary">
         <span>MojiPond puts emoji suggestions beside your cursor.</span>
@@ -68,8 +84,7 @@ const description =
   }
 
   .hero h1 {
-    display: grid;
-    gap: 2px;
+    position: relative;
     margin-bottom: 18px;
     color: #f5fffd;
     font-size: clamp(3.25rem, 6vw, 5.25rem);
@@ -79,12 +94,166 @@ const description =
     text-shadow: 0 3px 24px rgb(0 20 28 / 32%);
   }
 
+  .hero-heading-final {
+    display: grid;
+    gap: 2px;
+    opacity: 0;
+    transform: translateY(8px);
+    animation: heading-final-in 360ms ease 2.85s forwards;
+  }
+
+  .hero-heading-demo {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: heading-demo-out 260ms ease 2.8s forwards;
+  }
+
+  .heading-demo-action,
+  .heading-demo-value {
+    display: inline-grid;
+    align-items: center;
+  }
+
+  .heading-demo-action {
+    margin-right: 0.18em;
+  }
+
+  .heading-demo-action > span,
+  .heading-demo-value > span {
+    grid-area: 1 / 1;
+  }
+
+  .heading-demo-get {
+    opacity: 0;
+    animation: heading-result-in 220ms ease 1.9s forwards;
+  }
+
+  .heading-demo-type {
+    animation: heading-result-out 180ms ease 1.85s forwards;
+  }
+
+  .heading-demo-value {
+    width: 0;
+    overflow: hidden;
+    border-right: 0.055em solid #80e8d8;
+    color: #80e8d8;
+    font-family: var(--font-mono);
+    font-size: 0.86em;
+    font-weight: 700;
+    letter-spacing: -0.06em;
+    text-align: left;
+    animation:
+      heading-value-type 1.3s steps(7, end) 300ms forwards,
+      heading-caret 520ms step-end 300ms 3,
+      heading-value-collapse 260ms ease 1.85s forwards,
+      heading-value-border-out 1ms linear 1.85s forwards;
+  }
+
+  .heading-demo-code {
+    display: inline-flex;
+    width: 7ch;
+    white-space: nowrap;
+    animation: heading-result-out 180ms ease 1.85s forwards;
+  }
+
+  .heading-demo-period {
+    color: #f5fffd;
+    font-family: var(--font-sans);
+    letter-spacing: normal;
+  }
+
+  .heading-demo-result {
+    display: inline-flex;
+    align-items: baseline;
+    opacity: 0;
+    color: #f5fffd;
+    font-family: var(--font-sans);
+    font-size: 1.12em;
+    letter-spacing: normal;
+    transform: scale(0.72) rotate(-8deg);
+    animation: heading-emoji-in 260ms cubic-bezier(0.2, 0.9, 0.25, 1.3) 1.87s
+      forwards;
+  }
+
   .hero h1 .shortcode {
     color: #80e8d8;
     font-family: var(--font-mono);
     font-size: 0.86em;
     font-weight: 700;
     letter-spacing: -0.06em;
+  }
+
+  @keyframes heading-value-type {
+    to {
+      width: 7ch;
+    }
+  }
+
+  @keyframes heading-caret {
+    50% {
+      border-color: transparent;
+    }
+  }
+
+  @keyframes heading-result-out {
+    to {
+      border-color: transparent;
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+  }
+
+  @keyframes heading-result-in {
+    from {
+      opacity: 0;
+      transform: translateY(5px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes heading-value-collapse {
+    from {
+      width: 7ch;
+    }
+
+    to {
+      width: 1.62em;
+    }
+  }
+
+  @keyframes heading-value-border-out {
+    to {
+      border-color: transparent;
+    }
+  }
+
+  @keyframes heading-emoji-in {
+    to {
+      opacity: 1;
+      transform: scale(1) rotate(0);
+    }
+  }
+
+  @keyframes heading-demo-out {
+    to {
+      opacity: 0;
+      transform: translateY(-8px);
+      visibility: hidden;
+    }
+  }
+
+  @keyframes heading-final-in {
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   .hero-copy > p {
@@ -114,6 +283,19 @@ const description =
 
     .hero-picker-shell {
       width: min(calc(100% - 24px), 700px);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hero-heading-demo {
+      display: none;
+      animation: none !important;
+    }
+
+    .hero-heading-final {
+      opacity: 1;
+      transform: none;
+      animation: none !important;
     }
   }
 
