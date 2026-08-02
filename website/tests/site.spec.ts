@@ -11,6 +11,19 @@ const expectNoHorizontalOverflow = async (page: Page) => {
   );
 };
 
+const expectNoPageScroll = async (page: Page) => {
+  const dimensions = await page.evaluate(() => ({
+    clientHeight: document.documentElement.clientHeight,
+    scrollHeight: document.documentElement.scrollHeight,
+  }));
+  expect(dimensions.scrollHeight).toBeLessThanOrEqual(
+    dimensions.clientHeight + 1,
+  );
+
+  await page.evaluate(() => window.scrollTo(0, 100));
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+};
+
 test("home page is a full-screen product landing page", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
@@ -19,7 +32,8 @@ test("home page is a full-screen product landing page", async ({ page }) => {
   await expect(
     page.getByRole("heading", {
       level: 1,
-      name: /type :wave:.+get 👋/i,
+      name: "Type :wave: Get 👋",
+      exact: true,
     }),
   ).toBeVisible();
   await expect(page.getByText("Mac app in final testing.")).toHaveCount(0);
@@ -50,7 +64,10 @@ test("home page is a full-screen product landing page", async ({ page }) => {
   await expect(page.getByRole("option")).toHaveCount(5);
   await expect(page.getByRole("option").last()).toBeVisible();
   await expect(page.locator(".picker-keys")).toBeVisible();
+  await expect(page.getByText("Try it now", { exact: true })).toBeVisible();
+  await expect(page.locator("body")).toHaveCSS("font-family", /Nunito/);
   await expectNoHorizontalOverflow(page);
+  await expectNoPageScroll(page);
 });
 
 test("headline types and resolves once on load", async ({ page }) => {
@@ -362,20 +379,16 @@ test("source links stay minimal and point to GitHub", async ({ page }) => {
     "https://github.com/iamrajjoshi/mojipond",
   );
 
-  const footer = page.locator(".site-footer");
   const sourceLink = page.getByRole("link", {
-    name: /^(?:[0-9a-f]{7}|main)$/i,
+    name: /^Revision (?:[0-9a-f]{7}|main)$/i,
   });
   await expect(sourceLink).toHaveAttribute(
     "href",
     /^https:\/\/github\.com\/iamrajjoshi\/mojipond\/(?:commit\/[0-9a-f]{40}|commits\/main)$/i,
   );
-  await expect(footer).not.toContainText("©");
-  await expect(footer).not.toContainText(/commit/i);
-  await expect(footer).toHaveCSS("background-color", "rgb(6, 51, 61)");
-
-  const footerBox = await footer.boundingBox();
-  expect(footerBox?.height).toBeLessThanOrEqual(48);
+  await expect(page.locator(".site-footer")).toHaveCount(0);
+  await expect(page.locator(".source-links")).not.toContainText("©");
+  await expect(page.locator(".source-links")).not.toContainText(/commit/i);
 });
 
 test("home page has no detectable accessibility violations", async ({
@@ -390,26 +403,28 @@ test("mobile layout stays inside the viewport", async ({ page, isMobile }) => {
   test.skip(!isMobile, "Mobile layout applies only to the mobile project.");
   await page.goto("/");
   await expectNoHorizontalOverflow(page);
+  await expectNoPageScroll(page);
 });
 
-test("short viewports keep the picker below the hero copy", async ({
+test("short viewports keep the complete demo in one screen", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 720, height: 450 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
 
-  const copyBox = await page.locator(".hero-copy").boundingBox();
   const pickerBox = await page.locator(".hero-picker-shell").boundingBox();
   const heroBox = await page.locator(".hero").boundingBox();
-  expect(copyBox).not.toBeNull();
   expect(pickerBox).not.toBeNull();
   expect(heroBox).not.toBeNull();
-  expect((copyBox?.y ?? 0) + (copyBox?.height ?? 0)).toBeLessThanOrEqual(
-    pickerBox?.y ?? 0,
-  );
   expect((pickerBox?.y ?? 0) + (pickerBox?.height ?? 0)).toBeLessThanOrEqual(
     (heroBox?.y ?? 0) + (heroBox?.height ?? 0) + 1,
   );
+  await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
+  await expect(page.getByRole("option").last()).toBeVisible();
+  await expect(page.getByText("Try it now", { exact: true })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  await expectNoPageScroll(page);
 });
 
 test("removed legal routes use the branded 404", async ({ page }) => {

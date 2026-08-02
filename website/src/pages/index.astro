@@ -12,10 +12,10 @@ const description =
   <section class="hero" aria-labelledby="hero-title">
     <PondScene />
     <div class="hero-copy">
-      <h1 id="hero-title" aria-label="Type :wave:. Get 👋.">
+      <h1 id="hero-title" aria-label="Type :wave: Get 👋">
         <span class="hero-heading-final" aria-hidden="true" data-heading-final>
-          <span>Type <span class="shortcode">:wave:</span>.</span>
-          <span>Get 👋.</span>
+          <span>Type <span class="shortcode">:wave:</span></span>
+          <span>Get 👋</span>
         </span>
         <span class="hero-heading-demo" aria-hidden="true" data-heading-demo>
           <span class="heading-demo-action">
@@ -23,12 +23,8 @@ const description =
             <span class="heading-demo-get">Get</span>
           </span>
           <span class="heading-demo-value">
-            <span class="heading-demo-code">
-              <span>:wave:</span><span class="heading-demo-period">.</span>
-            </span>
-            <span class="heading-demo-result"
-              ><span>👋</span><span>.</span></span
-            >
+            <span class="heading-demo-code">:wave:</span>
+            <span class="heading-demo-result">👋</span>
           </span>
         </span>
       </h1>
@@ -49,7 +45,8 @@ const description =
     position: relative;
     display: flex;
     width: 100%;
-    min-height: 100dvh;
+    height: 100%;
+    min-height: 0;
     padding: 112px 24px 48px;
     overflow: hidden;
     align-items: center;
@@ -90,7 +87,7 @@ const description =
     font-size: clamp(3.25rem, 6vw, 5.25rem);
     font-weight: 650;
     line-height: 0.96;
-    letter-spacing: -0.06em;
+    letter-spacing: -0.045em;
     text-shadow: 0 3px 24px rgb(0 20 28 / 32%);
   }
 
@@ -146,7 +143,7 @@ const description =
     letter-spacing: -0.06em;
     text-align: left;
     animation:
-      heading-value-type 1.3s steps(7, end) 300ms forwards,
+      heading-value-type 1.3s steps(6, end) 300ms forwards,
       heading-caret 520ms step-end 300ms 3,
       heading-value-collapse 260ms ease 1.85s forwards,
       heading-value-border-out 1ms linear 1.85s forwards;
@@ -154,15 +151,9 @@ const description =
 
   .heading-demo-code {
     display: inline-flex;
-    width: 7ch;
+    width: 6ch;
     white-space: nowrap;
     animation: heading-result-out 180ms ease 1.85s forwards;
-  }
-
-  .heading-demo-period {
-    color: #f5fffd;
-    font-family: var(--font-sans);
-    letter-spacing: normal;
   }
 
   .heading-demo-result {
@@ -170,7 +161,7 @@ const description =
     align-items: baseline;
     opacity: 0;
     color: #f5fffd;
-    font-family: var(--font-sans);
+    font-family: var(--font-display);
     font-size: 1.12em;
     letter-spacing: normal;
     transform: scale(0.72) rotate(-8deg);
@@ -188,7 +179,7 @@ const description =
 
   @keyframes heading-value-type {
     to {
-      width: 7ch;
+      width: 6ch;
     }
   }
 
@@ -220,11 +211,11 @@ const description =
 
   @keyframes heading-value-collapse {
     from {
-      width: 7ch;
+      width: 6ch;
     }
 
     to {
-      width: 1.62em;
+      width: 1.28em;
     }
   }
 
@@ -301,7 +292,7 @@ const description =
 
   @media (max-width: 520px) {
     .hero {
-      padding: 88px 12px 32px;
+      padding: 88px 12px 16px;
     }
 
     .hero-copy {
@@ -356,6 +347,52 @@ const description =
 
     .hero-picker-shell {
       margin-top: 16px;
+    }
+  }
+
+  @media (max-height: 740px) and (min-width: 650px) {
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr);
+      gap: 20px;
+      padding: 68px 20px 12px;
+      align-items: center;
+    }
+
+    .hero-copy,
+    .hero-picker-shell {
+      width: 100%;
+      margin: 0;
+    }
+
+    .hero h1 {
+      margin-bottom: 12px;
+      font-size: clamp(2.5rem, 6vw, 3.25rem);
+    }
+
+    .hero-copy > p {
+      font-size: 0.92rem;
+      line-height: 1.3rem;
+    }
+  }
+
+  @media (max-width: 520px) and (max-height: 740px) {
+    .hero {
+      padding: 68px 8px 8px;
+    }
+
+    .hero h1 {
+      margin-bottom: 8px;
+      font-size: 2.5rem;
+    }
+
+    .hero-copy > p {
+      font-size: 0.9rem;
+      line-height: 1.25rem;
+    }
+
+    .hero-picker-shell {
+      margin-top: 10px;
     }
   }
 </style>

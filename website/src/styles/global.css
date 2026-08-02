@@ -1,7 +1,8 @@
 :root {
   color-scheme: light;
   --content-width: min(calc(100% - 48px), 1160px);
-  --font-display: "Manrope Variable", "Avenir Next", system-ui, sans-serif;
+  --font-display:
+    "Nunito Variable", ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   --paper: #f5f7f0;
   --paper-strong: #fffefa;
@@ -42,6 +43,20 @@ body {
   color: var(--ink);
   background: var(--paper);
   -webkit-font-smoothing: antialiased;
+}
+
+html.home-page {
+  height: 100dvh;
+  overflow: hidden;
+}
+
+body.home-page {
+  height: 100%;
+  overflow: hidden;
+}
+
+body.home-page main {
+  height: 100%;
 }
 
 ::selection {
