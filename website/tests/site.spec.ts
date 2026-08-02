@@ -118,6 +118,7 @@ test("hero demo receives, replies, sends once, and stops", async ({ page }) => {
       values: string[];
       phases: string[];
       incomingVisibleBeforeTyping: boolean;
+      returnKeyPressed: boolean;
       sentBubbleVisible: boolean;
     }>((resolve, reject) => {
       if (!demo || !input || !incomingMessage || !demoMessage) {
@@ -128,6 +129,7 @@ test("hero demo receives, replies, sends once, and stops", async ({ page }) => {
       const values = new Set<string>();
       const phases = new Set<string>();
       let incomingVisibleBeforeTyping = false;
+      let returnKeyPressed = false;
       const deadline = Date.now() + 14_000;
       const sample = () => {
         values.add(input.value);
@@ -139,11 +141,19 @@ test("hero demo receives, replies, sends once, and stops", async ({ page }) => {
         ) {
           incomingVisibleBeforeTyping = true;
         }
+        if (demo.dataset.phase === "accepting") {
+          const returnKey = document.querySelector<HTMLElement>(".return-key");
+          returnKeyPressed =
+            returnKeyPressed ||
+            (returnKey !== null &&
+              getComputedStyle(returnKey).transform !== "none");
+        }
         if (demo.dataset.phase === "sent") {
           resolve({
             values: [...values],
             phases: [...phases],
             incomingVisibleBeforeTyping,
+            returnKeyPressed,
             sentBubbleVisible: !demoMessage.hidden,
           });
           return;
@@ -161,6 +171,7 @@ test("hero demo receives, replies, sends once, and stops", async ({ page }) => {
   expect(observed.values).toEqual(
     expect.arrayContaining([
       "Yep, that fixed it — thanks for checking :wa",
+      "Yep, that fixed it — thanks for checking :wave:",
       "Yep, that fixed it — thanks for checking 👋",
       "",
     ]),
@@ -175,6 +186,7 @@ test("hero demo receives, replies, sends once, and stops", async ({ page }) => {
     ]),
   );
   expect(observed.incomingVisibleBeforeTyping).toBe(true);
+  expect(observed.returnKeyPressed).toBe(true);
   expect(observed.sentBubbleVisible).toBe(true);
   await expect(demo).toHaveAttribute("data-phase", "sent");
   await expect(demo).toHaveAttribute("data-mode", "complete");
@@ -227,6 +239,59 @@ test("focusing and typing permanently stops the autoplay", async ({ page }) => {
   await page.waitForTimeout(2_200);
   await expect(input).toHaveValue("My own message");
   await expect(demo).toHaveAttribute("data-mode", "interactive");
+});
+
+test("bare focus does not cancel the one-shot demo", async ({ page }) => {
+  await page.goto("/");
+
+  const demo = page.locator("[data-hero-demo]");
+  const input = page.getByRole("combobox", { name: "Message" });
+  await input.focus();
+
+  await expect(demo).toHaveAttribute("data-mode", "auto");
+  await expect(demo).toHaveAttribute("data-phase", "incoming", {
+    timeout: 2_500,
+  });
+  await expect(input).toHaveValue("");
+});
+
+test("the one-shot demo waits until a background page becomes visible", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    let testDocumentHidden = true;
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      get: () => testDocumentHidden,
+    });
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => (testDocumentHidden ? "hidden" : "visible"),
+    });
+    (
+      window as typeof window & { revealTestDocument?: () => void }
+    ).revealTestDocument = () => {
+      testDocumentHidden = false;
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+  });
+  await page.goto("/");
+
+  const demo = page.locator("[data-hero-demo]");
+  const input = page.getByRole("combobox", { name: "Message" });
+  await page.waitForTimeout(900);
+  await expect(demo).toHaveAttribute("data-mode", "auto");
+  await expect(demo).toHaveAttribute("data-phase", "waiting");
+  await expect(input).toHaveValue("");
+
+  await page.evaluate(() => {
+    (
+      window as typeof window & { revealTestDocument?: () => void }
+    ).revealTestDocument?.();
+  });
+  await expect(demo).toHaveAttribute("data-phase", "incoming", {
+    timeout: 2_500,
+  });
 });
 
 test("the demo supports keyboard selection", async ({ page }) => {
