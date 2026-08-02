@@ -19,42 +19,28 @@ struct LibraryImportPreviewView: View {
                     }
                 }
 
-                TabView(selection: $selectedTab) {
-                    itemPreview(session)
-                        .tabItem {
-                            Label("Emoji", systemImage: "square.grid.3x3")
-                        }
-                        .tag(PreviewTab.items)
-
-                    conflictPreview(session)
-                        .tabItem {
-                            Label(
-                                "Conflicts (\(session.preview.collisions.count))",
-                                systemImage: "arrow.triangle.branch"
-                            )
-                        }
-                        .tag(PreviewTab.conflicts)
-
-                    issuesPreview(session)
-                        .tabItem {
-                            Label(
-                                "Issues (\(issueCount(session)))",
-                                systemImage: "exclamationmark.triangle"
-                            )
-                        }
-                        .tag(PreviewTab.issues)
+                Group {
+                    switch selectedTab {
+                    case .items:
+                        itemPreview(session)
+                    case .conflicts:
+                        conflictPreview(session)
+                    case .issues:
+                        issuesPreview(session)
+                    }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.horizontal, 20)
-                .padding(.top, 8)
+                .padding(.vertical, 12)
 
                 Divider()
                 footer(session)
             }
             .frame(
-                minWidth: 760,
-                idealWidth: 860,
-                minHeight: 560,
-                idealHeight: 640
+                minWidth: 720,
+                idealWidth: 800,
+                minHeight: 480,
+                idealHeight: 540
             )
             .overlay {
                 if viewModel.isInstallingImport {
@@ -79,40 +65,38 @@ struct LibraryImportPreviewView: View {
     }
 
     private func header(_ session: LibraryImportSession) -> some View {
-        HStack(alignment: .top, spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(PondDesign.pond.opacity(0.12))
+        VStack(spacing: 16) {
+            HStack(alignment: .top, spacing: 12) {
                 Image(systemName: "square.and.arrow.down")
-                    .font(.title2.weight(.semibold))
+                    .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(PondDesign.pond)
-            }
-            .frame(width: 46, height: 46)
-            .accessibilityHidden(true)
+                    .frame(width: 30, height: 30)
+                    .background(PondDesign.pond.opacity(0.09), in: Circle())
+                    .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(reviewTitle(session))
-                    .font(.title2.weight(.semibold))
-                    .accessibilityIdentifier("importPreview.title")
-                Text(summary(session))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            if !session.preview.collisions.isEmpty {
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text("\(viewModel.unresolvedConflictCount)")
-                        .font(.title3.monospacedDigit().weight(.semibold))
-                    Text(
-                        viewModel.unresolvedConflictCount == 1
-                            ? "decision left"
-                            : "decisions left"
-                    )
-                        .font(.caption)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(reviewTitle(session))
+                        .font(.title2.weight(.semibold))
+                        .fontDesign(.rounded)
+                        .accessibilityIdentifier("importPreview.title")
+                    Text(summary(session))
+                        .font(.callout)
                         .foregroundStyle(.secondary)
                 }
-                .accessibilityElement(children: .combine)
+                Spacer()
             }
+
+            Picker("Import review", selection: $selectedTab) {
+                Text("Emoji (\(session.preview.items.count))")
+                    .tag(PreviewTab.items)
+                Text("Conflicts (\(session.preview.collisions.count))")
+                    .tag(PreviewTab.conflicts)
+                Text("Issues (\(issueCount(session)))")
+                    .tag(PreviewTab.issues)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 390)
         }
         .padding(20)
     }
@@ -635,12 +619,8 @@ private struct LibraryCollisionRow: View {
                         }
                     }
                 } label: {
-                    HStack(spacing: 5) {
-                        Text(choice?.title ?? "Choose action")
-                        Image(systemName: "chevron.down")
-                    }
+                    Text(choice?.title ?? "Choose action")
                 }
-                .menuStyle(.borderlessButton)
                 .fixedSize()
                 .accessibilityLabel("Resolution for \(collision.shortcode.rawValue)")
             }

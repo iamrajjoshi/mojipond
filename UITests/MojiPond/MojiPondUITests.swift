@@ -13,7 +13,7 @@ final class MojiPondUITests: XCTestCase {
         }
 
         let setupExists = application.staticTexts[
-            "Set up typing shortcuts"
+            "Type emoji by name"
         ].waitForExistence(timeout: 5)
         XCTAssertTrue(setupExists)
         XCTAssertTrue(
@@ -30,10 +30,15 @@ final class MojiPondUITests: XCTestCase {
             element: onboardingWindow
         )
 
-        let practiceFieldExists = application.descendants(
+        let practiceField = application.descendants(
             matching: .any
-        )["onboarding.practiceField"].waitForExistence(timeout: 2)
-        XCTAssertTrue(practiceFieldExists)
+        )["onboarding.practiceField"]
+        XCTAssertTrue(practiceField.waitForExistence(timeout: 2))
+        practiceField.click()
+        practiceField.typeText(":wa")
+        practiceField.typeKey(.downArrow, modifierFlags: [])
+        practiceField.typeKey(.return, modifierFlags: [])
+        XCTAssertEqual(practiceField.value as? String, "⌚")
         XCTAssertFalse(application.buttons["Try It"].exists)
         XCTAssertFalse(application.buttons["Back"].exists)
         XCTAssertFalse(application.buttons["Use Library Only"].exists)
@@ -380,8 +385,7 @@ final class MojiPondUITests: XCTestCase {
         XCTAssertTrue(updateToggle.waitForExistence(timeout: 2))
         XCTAssertTrue(
             application.staticTexts[
-                "Checks once per day and adds Update to the menu bar. "
-                    + "Downloads and installs require your approval."
+                "Checks daily. You choose when to install."
             ].exists
         )
         XCTAssertTrue(application.menuItems["Check for Updates…"].exists)
@@ -644,7 +648,7 @@ final class MojiPondUITests: XCTestCase {
 
         XCTAssertTrue(
             application.staticTexts[
-                "Set up typing shortcuts"
+                "Type emoji by name"
             ].waitForExistence(timeout: 5)
         )
         let permissionStatus = application.descendants(

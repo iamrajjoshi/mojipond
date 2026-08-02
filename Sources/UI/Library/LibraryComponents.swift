@@ -95,11 +95,11 @@ struct LibraryEmojiArtwork: View {
         .frame(width: size, height: size)
         .background(
             PondDesign.raisedSurface,
-            in: RoundedRectangle(cornerRadius: 10)
+            in: RoundedRectangle(cornerRadius: PondDesign.compactCornerRadius)
         )
         .overlay {
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(PondDesign.ripple.opacity(0.18))
+            RoundedRectangle(cornerRadius: PondDesign.compactCornerRadius)
+                .stroke(PondDesign.separator.opacity(0.6))
         }
         .overlay(alignment: .bottomTrailing) {
             if item.isAnimated {
@@ -312,10 +312,10 @@ struct LibraryEmojiCard: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 9) {
+            VStack(spacing: 7) {
                 LibraryEmojiArtwork(
                     item: item,
-                    size: 62,
+                    size: 52,
                     loadStateChanged: {
                         artworkLoadState = $0
                     }
@@ -323,8 +323,9 @@ struct LibraryEmojiCard: View {
 
                 VStack(spacing: 2) {
                     Text(":\(item.shortcode):")
-                        .font(.callout.monospaced().weight(.medium))
+                        .font(.caption.monospaced().weight(.medium))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.82)
                         .help(":\(item.shortcode):")
                     Text(item.displayName)
                         .font(.caption)
@@ -339,7 +340,7 @@ struct LibraryEmojiCard: View {
                 }
                 .frame(maxWidth: .infinity)
             }
-            .padding(10)
+            .padding(9)
             .frame(maxWidth: .infinity)
             .background(
                 cardBackground,
@@ -381,10 +382,10 @@ struct LibraryEmojiCard: View {
 
     private var cardBackground: Color {
         guard isHovered || isFocused else {
-            return PondDesign.surface
+            return PondDesign.surface.opacity(0.56)
         }
         return PondDesign.pond.opacity(
-            contrast == .increased ? 0.16 : 0.09
+            contrast == .increased ? 0.16 : 0.075
         )
     }
 
@@ -393,12 +394,12 @@ struct LibraryEmojiCard: View {
             return PondDesign.pond
         }
         if isHovered {
-            return PondDesign.ripple.opacity(
-                contrast == .increased ? 1 : 0.42
+            return PondDesign.pond.opacity(
+                contrast == .increased ? 1 : 0.3
             )
         }
-        return PondDesign.ripple.opacity(
-            contrast == .increased ? 0.8 : 0.18
+        return PondDesign.separator.opacity(
+            contrast == .increased ? 0.9 : 0.5
         )
     }
 

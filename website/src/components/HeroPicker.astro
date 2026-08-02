@@ -1,0 +1,148 @@
+---
+const suggestions = [
+  { emoji: "👋", shortcode: "wave", name: "Waving hand" },
+  { emoji: "🐸", shortcode: "frog", name: "Frog", selected: true },
+  { emoji: "🦎", shortcode: "lizard", name: "Lizard" },
+  { emoji: "🪷", shortcode: "lotus", name: "Lotus" },
+  { emoji: "✨", shortcode: "sparkles", name: "Sparkles" },
+];
+---
+
+<figure class="hero-picker" aria-hidden="true">
+  <ul>
+    {
+      suggestions.map((suggestion) => (
+        <li class:list={{ selected: suggestion.selected }}>
+          <span class="emoji">{suggestion.emoji}</span>
+          <span class="copy">
+            <strong>:{suggestion.shortcode}:</strong>
+            <small>{suggestion.name}</small>
+          </span>
+          {suggestion.selected && <span class="check">✓</span>}
+        </li>
+      ))
+    }
+  </ul>
+  <figcaption>
+    <span>↑↓ choose</span>
+    <span>Tab or ↩ insert</span>
+    <span>Esc close</span>
+  </figcaption>
+</figure>
+
+<style>
+  .hero-picker {
+    width: 100%;
+    margin: 0;
+    overflow: hidden;
+    color: var(--deep-water);
+    background: rgb(255 254 250 / 97%);
+    border: 1px solid rgb(6 51 61 / 18%);
+    border-radius: 24px;
+    box-shadow: 0 40px 96px rgb(6 51 61 / 24%);
+  }
+
+  ul {
+    display: grid;
+    gap: 2px;
+    padding: 8px;
+    margin: 0;
+    list-style: none;
+  }
+
+  li {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr) 24px;
+    gap: 12px;
+    min-height: 64px;
+    padding: 8px 12px;
+    align-items: center;
+    border-radius: 16px;
+  }
+
+  li.selected {
+    color: white;
+    background: var(--deep-water);
+  }
+
+  .emoji {
+    display: grid;
+    width: 48px;
+    height: 48px;
+    place-items: center;
+    font-family: system-ui, sans-serif;
+    font-size: 1.875rem;
+    background: rgb(255 255 255 / 82%);
+    border: 1px solid rgb(6 51 61 / 10%);
+    border-radius: 12px;
+  }
+
+  .copy {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  strong {
+    overflow: hidden;
+    font-family: var(--font-mono);
+    font-size: 1rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  small {
+    overflow: hidden;
+    color: var(--ink-muted);
+    font-size: 0.875rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .selected small {
+    color: #cfe4e2;
+  }
+
+  .check {
+    font-weight: 700;
+    text-align: center;
+  }
+
+  figcaption {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    min-height: 46px;
+    padding: 12px 16px;
+    align-items: center;
+    color: var(--ink-muted);
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: #eef5f2;
+    border-top: 1px solid rgb(6 51 61 / 10%);
+  }
+
+  @media (max-width: 520px) {
+    .hero-picker {
+      border-radius: 16px;
+    }
+
+    li {
+      grid-template-columns: 44px minmax(0, 1fr) 20px;
+      gap: 8px;
+      min-height: 58px;
+      padding: 6px 8px;
+    }
+
+    .emoji {
+      width: 44px;
+      height: 44px;
+      font-size: 1.5rem;
+    }
+
+    figcaption {
+      gap: 8px 12px;
+      padding-inline: 12px;
+    }
+  }
+</style>

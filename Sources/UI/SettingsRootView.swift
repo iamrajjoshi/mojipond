@@ -29,15 +29,15 @@ private enum SettingsDestination: String, CaseIterable, Identifiable {
     var detail: String {
         switch self {
         case .general:
-            "Control autocomplete, launch at login, sticker search, and updates."
+            "App behavior and updates."
         case .shortcuts:
-            "Set the trigger, insertion keys, and skin tone."
+            "Trigger, insertion keys, and skin tone."
         case .library:
-            "Browse packs, aliases, and favorites."
+            "Packs, aliases, and favorites."
         case .privacy:
-            "Review permissions and turn suggestions off by app or site."
+            "Permissions and excluded apps."
         case .about:
-            "Version, updates, and privacy."
+            "Version and update status."
         }
     }
 }
@@ -57,6 +57,7 @@ struct SettingsRootView: View {
     @State private var showsUsageResetConfirmation = false
     @State private var destination: SettingsDestination
     @FocusState private var focusedDestination: SettingsDestination?
+    @Environment(\.colorSchemeContrast) private var contrast
     private let permissionSettingsOpener:
         any SystemPermissionSettingsOpening
 
@@ -92,7 +93,10 @@ struct SettingsRootView: View {
                     .frame(width: 1)
 
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
+                    VStack(
+                        alignment: .leading,
+                        spacing: PondDesign.sectionSpacing
+                    ) {
                         PondPageHeader(
                             icon: destination.icon,
                             title: destination.rawValue,
@@ -101,9 +105,9 @@ struct SettingsRootView: View {
 
                         selectedPage
                     }
-                    .frame(maxWidth: 680, alignment: .leading)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 18)
+                    .frame(maxWidth: 600, alignment: .leading)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 22)
                 }
                 .scrollContentBackground(.hidden)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -135,32 +139,16 @@ struct SettingsRootView: View {
             )
         }
         .frame(
-            minWidth: 720,
-            idealWidth: 760,
-            minHeight: 520,
-            idealHeight: 560
+            minWidth: 700,
+            idealWidth: 740,
+            minHeight: 480,
+            idealHeight: 520
         )
     }
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 9) {
-                PondMark(size: 34)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("MojiPond")
-                        .font(.callout.weight(.semibold))
-                    Text("SETTINGS")
-                        .font(.caption2.weight(.semibold))
-                        .tracking(1.2)
-                        .foregroundStyle(PondDesign.pond)
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 14)
-            .padding(.top, 15)
-            .padding(.bottom, 13)
-
-            VStack(spacing: 3) {
+            VStack(spacing: 4) {
                 ForEach(SettingsDestination.allCases) { item in
                     Button {
                         destination = item
@@ -176,29 +164,29 @@ struct SettingsRootView: View {
                         }
                         .foregroundStyle(
                             destination == item
-                                ? AnyShapeStyle(PondDesign.pond)
+                                ? AnyShapeStyle(Color.primary)
                                 : AnyShapeStyle(.primary)
                         )
                         .padding(.horizontal, 10)
                         .frame(height: 34)
                         .background(
                             destination == item
-                                ? PondDesign.ripple.opacity(0.16)
+                                ? PondDesign.pond.opacity(
+                                    contrast == .increased ? 0.24 : 0.11
+                                )
                                 : Color.clear,
                             in: RoundedRectangle(
                                 cornerRadius: PondDesign.compactCornerRadius
                             )
                         )
                         .overlay {
-                            if destination == item {
+                            if destination == item
+                                && contrast == .increased {
                                 RoundedRectangle(
                                     cornerRadius:
                                         PondDesign.compactCornerRadius
                                 )
-                                .stroke(
-                                    PondDesign.ripple.opacity(0.35),
-                                    lineWidth: 1
-                                )
+                                .stroke(PondDesign.pond, lineWidth: 2)
                             }
                         }
                         .contentShape(Rectangle())
@@ -212,7 +200,8 @@ struct SettingsRootView: View {
                     )
                 }
             }
-            .padding(.horizontal, 9)
+            .padding(.horizontal, 10)
+            .padding(.top, 16)
 
             Spacer(minLength: 20)
 
@@ -234,9 +223,9 @@ struct SettingsRootView: View {
                 sidebarStatus
             }
         }
-        .frame(width: 184)
+        .frame(width: 176)
         .frame(maxHeight: .infinity)
-        .background(PondDesign.sidebarSurface.opacity(0.94))
+        .background(PondDesign.sidebarSurface.opacity(0.9))
     }
 
     @ViewBuilder
@@ -256,7 +245,7 @@ struct SettingsRootView: View {
     }
 
     private var general: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: PondDesign.sectionSpacing) {
             SettingsCard {
                 SettingsRow(
                     icon: "water.waves",
@@ -312,8 +301,8 @@ struct SettingsRootView: View {
             ) {
                 SettingsRow(
                     icon: "face.smiling.inverse",
-                    title: "Search for more stickers",
-                    detail: "Use /sticker in Messages to fetch Noto artwork."
+                    title: "Enable sticker search",
+                    detail: "Use /sticker in Messages. Artwork downloads when you choose it."
                 ) {
                     HStack(spacing: 10) {
                         PondCommandToken(value: "/sticker")
@@ -338,10 +327,7 @@ struct SettingsRootView: View {
                     SettingsRow(
                         icon: "arrow.triangle.2.circlepath",
                         title: "Keep MojiPond up to date",
-                        detail:
-                            "Checks once per day and adds Update to the "
-                                + "menu bar. Downloads and installs require "
-                                + "your approval."
+                        detail: "Checks daily. You choose when to install."
                     ) {
                         Toggle(
                             "Keep MojiPond up to date",
@@ -361,7 +347,7 @@ struct SettingsRootView: View {
     }
 
     private var shortcuts: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: PondDesign.sectionSpacing) {
             SettingsCard(
                 title: "Acceptance"
             ) {
@@ -534,7 +520,7 @@ struct SettingsRootView: View {
     }
 
     private var library: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: PondDesign.sectionSpacing) {
             SettingsCard {
                 SettingsActionRow(
                     icon: "square.grid.2x2",
@@ -568,7 +554,7 @@ struct SettingsRootView: View {
 
             SettingsCard(
                 title: "Local data",
-                detail: "Your packs and settings stay on this Mac."
+                detail: "Packs and settings stay on this Mac."
             ) {
                 Text(
                     "Imported images are copied to Application Support."
@@ -610,11 +596,11 @@ struct SettingsRootView: View {
     }
 
     private var privacy: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: PondDesign.sectionSpacing) {
             SettingsCard(
                 title: "System permissions",
                 detail:
-                    "Typing needs Input Monitoring and Accessibility. Image pasting is optional."
+                    "Shortcuts need Input Monitoring and Accessibility. Image insertion is optional."
             ) {
                 PermissionSettingsRow(
                     icon: "keyboard",
@@ -646,7 +632,7 @@ struct SettingsRootView: View {
                     icon: "photo.on.rectangle",
                     title: "Image emoji in Messages",
                     detail:
-                        "Pastes custom images and lets Return send after insertion. Unicode insertion itself does not need this.",
+                        "Pastes custom images in Messages. Unicode emoji do not need it.",
                     status: permissions.snapshot.eventPosting,
                     isOptional: true,
                     request: { permissions.requestEventPosting() },
@@ -1200,28 +1186,44 @@ private struct SettingsCard<Content: View>: View {
     }
 
     var body: some View {
-        PondCard {
-            VStack(alignment: .leading, spacing: 10) {
-                if let title {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(title)
-                            .font(.subheadline.weight(.semibold))
-                        if let detail {
-                            Text(detail)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(
-                                    horizontal: false,
-                                    vertical: true
-                                )
-                        }
+        VStack(alignment: .leading, spacing: 8) {
+            if let title {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .fontDesign(.rounded)
+                    if let detail {
+                        Text(detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(
+                                horizontal: false,
+                                vertical: true
+                            )
                     }
-                    .padding(.bottom, 2)
                 }
+                .padding(.horizontal, 2)
+            }
 
+            VStack(alignment: .leading, spacing: PondDesign.rowSpacing) {
                 content
             }
+            .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                PondDesign.surface,
+                in: RoundedRectangle(
+                    cornerRadius: PondDesign.cornerRadius,
+                    style: .continuous
+                )
+            )
+            .overlay {
+                RoundedRectangle(
+                    cornerRadius: PondDesign.cornerRadius,
+                    style: .continuous
+                )
+                .stroke(PondDesign.separator.opacity(0.65))
+            }
         }
     }
 }
@@ -1247,15 +1249,9 @@ private struct SettingsRow<Accessory: View>: View {
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(PondDesign.pond)
-                .frame(width: 28, height: 28)
-                .background(
-                    PondDesign.pond.opacity(0.1),
-                    in: RoundedRectangle(
-                        cornerRadius: PondDesign.compactCornerRadius
-                    )
-                )
+                .frame(width: 24)
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -1307,9 +1303,9 @@ private struct SettingsActionRow<Accessory: View>: View {
 private struct SettingsDivider: View {
     var body: some View {
         Rectangle()
-            .fill(PondDesign.ripple.opacity(0.16))
+            .fill(PondDesign.separator.opacity(0.7))
             .frame(height: 1)
-            .padding(.leading, 38)
+            .padding(.leading, 34)
             .accessibilityHidden(true)
     }
 }
@@ -1332,21 +1328,13 @@ private struct PermissionSettingsRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(
                     status == .granted
                         ? PondDesign.lily
                         : PondDesign.pond
                 )
-                .frame(width: 28, height: 28)
-                .background(
-                    (status == .granted
-                        ? PondDesign.lily
-                        : PondDesign.pond).opacity(0.1),
-                    in: RoundedRectangle(
-                        cornerRadius: PondDesign.compactCornerRadius
-                    )
-                )
+                .frame(width: 24)
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 6) {

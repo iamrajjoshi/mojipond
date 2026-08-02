@@ -1,6 +1,5 @@
 ---
-import { Image } from "astro:assets";
-import caretSuggestions from "../../../docs/screenshots/caret-suggestions.png";
+import HeroPicker from "../components/HeroPicker.astro";
 import PondScene from "../components/PondScene.astro";
 import ShortcodeDemo from "../components/ShortcodeDemo.astro";
 import BaseLayout from "../layouts/BaseLayout.astro";
@@ -8,34 +7,6 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 const title = "MojiPond — emoji shortcuts and custom packs for macOS";
 const description =
   "Type emoji shortcuts beside the cursor on macOS, then choose with the arrow keys and keep writing.";
-
-const details = [
-  {
-    question: "What happens?",
-    answer:
-      "Type a colon and a name. A picker opens beside your cursor. Choose with the arrow keys, then press Tab or Return.",
-  },
-  {
-    question: "What happens to animated emoji?",
-    answer:
-      "On macOS 15 or later, MojiPond prepares frame 0 as a static inline glyph. macOS 14 uses a media fallback. The original animation stays in your library.",
-  },
-  {
-    question: "What ZIP files can I import?",
-    answer:
-      "A ZIP can contain a folder of PNG, JPEG, GIF, or WebP files, a mojipond.json manifest, or a Slack emoji.json file with local artwork. You review names and conflicts before anything installs.",
-  },
-  {
-    question: "Why does it need macOS permissions?",
-    answer:
-      "Input Monitoring lets MojiPond notice a shortcut. Accessibility finds the cursor and replaces the selected token. Event Posting is optional for Unicode shortcuts; MojiPond uses it to paste custom images in Messages and to replay Return when you enable Return to send.",
-  },
-  {
-    question: "Where does it work?",
-    answer:
-      "Shortcuts work in supported text fields on macOS 14 or newer. MojiPond stays out of password fields, terminals, remote desktop apps, Slack, Discord, and anything you exclude. Custom images insert only in Messages.",
-  },
-];
 ---
 
 <BaseLayout title={title} description={description}>
@@ -45,25 +16,18 @@ const details = [
       <h1 id="hero-title">
         Type <span class="shortcode">:wave:</span><br />Get 👋
       </h1>
-      <p>
-        MojiPond puts emoji suggestions beside your cursor. Pick one and keep
-        typing.
+      <p class="hero-summary">
+        <span>MojiPond puts emoji suggestions beside your cursor.</span>
+        <span>Pick one and keep typing.</span>
       </p>
       <a class="button primary" href="#try"
         >Try it <span aria-hidden="true">↓</span></a
       >
     </div>
 
-    <figure class="hero-picker">
-      <Image
-        src={caretSuggestions}
-        alt="MojiPond suggestions beside a typed frog shortcut, with Frog selected"
-        width={760}
-        height={558}
-        loading="eager"
-        fetchpriority="high"
-      />
-    </figure>
+    <div class="hero-picker-shell">
+      <HeroPicker />
+    </div>
   </section>
 
   <section
@@ -80,23 +44,6 @@ const details = [
       </p>
     </div>
     <ShortcodeDemo />
-  </section>
-
-  <section
-    class="details-section section-shell"
-    aria-labelledby="details-title"
-  >
-    <h2 class="sr-only" id="details-title">About MojiPond</h2>
-    <dl class="details-list">
-      {
-        details.map((item) => (
-          <div class="detail-row">
-            <dt>{item.question}</dt>
-            <dd>{item.answer}</dd>
-          </div>
-        ))
-      }
-    </dl>
   </section>
 </BaseLayout>
 
@@ -147,29 +94,21 @@ const details = [
     line-height: 1.75rem;
   }
 
+  .hero-summary span {
+    display: block;
+  }
+
   .hero-copy .button {
     gap: 8px;
   }
 
-  .hero-picker {
+  .hero-picker-shell {
     position: absolute;
     bottom: -64px;
     left: 50%;
     z-index: 2;
     width: min(calc(100% - 48px), 500px);
-    margin: 0;
-    overflow: hidden;
-    background: var(--paper-strong);
-    border: 1px solid rgb(6 51 61 / 18%);
-    border-radius: 24px;
-    box-shadow: 0 40px 96px rgb(6 51 61 / 24%);
     transform: translateX(-50%);
-  }
-
-  .hero-picker img {
-    display: block;
-    width: 100%;
-    height: auto;
   }
 
   .demo-section {
@@ -207,40 +146,6 @@ const details = [
     font-weight: 700;
   }
 
-  .details-section {
-    padding-top: 32px;
-    padding-bottom: 96px;
-  }
-
-  .details-list {
-    padding: 0;
-    margin: 0;
-    border-top: 1px solid var(--line);
-  }
-
-  .detail-row {
-    display: grid;
-    grid-template-columns: minmax(220px, 0.72fr) minmax(0, 1.28fr);
-    gap: 64px;
-    padding: 32px 0;
-    border-bottom: 1px solid var(--line);
-  }
-
-  dt {
-    color: var(--deep-water);
-    font-size: 1.25rem;
-    font-weight: 700;
-    line-height: 1.75rem;
-  }
-
-  dd {
-    max-width: 680px;
-    margin: 0;
-    color: var(--ink-muted);
-    font-size: 1rem;
-    line-height: 1.5rem;
-  }
-
   @media (max-width: 820px) {
     .hero-copy {
       padding-top: 112px;
@@ -264,11 +169,6 @@ const details = [
     .demo-intro > p:last-child {
       max-width: 620px;
     }
-
-    .detail-row {
-      grid-template-columns: 1fr;
-      gap: 12px;
-    }
   }
 
   @media (max-width: 520px) {
@@ -288,10 +188,9 @@ const details = [
       line-height: 1.5rem;
     }
 
-    .hero-picker {
+    .hero-picker-shell {
       bottom: -32px;
       width: calc(100% - 24px);
-      border-radius: 16px;
     }
 
     .demo-section {
@@ -304,15 +203,6 @@ const details = [
       margin-bottom: 16px;
       font-size: 2.25rem;
       line-height: 2.5rem;
-    }
-
-    .details-section {
-      padding-top: 16px;
-      padding-bottom: 64px;
-    }
-
-    .detail-row {
-      padding: 24px 0;
     }
   }
 
@@ -330,7 +220,7 @@ const details = [
       margin-bottom: 16px;
     }
 
-    .hero-picker {
+    .hero-picker-shell {
       bottom: -56px;
       width: 400px;
     }

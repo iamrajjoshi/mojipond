@@ -9,6 +9,7 @@ struct LibraryShellView: View {
     @State private var packDetails: PackDetailSelection?
     @State private var isDropTargeted = false
     @FocusState private var focusedSidebarScope: LibraryScope?
+    @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(appState: AppState) {
@@ -25,7 +26,7 @@ struct LibraryShellView: View {
         NavigationSplitView {
             sidebar
                 .navigationTitle("MojiPond")
-                .navigationSplitViewColumnWidth(min: 190, ideal: 225, max: 280)
+                .navigationSplitViewColumnWidth(min: 175, ideal: 200, max: 240)
         } detail: {
             detail
                 .searchable(
@@ -117,28 +118,23 @@ struct LibraryShellView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
-                PondMark(size: 38)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("MojiPond")
-                        .font(.headline)
-                    Text("EMOJI LIBRARY")
-                        .font(.caption2.weight(.semibold))
-                        .tracking(1.1)
-                        .foregroundStyle(PondDesign.pond)
-                }
+            HStack(spacing: 9) {
+                PondMark(size: 30)
+                Text("Library")
+                    .font(.headline)
+                    .fontDesign(.rounded)
                 Spacer()
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 18)
-            .padding(.bottom, 15)
+            .padding(.horizontal, 14)
+            .padding(.top, 14)
+            .padding(.bottom, 12)
 
             Rectangle()
                 .fill(PondDesign.ripple.opacity(0.2))
                 .frame(height: 1)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: 4) {
                     sidebarSectionTitle("Library")
 
                     sidebarScopeRow(
@@ -187,16 +183,15 @@ struct LibraryShellView: View {
                     }
                 }
                 .padding(.horizontal, 10)
-                .padding(.top, 12)
+                .padding(.top, 10)
             }
         }
-        .background(PondDesign.sidebarSurface.opacity(0.94))
+        .background(PondDesign.sidebarSurface.opacity(0.9))
     }
 
     private func sidebarSectionTitle(_ title: String) -> some View {
-        Text(title.uppercased())
-            .font(.caption2.weight(.semibold))
-            .tracking(1)
+        Text(title)
+            .font(.caption.weight(.medium))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 11)
             .padding(.bottom, 3)
@@ -343,21 +338,25 @@ struct LibraryShellView: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(isSelected ? PondDesign.pond : .secondary)
         }
-        .foregroundStyle(isSelected ? PondDesign.pond : .primary)
+        .foregroundStyle(.primary)
         .padding(.horizontal, 11)
-        .frame(height: 36)
+        .frame(height: 34)
         .background(
-            isSelected ? PondDesign.ripple.opacity(0.16) : Color.clear,
+            isSelected
+                ? PondDesign.pond.opacity(
+                    contrast == .increased ? 0.24 : 0.11
+                )
+                : Color.clear,
             in: RoundedRectangle(
                 cornerRadius: PondDesign.compactCornerRadius
             )
         )
         .overlay {
-            if isSelected {
+            if isSelected && contrast == .increased {
                 RoundedRectangle(
                     cornerRadius: PondDesign.compactCornerRadius
                 )
-                .stroke(PondDesign.ripple.opacity(0.35), lineWidth: 1)
+                .stroke(PondDesign.pond, lineWidth: 2)
             }
         }
         .contentShape(Rectangle())
@@ -388,7 +387,7 @@ struct LibraryShellView: View {
     }
 
     private var header: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 12) {
             HStack(alignment: .top, spacing: 14) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(viewModel.selectedScopeTitle)
@@ -405,25 +404,19 @@ struct LibraryShellView: View {
                 }
                 Spacer()
 
-                VStack(alignment: .trailing, spacing: 3) {
-                    Button {
-                        chooseZIP()
-                    } label: {
-                        Label(
-                            "Import ZIP",
-                            systemImage: "square.and.arrow.down"
-                        )
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut("i", modifiers: .command)
-                    .accessibilityHint(
-                        "Choose one local ZIP archive, or drop a ZIP anywhere in the Library"
+                Button {
+                    chooseZIP()
+                } label: {
+                    Label(
+                        "Import ZIP",
+                        systemImage: "square.and.arrow.down"
                     )
-
-                    Text("or drop a ZIP anywhere")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
                 }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut("i", modifiers: .command)
+                .accessibilityHint(
+                    "Choose one local ZIP archive, or drop a ZIP anywhere in the Library"
+                )
 
                 if case .builtIn = viewModel.scope {
                     Button("Source & License", systemImage: "info.circle") {
@@ -440,35 +433,42 @@ struct LibraryShellView: View {
                 }
             }
 
-            HStack(spacing: 10) {
-                Picker("Category", selection: $viewModel.categoryFilter) {
-                    Text("All Categories")
-                        .tag(String?.none)
-                    ForEach(viewModel.availableCategories, id: \.self) { category in
-                        Text(category)
-                            .tag(Optional(category))
+            HStack(spacing: 8) {
+                Menu {
+                    Picker("Category", selection: $viewModel.categoryFilter) {
+                        Text("All Categories")
+                            .tag(String?.none)
+                        ForEach(
+                            viewModel.availableCategories,
+                            id: \.self
+                        ) { category in
+                            Text(category)
+                                .tag(Optional(category))
+                        }
                     }
-                }
-                .frame(maxWidth: 210)
 
-                Picker("Content Type", selection: $viewModel.contentFilter) {
-                    ForEach(LibraryContentFilter.allCases) { filter in
-                        Text(filter.title)
-                            .tag(filter)
+                    Picker("Content Type", selection: $viewModel.contentFilter) {
+                        ForEach(LibraryContentFilter.allCases) { filter in
+                            Text(filter.title)
+                                .tag(filter)
+                        }
                     }
+                } label: {
+                    Label(filterLabel, systemImage: "line.3.horizontal.decrease")
                 }
-                .frame(width: 210, alignment: .leading)
+                .fixedSize()
+
+                if hasActiveFilters {
+                    Button("Clear", action: clearFilters)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(PondDesign.pond)
+                }
 
                 Spacer()
-
-                Text("\(viewModel.visibleItems.count.formatted()) shown")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel("\(viewModel.visibleItems.count) emoji shown")
             }
         }
         .padding(PondDesign.contentPadding)
-        .background(PondDesign.surface.opacity(0.74))
+        .background(PondDesign.surface.opacity(0.82))
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(PondDesign.ripple.opacity(0.22))
@@ -513,11 +513,11 @@ struct LibraryShellView: View {
                     LazyVGrid(
                         columns: [
                             GridItem(
-                                .adaptive(minimum: 132, maximum: 190),
-                                spacing: 12
+                                .adaptive(minimum: 118, maximum: 154),
+                                spacing: 10
                             )
                         ],
-                        spacing: 12
+                        spacing: 10
                     ) {
                         ForEach(viewModel.visibleItems) { item in
                             LibraryEmojiCard(
@@ -661,6 +661,12 @@ struct LibraryShellView: View {
         !viewModel.searchText.isEmpty
             || viewModel.categoryFilter != nil
             || viewModel.contentFilter != .all
+    }
+
+    private var filterLabel: String {
+        let activeCount = (viewModel.categoryFilter == nil ? 0 : 1)
+            + (viewModel.contentFilter == .all ? 0 : 1)
+        return activeCount == 0 ? "Filters" : "Filters (\(activeCount))"
     }
 
     private func clearFilters() {
