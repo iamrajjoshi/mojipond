@@ -81,7 +81,7 @@ import { emojiOptions, waveSuggestions } from "../lib/emojiOptions";
         <div class="picker-keys" aria-hidden="true">
           <span><kbd>↑</kbd><kbd>↓</kbd> choose</span>
           <span class="accept-cue"
-            ><kbd>Tab</kbd> or <kbd>Return</kbd> insert</span
+            ><kbd>Tab</kbd> or <kbd class="return-key">Return</kbd> insert</span
           >
           <span><kbd>Esc</kbd> close</span>
         </div>
@@ -192,9 +192,11 @@ import { emojiOptions, waveSuggestions } from "../lib/emojiOptions";
         { value: "", phase: "incoming", delay: 1_400 },
         ...typingFrames,
         { value: `${prefix}:`, phase: "typing", delay: 480 },
-        { value: `${prefix}:w`, phase: "picker", delay: 1_000 },
-        { value: `${prefix}:wa`, phase: "picker", delay: 1_500 },
-        { value: `${prefix}:wa`, phase: "accepting", delay: 700 },
+        { value: `${prefix}:w`, phase: "picker", delay: 500 },
+        { value: `${prefix}:wa`, phase: "picker", delay: 500 },
+        { value: `${prefix}:wav`, phase: "picker", delay: 500 },
+        { value: `${prefix}:wave`, phase: "picker", delay: 700 },
+        { value: `${prefix}:wave:`, phase: "accepting", delay: 900 },
         { value: `${prefix}👋`, phase: "inserted", delay: 1_800 },
         { value: "", phase: "sent", delay: 0 },
       ];
@@ -208,7 +210,7 @@ import { emojiOptions, waveSuggestions } from "../lib/emojiOptions";
       let frameIndex = 0;
       let timer: number | undefined;
       let userControlled = false;
-      let suspendedByVisibility = false;
+      let suspendedByVisibility = document.hidden;
 
       const clearTimer = () => {
         if (timer !== undefined) {
@@ -474,12 +476,13 @@ import { emojiOptions, waveSuggestions } from "../lib/emojiOptions";
       };
 
       const schedule = () => {
-        if (userControlled || reducedMotion.matches || suspendedByVisibility) {
+        if (userControlled || reducedMotion.matches) {
           return;
         }
 
         const frame = frames[frameIndex];
         renderFrame(frame);
+        if (suspendedByVisibility) return;
         if (frameIndex === frames.length - 1) {
           demo.dataset.mode = "complete";
           return;
@@ -504,10 +507,6 @@ import { emojiOptions, waveSuggestions } from "../lib/emojiOptions";
         renderFrame(frames[frameIndex]);
       };
 
-      input.addEventListener("focus", () => {
-        takeControl();
-        updateSuggestions();
-      });
       input.addEventListener("input", () => {
         takeControl();
         updateSuggestions();
@@ -973,9 +972,10 @@ import { emojiOptions, waveSuggestions } from "../lib/emojiOptions";
     cursor: default;
   }
 
-  [data-phase="accepting"] .accept-cue kbd {
+  [data-phase="accepting"] .accept-cue .return-key {
     color: white;
     background: var(--lotus);
+    box-shadow: 0 0 0 3px rgb(91 179 165 / 18%);
     transform: translateY(1px) scale(0.94);
   }
 
