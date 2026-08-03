@@ -4,6 +4,27 @@ import XCTest
 
 @MainActor
 final class RuntimeVoiceOverAnnouncementTests: XCTestCase {
+    func testSuggestionPanelConvertsHitTargetToQuartzCoordinates() {
+        let display = DisplayGeometry(
+            appKitFrame: CGRect(x: 0, y: 0, width: 1_920, height: 1_080),
+            quartzFrame: CGRect(x: 0, y: 0, width: 1_920, height: 1_080),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1_920, height: 1_080)
+        )
+
+        XCTAssertEqual(
+            RuntimeSuggestionPanelController.quartzFrame(
+                forAppKitFrame: CGRect(
+                    x: 100,
+                    y: 200,
+                    width: 380,
+                    height: 279
+                ),
+                displays: [display]
+            ),
+            CGRect(x: 100, y: 601, width: 380, height: 279)
+        )
+    }
+
     func testSuggestionPanelSizesToVisibleSuggestionRows() {
         let row =
             RuntimeSuggestionRow(

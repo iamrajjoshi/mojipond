@@ -32,6 +32,29 @@ final class LibraryViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.visibleItems.map(\.shortcode), ["frog"])
     }
 
+    func testSearchFindsWordsBeyondImportedShortcodeFilenameLimit() async throws {
+        let fixture = try await makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.workspace) }
+        let filename = "bufo-" + String(repeating: "a", count: 64)
+            + "-tailtoken.png"
+        let source = try TestSupport.writeImage(
+            to: fixture.workspace.appendingPathComponent(filename)
+        )
+        _ = try await install(
+            files: [source],
+            name: "Long Filename Pack",
+            into: fixture.store
+        )
+        let viewModel = makeViewModel(fixture)
+
+        await viewModel.reload()
+        viewModel.searchText = "tailtoken"
+
+        let result = try XCTUnwrap(viewModel.visibleItems.first)
+        XCTAssertEqual(result.sourceFilename, filename)
+        XCTAssertFalse(result.shortcode.contains("tailtoken"))
+    }
+
     func testCopiesBuiltInUnicodeWithoutTypingPermissions() async throws {
         let fixture = try await makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.workspace) }

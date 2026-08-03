@@ -247,6 +247,76 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
         }
     }
 
+    func testSuccessfulMediaSelectionRefreshesRankingWithoutRelaunch()
+        async throws
+    {
+        let sourceRoot = try TestSupport.makeTemporaryDirectory()
+        temporaryRoots.append(sourceRoot)
+        let pngURL = try TestSupport.writeImage(
+            to: sourceRoot.appendingPathComponent("source.png"),
+            width: 16,
+            height: 12
+        )
+        let png = try Data(contentsOf: pngURL)
+        let fixture = try makeMediaFixture(data: png, filename: "bufo.png")
+        let usageStore = InMemoryEmojiUsageStore()
+        let items = [
+            mediaEmoji(
+                shortcode: "bufo_alpha",
+                mediaType: .png,
+                relativePath: fixture.relativePath,
+                data: png
+            ),
+            mediaEmoji(
+                shortcode: "bufo_beta",
+                mediaType: .png,
+                relativePath: fixture.relativePath,
+                data: png
+            )
+        ]
+        let harness = try makeHarness(
+            items: items,
+            targetText: ":bufo",
+            bundleIdentifier: messages,
+            managedMediaRoot: fixture.root,
+            usageStore: usageStore
+        )
+        harness.worker.setCaptureEnabled(true)
+        type(":bufo", into: harness.worker)
+        let initiallyShown = await eventually {
+            harness.presenter.latestSuggestion?.rows.count == 2
+        }
+        XCTAssertTrue(initiallyShown)
+        let initial = try XCTUnwrap(harness.presenter.latestSuggestion)
+        let chosen = initial.rows[1]
+        harness.worker.enqueue(
+            keySnapshot(keyCode: RuntimeKeyboardKeyCode.downArrow)
+        )
+        harness.worker.enqueue(
+            keySnapshot(keyCode: RuntimeKeyboardKeyCode.tab)
+        )
+
+        let useWasPersisted = await eventually(timeout: .seconds(15)) {
+            guard
+                let snapshot = try? await usageStore.snapshot()
+            else {
+                return false
+            }
+            return snapshot.statistics(for: chosen.id).useCount == 1
+        }
+        XCTAssertTrue(useWasPersisted)
+        try? await Task.sleep(for: .milliseconds(30))
+
+        type(":bufo", into: harness.worker)
+        let reranked = await eventually {
+            harness.presenter.latestSuggestion?.transactionID
+                    != initial.transactionID
+                && harness.presenter.latestSuggestion?.rows.first?.id
+                    == chosen.id
+        }
+        XCTAssertTrue(reranked)
+    }
+
     func testSuggestionFallsBackToOriginalWhenThumbnailEscapesManagedRoot()
         async throws
     {
@@ -1131,7 +1201,8 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
                 PasteboardItemPayload = { $0.pasteboardPayload },
         failClipboardRestore: Bool = false,
         presentationDelayMilliseconds: Int = 0,
-        captureDelayMilliseconds: Int = 0
+        captureDelayMilliseconds: Int = 0,
+        usageStore: (any EmojiUsageStore)? = nil
     ) throws -> RuntimeMediaHarness {
         let system = FakeAccessibilityTextSystem()
         system.text = targetText
@@ -1179,6 +1250,7 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
             interceptionGate: gate,
             contextProvider: captureProvider,
             mainActorBridge: bridge,
+            usageStore: usageStore,
             managedMediaResolver: managedMediaResolver,
             managedMediaRoot: managedMediaRoot,
             adaptiveGlyphPayloadService: adaptiveGlyphPayloadService,

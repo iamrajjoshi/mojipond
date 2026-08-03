@@ -736,7 +736,7 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
             harness.presenter.latestShown
         )
         XCTAssertGreaterThan(shownSnapshot.rows.count, 1)
-        let expectedSelection = shownSnapshot.rows[0].glyph
+        let expectedSelection = shownSnapshot.rows[1].glyph
 
         harness.worker.enqueue(
             keySnapshot(keyCode: RuntimeKeyboardKeyCode.downArrow)
@@ -751,7 +751,179 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         XCTAssertTrue(selectedInserted)
     }
 
-    func testSuggestionSelectionScrollsPastVisibleRowsAndUsesSlackBoundaries()
+    func testPointerHoverSelectsAndClickInsertsWithoutActivatingPanel()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [
+                emoji(shortcode: "frog", value: "🐸"),
+                emoji(shortcode: "fox", value: "🦊")
+            ],
+            targetText: ":f"
+        )
+        harness.worker.setCaptureEnabled(true)
+        type(":f", into: harness.worker)
+        let panelReady = await eventually {
+            harness.presenter.isInteractionConfigured
+                && harness.presenter.latestShown?.rows.count == 2
+        }
+        XCTAssertTrue(panelReady)
+        let snapshot = try XCTUnwrap(harness.presenter.latestShown)
+        let target = snapshot.rows[1]
+
+        harness.presenter.send(
+            .hover(
+                transactionID: snapshot.transactionID,
+                itemID: target.id
+            )
+        )
+        let hovered = await eventually {
+            harness.presenter.latestShown?.selectedRow?.id == target.id
+        }
+        XCTAssertTrue(hovered)
+
+        harness.presenter.send(
+            .accept(
+                transactionID: snapshot.transactionID,
+                itemID: target.id
+            )
+        )
+        let inserted = await eventually {
+            harness.system.text == target.glyph
+        }
+        XCTAssertTrue(inserted)
+    }
+
+    func testSuggestionRefinementPreservesSelectedItemWhenItStillMatches()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [
+                emoji(shortcode: "frog", value: "🐸"),
+                emoji(shortcode: "frown", value: "☹️")
+            ],
+            targetText: ":fr"
+        )
+        harness.worker.setCaptureEnabled(true)
+        type(":f", into: harness.worker)
+        let initiallyShown = await eventually {
+            harness.presenter.latestShown?.rows.count == 2
+        }
+        XCTAssertTrue(initiallyShown)
+        harness.worker.enqueue(
+            keySnapshot(keyCode: RuntimeKeyboardKeyCode.downArrow)
+        )
+        let selectedID = try XCTUnwrap(
+            harness.presenter.latestShown?.rows.last?.id
+        )
+        let selected = await eventually {
+            harness.presenter.latestShown?.selectedRow?.id == selectedID
+        }
+        XCTAssertTrue(selected)
+
+        harness.worker.enqueue(
+            keySnapshot(keyCode: 15, characters: "r")
+        )
+
+        let preserved = await eventually {
+            harness.presenter.latestShown?.rows.count == 2
+                && harness.presenter.latestShown?.selectedRow?.id
+                    == selectedID
+        }
+        XCTAssertTrue(preserved)
+    }
+
+    func testSuccessfulUnicodeSelectionRefreshesRankingWithoutRelaunch()
+        async throws
+    {
+        let usageStore = InMemoryEmojiUsageStore()
+        let harness = try makeHarness(
+            items: [
+                emoji(shortcode: "frog", value: "🐸"),
+                emoji(shortcode: "fish", value: "🐟")
+            ],
+            targetText: ":f",
+            usageStore: usageStore
+        )
+        harness.worker.setCaptureEnabled(true)
+        type(":f", into: harness.worker)
+        let initiallyShown = await eventually {
+            harness.presenter.latestShown?.rows.count == 2
+        }
+        XCTAssertTrue(initiallyShown)
+        let initial = try XCTUnwrap(harness.presenter.latestShown)
+        let chosen = initial.rows[1]
+        harness.worker.enqueue(
+            keySnapshot(keyCode: RuntimeKeyboardKeyCode.downArrow)
+        )
+        harness.worker.enqueue(
+            keySnapshot(keyCode: RuntimeKeyboardKeyCode.tab)
+        )
+
+        let useWasPersisted = await eventuallyAsync {
+            guard
+                let snapshot = try? await usageStore.snapshot()
+            else {
+                return false
+            }
+            return snapshot.statistics(for: chosen.id).useCount == 1
+        }
+        XCTAssertTrue(useWasPersisted)
+        try? await Task.sleep(for: .milliseconds(30))
+
+        type(":f", into: harness.worker)
+        let reranked = await eventually {
+            harness.presenter.latestShown?.transactionID
+                    != initial.transactionID
+                && harness.presenter.latestShown?.rows.first?.id
+                    == chosen.id
+        }
+        XCTAssertTrue(reranked)
+    }
+
+    func testFailedUsagePersistenceDoesNotMutateInSessionRanking()
+        async throws
+    {
+        let usageStore = FailingRuntimeEmojiUsageStore()
+        let harness = try makeHarness(
+            items: [
+                emoji(shortcode: "frog", value: "🐸"),
+                emoji(shortcode: "fox", value: "🦊")
+            ],
+            targetText: ":f",
+            usageStore: usageStore
+        )
+        harness.worker.setCaptureEnabled(true)
+        type(":f", into: harness.worker)
+        let initiallyShown = await eventually {
+            harness.presenter.latestShown?.rows.count == 2
+        }
+        XCTAssertTrue(initiallyShown)
+        let initial = try XCTUnwrap(harness.presenter.latestShown)
+        let originalFirstID = try XCTUnwrap(initial.rows.first?.id)
+        harness.worker.enqueue(
+            keySnapshot(keyCode: RuntimeKeyboardKeyCode.downArrow)
+        )
+        harness.worker.enqueue(
+            keySnapshot(keyCode: RuntimeKeyboardKeyCode.tab)
+        )
+
+        let persistenceAttempted = await eventuallyAsync {
+            await usageStore.recordAttempts == 1
+        }
+        XCTAssertTrue(persistenceAttempted)
+        type(":f", into: harness.worker)
+
+        let rankingStayedStable = await eventually {
+            harness.presenter.latestShown?.transactionID
+                    != initial.transactionID
+                && harness.presenter.latestShown?.rows.first?.id
+                    == originalFirstID
+        }
+        XCTAssertTrue(rankingStayedStable)
+    }
+
+    func testSuggestionSelectionScrollsPastVisibleRowsAndClampsAtBoundaries()
         async throws
     {
         let items = (0..<8).map { index in
@@ -769,7 +941,7 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
 
         let suggestionsShown = await eventually {
             harness.presenter.latestShown?.rows.count == items.count
-                && harness.presenter.latestShown?.selectedIndex == -1
+                && harness.presenter.latestShown?.selectedIndex == 0
         }
         XCTAssertTrue(suggestionsShown)
         let initial = try XCTUnwrap(harness.presenter.latestShown)
@@ -779,10 +951,20 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         harness.worker.enqueue(
             keySnapshot(keyCode: RuntimeKeyboardKeyCode.upArrow)
         )
-        let selectedLastResult = await eventually {
+        let selectionStayedAtFirstResult = await eventually {
             harness.presenter.updates.count > updateCountBeforeSelectedUp
-                && harness.presenter.latestShown?.selectedIndex
-                    == items.count - 1
+                && harness.presenter.latestShown?.selectedIndex == 0
+        }
+        XCTAssertTrue(selectionStayedAtFirstResult)
+
+        for _ in 0..<(items.count + 3) {
+            harness.worker.enqueue(
+                keySnapshot(keyCode: RuntimeKeyboardKeyCode.downArrow)
+            )
+        }
+        let selectedLastResult = await eventually {
+            harness.presenter.latestShown?.selectedIndex
+                == items.count - 1
         }
         XCTAssertTrue(selectedLastResult)
         let last = try XCTUnwrap(harness.presenter.latestShown)
@@ -790,26 +972,8 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         XCTAssertEqual(last.visibleRows.count, 6)
 
         harness.worker.enqueue(
-            keySnapshot(keyCode: RuntimeKeyboardKeyCode.downArrow)
+            keySnapshot(keyCode: RuntimeKeyboardKeyCode.upArrow)
         )
-        let clearedBelowLastResult = await eventually {
-            harness.presenter.latestShown?.selectedIndex == -1
-        }
-        XCTAssertTrue(clearedBelowLastResult)
-
-        harness.worker.enqueue(
-            keySnapshot(keyCode: RuntimeKeyboardKeyCode.downArrow)
-        )
-        let selectedFirstResult = await eventually {
-            harness.presenter.latestShown?.selectedIndex == 0
-        }
-        XCTAssertTrue(selectedFirstResult)
-
-        for _ in 0..<6 {
-            harness.worker.enqueue(
-                keySnapshot(keyCode: RuntimeKeyboardKeyCode.downArrow)
-            )
-        }
         let selectedSeventhResult = await eventually {
             harness.presenter.latestShown?.selectedIndex == 6
         }
@@ -902,7 +1066,7 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
                 false
             )
         ]
-        for (keyCode, flags, selection, clearsSelection) in cases {
+        for (keyCode, flags, selection, _) in cases {
             let harness = try makeHarness(
                 items: [emoji(shortcode: "frog", value: "🐸")],
                 targetText: ":frog"
@@ -940,8 +1104,7 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
             let preserved = await eventually {
                 harness.gate.mode == .suggestions
                     && harness.presenter.updates.count > updateStart
-                    && harness.presenter.latestShown?.selectedIndex
-                        == (clearsSelection ? -1 : 0)
+                    && harness.presenter.latestShown?.selectedIndex == 0
                     && harness.presenter.latestShown?.acceptsTab == false
                     && harness.presenter.latestShown?.acceptsReturn == false
             }
@@ -995,7 +1158,7 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
 
         let preserved = await eventually {
             harness.gate.mode == .suggestions
-                && harness.presenter.latestShown?.selectedIndex == -1
+                && harness.presenter.latestShown?.selectedIndex == 0
         }
         XCTAssertTrue(preserved)
         XCTAssertFalse(
@@ -1106,12 +1269,12 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         XCTAssertEqual(downOutcome.decision, .intercept)
         harness.worker.enqueue(down.delivered(with: downOutcome))
         let selected = await eventually {
-            harness.presenter.latestShown?.selectedIndex == 0
+            harness.presenter.latestShown?.selectedIndex == 1
         }
         XCTAssertTrue(selected)
 
         try await Task.sleep(for: .milliseconds(250))
-        XCTAssertEqual(harness.presenter.latestShown?.selectedIndex, 0)
+        XCTAssertEqual(harness.presenter.latestShown?.selectedIndex, 1)
         XCTAssertEqual(harness.gate.mode, .suggestions)
     }
 
@@ -1620,7 +1783,7 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
                 timeout: .milliseconds(300)
             ) {
                 harness.gate.mode == .suggestions
-                    && harness.presenter.latestShown?.selectedIndex == -1
+                    && harness.presenter.latestShown?.selectedIndex == 0
                     && harness.presenter.latestShown?.acceptsTab == false
             }
             XCTAssertTrue(
@@ -2600,6 +2763,7 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         canPostEvents: Bool = true,
         acceptsTab: Bool = true,
         acceptsReturn: Bool = true,
+        usageStore: (any EmojiUsageStore)? = nil,
         diagnosticHandler:
             (@Sendable (UnicodeAutocompleteRuntimeDiagnostic) -> Void)? = nil
     ) throws -> RuntimeWorkerHarness {
@@ -2651,8 +2815,10 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
             interceptionGate: gate,
             contextProvider: captureProvider,
             mainActorBridge: bridge,
+            usageStore: usageStore,
             diagnosticHandler: diagnosticHandler
         )
+        worker.connectSuggestionPanelInteractions()
         return RuntimeWorkerHarness(
             worker: worker,
             gate: gate,
@@ -2788,6 +2954,21 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         }
         return condition()
     }
+
+    private func eventuallyAsync(
+        timeout: Duration = .seconds(1),
+        condition: @escaping @MainActor () async -> Bool
+    ) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        while clock.now < deadline {
+            if await condition() {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return await condition()
+    }
 }
 
 private struct RuntimeWorkerHarness {
@@ -2805,6 +2986,12 @@ private final class RuntimeRecordingPresenter: RuntimeSuggestionPresenting {
     var allowsPresentation = true
     var onApplyReportingVisibility: (() -> Void)?
     private var latestRevision: UInt64 = 0
+    private var interactionHandler:
+        (@Sendable (RuntimeSuggestionPanelInteraction) -> Void)?
+
+    var isInteractionConfigured: Bool {
+        interactionHandler != nil
+    }
 
     var latestShown: RuntimeSuggestionPanelSnapshot? {
         updates.reversed().lazy.compactMap { update in
@@ -2829,6 +3016,20 @@ private final class RuntimeRecordingPresenter: RuntimeSuggestionPresenting {
         apply(update)
         onApplyReportingVisibility?()
         return allowsPresentation
+    }
+
+    func configureInteractions(
+        handler: @escaping @Sendable (
+            RuntimeSuggestionPanelInteraction
+        ) -> Void,
+        quartzFrameDidChange: @escaping @Sendable (CGRect?) -> Void
+    ) {
+        interactionHandler = handler
+        quartzFrameDidChange(nil)
+    }
+
+    func send(_ interaction: RuntimeSuggestionPanelInteraction) {
+        interactionHandler?(interaction)
     }
 }
 
@@ -3085,5 +3286,49 @@ private final class RuntimeDiagnosticRecorder: @unchecked Sendable {
         lock.withLock {
             storedValues.append(value)
         }
+    }
+}
+
+private actor FailingRuntimeEmojiUsageStore: EmojiUsageStore {
+    private(set) var recordAttempts = 0
+
+    func snapshot() async throws -> EmojiUsageSnapshot {
+        EmojiUsageSnapshot()
+    }
+
+    func recordUse(
+        itemID: EmojiItem.ID,
+        skinTone: EmojiSkinTone?,
+        at date: Date
+    ) async throws {
+        _ = itemID
+        _ = skinTone
+        _ = date
+        recordAttempts += 1
+        throw CocoaError(.fileWriteUnknown)
+    }
+
+    func setFavorite(
+        _ isFavorite: Bool,
+        itemID: EmojiItem.ID
+    ) async throws {
+        _ = isFavorite
+        _ = itemID
+    }
+
+    func setCustomAliases(
+        _ aliases: [String],
+        itemID: EmojiItem.ID
+    ) async throws {
+        _ = aliases
+        _ = itemID
+    }
+
+    func setPreferredSkinTone(
+        _ skinTone: EmojiSkinTone?,
+        itemID: EmojiItem.ID
+    ) async throws {
+        _ = skinTone
+        _ = itemID
     }
 }

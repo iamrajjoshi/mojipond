@@ -66,7 +66,7 @@ enum EmojiLibrarySearchAdapter {
                 shortcode: libraryItem.shortcode,
                 name: libraryItem.displayName ?? libraryItem.shortcode.rawValue,
                 aliases: libraryItem.aliases.map(\.rawValue),
-                keywords: libraryItem.tags,
+                keywords: searchKeywords(for: libraryItem),
                 category: libraryItem.category ?? "Custom",
                 content: try content(from: libraryItem),
                 packID: packID,
@@ -83,6 +83,27 @@ enum EmojiLibrarySearchAdapter {
             priority: priority,
             items: items
         )
+    }
+
+    /// Imported filenames may contain useful words beyond the bounded
+    /// shortcode. Keep the complete stem as search-only metadata so those
+    /// words remain discoverable without becoming exact insertion aliases.
+    private static func searchKeywords(for item: LibraryEmoji) -> [String] {
+        guard
+            item.payload.kind == .asset,
+            let sourceFilename = item.sourceFilename?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+            !sourceFilename.isEmpty
+        else {
+            return item.tags
+        }
+
+        let filename = (sourceFilename as NSString).lastPathComponent
+        let stem = (filename as NSString).deletingPathExtension
+        guard !stem.isEmpty else {
+            return item.tags
+        }
+        return item.tags + [stem]
     }
 
     private static func content(from item: LibraryEmoji) throws -> EmojiContent {

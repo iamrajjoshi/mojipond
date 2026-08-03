@@ -81,6 +81,18 @@ final class RuntimeMainActorBridge {
         )
     }
 
+    func configureSuggestionPanelInteractions(
+        handler: @escaping @Sendable (
+            RuntimeSuggestionPanelInteraction
+        ) -> Void,
+        quartzFrameDidChange: @escaping @Sendable (CGRect?) -> Void
+    ) {
+        presenter.configureInteractions(
+            handler: handler,
+            quartzFrameDidChange: quartzFrameDidChange
+        )
+    }
+
     private func waitForPresentationDelay() async -> Bool {
         guard presentationDelayMilliseconds > 0 else {
             return !Task.isCancelled
@@ -194,6 +206,8 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
     private var activeTransaction: ActiveTransaction?
     private var suggestionPresentationTask: Task<Void, Never>?
     private var pendingSendTask: Task<Void, Never>?
+    private var usageMutationTask: Task<Void, Never>?
+    private var usageMutationGeneration: UInt64 = 0
     private var pendingSendGeneration: UInt64 = 0
     private var managedMediaRoot: URL?
     private var captureEnabled = false
@@ -256,6 +270,27 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
     func enqueue(_ snapshot: KeyboardEventSnapshot) {
         queue.async { [weak self] in
             self?.process(snapshot)
+        }
+    }
+
+    func enqueue(_ interaction: RuntimeSuggestionPanelInteraction) {
+        queue.async { [weak self] in
+            self?.process(interaction)
+        }
+    }
+
+    func connectSuggestionPanelInteractions() {
+        let bridge = mainActorBridge
+        let gate = interceptionGate
+        Task { @MainActor [weak self] in
+            bridge.configureSuggestionPanelInteractions(
+                handler: { [weak self] interaction in
+                    self?.enqueue(interaction)
+                },
+                quartzFrameDidChange: { [gate] frame in
+                    gate.setSuggestionPanelQuartzFrame(frame)
+                }
+            )
         }
     }
 
@@ -487,6 +522,56 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         }
     }
 
+    private func process(
+        _ interaction: RuntimeSuggestionPanelInteraction
+    ) {
+        let transactionID: ParserTransactionID
+        let itemID: EmojiItem.ID
+        switch interaction {
+        case let .hover(id, selectedItemID),
+             let .accept(id, selectedItemID):
+            transactionID = id
+            itemID = selectedItemID
+        }
+        guard
+            var transaction = activeTransaction,
+            transaction.transactionID == transactionID,
+            transaction.visibleMode == .suggestions
+                || transaction.visibleMode == .browser,
+            let selectedIndex = transaction.results.firstIndex(where: {
+                $0.item.id == itemID
+            })
+        else {
+            return
+        }
+
+        let interactionRevision = interceptionGate.interactionRevision
+        let selectionChanged =
+            transaction.selectedIndex != selectedIndex
+        transaction.selectedIndex = selectedIndex
+        transaction.presentationInteractionRevision = interactionRevision
+        armShortcodeInactivityTimeout(for: &transaction)
+        activeTransaction = transaction
+
+        switch interaction {
+        case .hover:
+            guard selectionChanged else {
+                return
+            }
+            present(transaction)
+            prepareSelectedAdaptiveGlyphIfUseful(in: transaction)
+        case .accept:
+            guard transaction.canAcceptSelection else {
+                present(transaction)
+                return
+            }
+            acceptCurrentSelection(
+                transactionID: transactionID,
+                interactionRevision: interactionRevision
+            )
+        }
+    }
+
     private func isFreshTrigger(
         _ action: RuntimeKeyboardAction
     ) -> Bool {
@@ -501,24 +586,13 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
     }
 
     private func preserveSuggestionsAfterCaretMovement(
-        _ snapshot: KeyboardEventSnapshot
+        _: KeyboardEventSnapshot
     ) {
         guard
             var transaction = activeTransaction,
             transaction.visibleMode == .suggestions
         else {
             return
-        }
-        let modifiers = RuntimeKeyboardEventMapper.parserModifiers(
-            from: snapshot.flags,
-            for: snapshot.keyCode
-        )
-        if
-            modifiers.contains(.shift)
-                || !modifiers.contains(.option)
-                    && !modifiers.contains(.command)
-        {
-            transaction.selectedIndex = -1
         }
         transaction.canAcceptSelection = false
         if let processingInteractionRevision {
@@ -874,7 +948,6 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             ),
             in: &transaction
         )
-        transaction.selectedIndex = -1
         armShortcodeInactivityTimeout(for: &transaction)
         activeTransaction = transaction
 
@@ -950,7 +1023,6 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             ),
             in: &transaction
         )
-        transaction.selectedIndex = 0
         transaction.visibleMode = .hidden
         armShortcodeInactivityTimeout(for: &transaction)
         activeTransaction = transaction
@@ -991,7 +1063,6 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             ),
             in: &transaction
         )
-        transaction.selectedIndex = 0
         armShortcodeInactivityTimeout(for: &transaction)
         activeTransaction = transaction
         present(transaction)
@@ -1013,10 +1084,12 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             transaction.selectedIndex
         ) {
             let nextIndex = transaction.selectedIndex + delta
-            transaction.selectedIndex = transaction.results.indices
-                .contains(nextIndex) ? nextIndex : -1
+            transaction.selectedIndex = min(
+                max(nextIndex, 0),
+                count - 1
+            )
         } else {
-            transaction.selectedIndex = delta < 0 ? count - 1 : 0
+            transaction.selectedIndex = 0
         }
         if let processingInteractionRevision {
             transaction.presentationInteractionRevision =
@@ -1056,7 +1129,8 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
 
     private func acceptCurrentSelection(
         transactionID: ParserTransactionID,
-        token: ParsedShortcodeToken? = nil
+        token: ParsedShortcodeToken? = nil,
+        interactionRevision: UInt64? = nil
     ) {
         guard var transaction = activeTransaction,
               transaction.transactionID == transactionID else {
@@ -1078,7 +1152,8 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         let item = transaction.results[acceptedIndex].item
         guard beginCommit(
             transactionID: transactionID,
-            item: item
+            item: item,
+            interactionRevision: interactionRevision
         ) else {
             return
         }
@@ -1092,7 +1167,8 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
     @discardableResult
     private func beginCommit(
         transactionID: ParserTransactionID,
-        item: EmojiItem
+        item: EmojiItem,
+        interactionRevision: UInt64? = nil
     ) -> Bool {
         guard
             var transaction = activeTransaction,
@@ -1101,7 +1177,8 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             return false
         }
         guard let gateGeneration = interceptionGate.activateCommit(
-            interactionRevision: processingInteractionRevision,
+            interactionRevision:
+                interactionRevision ?? processingInteractionRevision,
             acceptsTab: configuration.preferences.shortcode.acceptsTab,
             acceptsReturn: true
         ) else {
@@ -1704,14 +1781,11 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                     clear(transactionID: transactionID)
                     return
                 }
-                if case .inserted = result, let usageStore {
-                    Task {
-                        try? await usageStore.recordUse(
-                            itemID: item.id,
-                            skinTone: selectedTone,
-                            at: Date()
-                        )
-                    }
+                if case .inserted = result {
+                    recordSuccessfulUse(
+                        itemID: item.id,
+                        skinTone: selectedTone
+                    )
                 }
                 if Self.clipboardRestoreFailed(in: result) {
                     diagnosticHandler?(.clipboardRestoreFailed)
@@ -2058,15 +2132,10 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                 }
                 switch result {
                 case let .inserted(method):
-                    if let usageStore {
-                        Task {
-                            try? await usageStore.recordUse(
-                                itemID: item.id,
-                                skinTone: nil,
-                                at: Date()
-                            )
-                        }
-                    }
+                    recordSuccessfulUse(
+                        itemID: item.id,
+                        skinTone: nil
+                    )
                     if method == .temporaryPasteboard(.restoreFailed) {
                         diagnosticHandler?(.clipboardRestoreFailed)
                     }
@@ -2341,6 +2410,9 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         _ results: [EmojiSearchResult],
         in transaction: inout ActiveTransaction
     ) {
+        let selectedItemID = transaction.results.indices.contains(
+            transaction.selectedIndex
+        ) ? transaction.results[transaction.selectedIndex].item.id : nil
         transaction.results = results
         transaction.presentationRows = results.map { result in
             let artworkURLs = displayArtworkURLs(for: result.item)
@@ -2355,6 +2427,61 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                 shortcode: result.item.shortcode.rawValue,
                 name: result.item.name
             )
+        }
+        if results.isEmpty {
+            transaction.selectedIndex = -1
+        } else if let selectedItemID,
+                  let preservedIndex = results.firstIndex(where: {
+                      $0.item.id == selectedItemID
+                  }) {
+            transaction.selectedIndex = preservedIndex
+        } else {
+            transaction.selectedIndex = 0
+        }
+    }
+
+    private func recordSuccessfulUse(
+        itemID: EmojiItem.ID,
+        skinTone: EmojiSkinTone?
+    ) {
+        guard let usageStore else {
+            return
+        }
+        usageMutationGeneration &+= 1
+        let mutationGeneration = usageMutationGeneration
+        let precedingMutation = usageMutationTask
+        usageMutationTask = Task { [weak self, usageStore] in
+            await precedingMutation?.value
+            let persistedSnapshot: EmojiUsageSnapshot?
+            if Task.isCancelled {
+                persistedSnapshot = nil
+            } else {
+                do {
+                    try await usageStore.recordUse(
+                        itemID: itemID,
+                        skinTone: skinTone,
+                        at: Date()
+                    )
+                    persistedSnapshot = try await usageStore.snapshot()
+                } catch {
+                    persistedSnapshot = nil
+                }
+            }
+            guard let self else {
+                return
+            }
+            queue.async { [weak self] in
+                guard let self else {
+                    return
+                }
+                if let persistedSnapshot {
+                    usageSnapshot = persistedSnapshot
+                    refreshExactCommitPredictionConfiguration()
+                }
+                if usageMutationGeneration == mutationGeneration {
+                    usageMutationTask = nil
+                }
+            }
         }
     }
 

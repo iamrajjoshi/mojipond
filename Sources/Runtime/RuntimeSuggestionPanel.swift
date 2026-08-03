@@ -217,12 +217,29 @@ enum RuntimeSuggestionPanelUpdate: Equatable, Sendable {
     }
 }
 
+enum RuntimeSuggestionPanelInteraction: Equatable, Sendable {
+    case hover(
+        transactionID: ParserTransactionID,
+        itemID: EmojiItem.ID
+    )
+    case accept(
+        transactionID: ParserTransactionID,
+        itemID: EmojiItem.ID
+    )
+}
+
 @MainActor
 protocol RuntimeSuggestionPresenting: AnyObject {
     func apply(_ update: RuntimeSuggestionPanelUpdate)
     func applyReportingVisibility(
         _ update: RuntimeSuggestionPanelUpdate
     ) -> Bool
+    func configureInteractions(
+        handler: @escaping @Sendable (
+            RuntimeSuggestionPanelInteraction
+        ) -> Void,
+        quartzFrameDidChange: @escaping @Sendable (CGRect?) -> Void
+    )
 }
 
 extension RuntimeSuggestionPresenting {
@@ -233,17 +250,30 @@ extension RuntimeSuggestionPresenting {
         return true
     }
 
+    func configureInteractions(
+        handler: @escaping @Sendable (
+            RuntimeSuggestionPanelInteraction
+        ) -> Void,
+        quartzFrameDidChange: @escaping @Sendable (CGRect?) -> Void
+    ) {
+        _ = handler
+        quartzFrameDidChange(nil)
+    }
+
 }
 
-/// A keyboard-only, nonactivating surface. Ignoring mouse events is deliberate:
-/// a global click always dismisses the active transaction instead of racing a
-/// panel click against a focus change in the destination app.
 @MainActor
 private final class RuntimeSuggestionPanelModel: ObservableObject {
     @Published var snapshot: RuntimeSuggestionPanelSnapshot
+    var interactionHandler:
+        (@Sendable (RuntimeSuggestionPanelInteraction) -> Void)?
 
     init(snapshot: RuntimeSuggestionPanelSnapshot) {
         self.snapshot = snapshot
+    }
+
+    func send(_ interaction: RuntimeSuggestionPanelInteraction) {
+        interactionHandler?(interaction)
     }
 }
 
@@ -256,6 +286,8 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
     private var lastSuggestionAnnouncement: String?
     private var lastAnnouncedSuggestionSnapshot:
         RuntimeSuggestionPanelSnapshot?
+    private var quartzFrameDidChange:
+        (@Sendable (CGRect?) -> Void)?
 
     init() {
         let initialSnapshot = RuntimeSuggestionPanelSnapshot(
@@ -280,7 +312,8 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true
-        panel.ignoresMouseEvents = true
+        panel.ignoresMouseEvents = false
+        panel.acceptsMouseMovedEvents = true
         panel.setAccessibilityLabel("MojiPond emoji suggestions")
         panel.setAccessibilityIdentifier("runtime.suggestionPanel")
 
@@ -288,6 +321,19 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
 
     func apply(_ update: RuntimeSuggestionPanelUpdate) {
         _ = applyReportingVisibility(update)
+    }
+
+    func configureInteractions(
+        handler: @escaping @Sendable (
+            RuntimeSuggestionPanelInteraction
+        ) -> Void,
+        quartzFrameDidChange: @escaping @Sendable (CGRect?) -> Void
+    ) {
+        suggestionModel.interactionHandler = handler
+        self.quartzFrameDidChange = quartzFrameDidChange
+        quartzFrameDidChange(
+            panel.isVisible ? currentQuartzPanelFrame() : nil
+        )
     }
 
     func applyReportingVisibility(
@@ -305,6 +351,7 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
         case let .hide(revision):
             _ = revision
             panel.orderOut(nil)
+            quartzFrameDidChange?(nil)
             lastSuggestionAnnouncement = nil
             lastAnnouncedSuggestionSnapshot = nil
             return false
@@ -326,14 +373,48 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
                 nearQuartzCaret: caretBounds
             ) != nil else {
                 panel.orderOut(nil)
+                quartzFrameDidChange?(nil)
                 return false
             }
+            quartzFrameDidChange?(currentQuartzPanelFrame())
             if !panel.isVisible {
                 panel.orderFrontRegardless()
             }
             announceSuggestions(snapshot)
             return true
         }
+    }
+
+    private func currentQuartzPanelFrame() -> CGRect? {
+        Self.quartzFrame(
+            forAppKitFrame: panel.frame,
+            displays: CaretPanelPositioner.currentDisplays()
+        )
+    }
+
+    nonisolated static func quartzFrame(
+        forAppKitFrame frame: CGRect,
+        displays: [DisplayGeometry]
+    ) -> CGRect? {
+        guard
+            frame.width > 0,
+            frame.height > 0,
+            let display = displays.first(where: {
+                $0.appKitFrame.contains(
+                    CGPoint(x: frame.midX, y: frame.midY)
+                )
+            })
+        else {
+            return nil
+        }
+        return CGRect(
+            x: display.quartzFrame.minX
+                + frame.minX - display.appKitFrame.minX,
+            y: display.quartzFrame.minY
+                + display.appKitFrame.maxY - frame.maxY,
+            width: frame.width,
+            height: frame.height
+        )
     }
 
     private func announceSuggestions(
@@ -589,7 +670,23 @@ struct RuntimeSuggestionPanelView: View {
                     row: row,
                     isSelected: row.id == selectedID,
                     compact: snapshot.mode == .browser,
-                    trigger: snapshot.trigger
+                    trigger: snapshot.trigger,
+                    onHover: {
+                        model.send(
+                            .hover(
+                                transactionID: snapshot.transactionID,
+                                itemID: row.id
+                            )
+                        )
+                    },
+                    onAccept: {
+                        model.send(
+                            .accept(
+                                transactionID: snapshot.transactionID,
+                                itemID: row.id
+                            )
+                        )
+                    }
                 )
                 .id(row.id)
             }
@@ -612,6 +709,8 @@ private struct RuntimeSuggestionRowView: View {
     let isSelected: Bool
     let compact: Bool
     let trigger: ShortcodeTrigger
+    let onHover: () -> Void
+    let onAccept: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -685,6 +784,12 @@ private struct RuntimeSuggestionRowView: View {
                 .padding(.horizontal, 5)
         }
         .contentShape(Rectangle())
+        .onHover { isInside in
+            if isInside {
+                onHover()
+            }
+        }
+        .onTapGesture(perform: onAccept)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
             "\(row.name), \(trigger.accessibilityName) "

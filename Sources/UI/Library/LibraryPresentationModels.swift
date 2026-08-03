@@ -86,6 +86,7 @@ struct LibraryDisplayItem: Identifiable, Equatable {
     let aliases: [String]
     let displayName: String
     let tags: [String]
+    let sourceFilename: String?
     let category: String
     let unicode: String?
     let assetURL: URL?
