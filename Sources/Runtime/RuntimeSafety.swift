@@ -306,11 +306,6 @@ final class RuntimeAccessibilityTextContextProvider:
         )
         let context = expectedToken.isEmpty
             ? try Self.caretContext(capture.context)
-            : trigger == "/"
-            ? try Self.mediaCommandContext(
-                capture.context,
-                expectedToken: expectedToken
-            )
             : capture.context
 
         guard Self.context(context, containsExactly: expectedToken) else {
@@ -474,64 +469,6 @@ final class RuntimeAccessibilityTextContextProvider:
             tokenRange: NSRange(
                 location: context.selection.location,
                 length: 0
-            )
-        )
-    }
-
-    private static func mediaCommandContext(
-        _ context: AccessibilityTextContext,
-        expectedToken: String
-    ) throws -> AccessibilityTextContext {
-        let expectedLength = expectedToken.utf16.count
-        guard
-            expectedLength > 0,
-            expectedLength <= AccessibilityTextAdapter
-                .maximumShortcodeContextLength,
-            context.selection.length == 0,
-            context.selection.location >= expectedLength,
-            context.textFragmentRange.location
-                + context.textFragmentRange.length
-                == context.selection.location,
-            context.textFragment.utf16.count >= expectedLength
-        else {
-            throw RuntimeTextCaptureError.invalidTokenContext
-        }
-
-        let fragment = context.textFragment as NSString
-        let localRange = NSRange(
-            location: fragment.length - expectedLength,
-            length: expectedLength
-        )
-        guard fragment.substring(with: localRange) == expectedToken else {
-            throw RuntimeTextCaptureError.invalidTokenContext
-        }
-        let tokenLocation =
-            context.selection.location - expectedLength
-        if tokenLocation > 0 {
-            guard localRange.location > 0 else {
-                throw RuntimeTextCaptureError.invalidTokenContext
-            }
-            let precedingRange = fragment.rangeOfComposedCharacterSequence(
-                at: localRange.location - 1
-            )
-            let preceding = fragment.substring(with: precedingRange)
-            guard
-                !preceding.isEmpty,
-                preceding.unicodeScalars.allSatisfy({
-                    CharacterSet.whitespacesAndNewlines.contains($0)
-                })
-            else {
-                throw RuntimeTextCaptureError.invalidTokenContext
-            }
-        }
-        return AccessibilityTextContext(
-            selection: context.selection,
-            caretBounds: context.caretBounds,
-            textFragment: context.textFragment,
-            textFragmentRange: context.textFragmentRange,
-            tokenRange: NSRange(
-                location: tokenLocation,
-                length: expectedLength
             )
         )
     }

@@ -23,18 +23,12 @@ struct UnicodeAutocompleteRuntimeConfiguration: Equatable, Sendable {
     var suggestionLimit: Int
     var accessibilitySettleDelayMilliseconds: Int
     var accessibilityRetryLimit: Int
-    var mediaSearchDebounceMilliseconds: Int
-    var mediaResultLimit: Int
-    var mediaInactivityTimeoutMilliseconds: Int
 
     init(
         preferences: MojiPondPreferences = .defaults,
         suggestionLimit: Int = 60,
         accessibilitySettleDelayMilliseconds: Int = 12,
-        accessibilityRetryLimit: Int = 2,
-        mediaSearchDebounceMilliseconds: Int = 140,
-        mediaResultLimit: Int = 12,
-        mediaInactivityTimeoutMilliseconds: Int = 8_000
+        accessibilityRetryLimit: Int = 2
     ) {
         self.preferences = preferences
         self.suggestionLimit = min(
@@ -46,15 +40,6 @@ struct UnicodeAutocompleteRuntimeConfiguration: Equatable, Sendable {
             100
         )
         self.accessibilityRetryLimit = min(max(0, accessibilityRetryLimit), 4)
-        self.mediaSearchDebounceMilliseconds = min(
-            max(0, mediaSearchDebounceMilliseconds),
-            1_000
-        )
-        self.mediaResultLimit = min(max(4, mediaResultLimit), 24)
-        self.mediaInactivityTimeoutMilliseconds = min(
-            max(100, mediaInactivityTimeoutMilliseconds),
-            60_000
-        )
     }
 }
 
@@ -81,10 +66,6 @@ final class RuntimeMainActorBridge {
         presenter.apply(update)
     }
 
-    func applyMedia(_ update: RuntimeMediaPanelUpdate) {
-        presenter.applyMedia(update)
-    }
-
     func applyReportingVisibility(
         _ update: RuntimeSuggestionPanelUpdate,
         willApply: @escaping @MainActor @Sendable () -> Bool = { true }
@@ -97,21 +78,6 @@ final class RuntimeMainActorBridge {
         }
         return .applied(
             isVisible: presenter.applyReportingVisibility(update)
-        )
-    }
-
-    func applyMediaReportingVisibility(
-        _ update: RuntimeMediaPanelUpdate,
-        willApply: @escaping @MainActor @Sendable () -> Bool = { true }
-    ) async -> RuntimePresentationApplicationResult {
-        guard await waitForPresentationDelay() else {
-            return .rejected
-        }
-        guard willApply() else {
-            return .rejected
-        }
-        return .applied(
-            isVisible: presenter.applyMediaReportingVisibility(update)
         )
     }
 
@@ -139,16 +105,6 @@ final class RuntimeMainActorBridge {
         }
         return await insertionEngine.insert(
             .unicode(value),
-            replacing: request
-        )
-    }
-
-    func insertDownloadedMedia(
-        _ payload: PasteboardItemPayload,
-        replacing request: AccessibilityReplacementRequest
-    ) async -> InsertionResult {
-        await insertionEngine.insert(
-            .media(payload),
             replacing: request
         )
     }
@@ -185,17 +141,13 @@ final class RuntimeMainActorBridge {
 /// Owns every mutable parser/search/session value on one serial queue. Event-tap
 /// handlers only enqueue immutable snapshots into this object.
 final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
+    private static let messagesBundleIdentifier = "com.apple.MobileSMS"
+
     private enum CapturePurpose: Sendable {
         case establishSession
         case showSuggestions
         case showBrowser
         case insert(item: EmojiItem)
-    }
-
-    private enum MediaCapturePurpose: Sendable {
-        case search(query: String)
-        case insert(result: MediaCommandResult)
-        case validationFailure
     }
 
     private struct ActiveTransaction: @unchecked Sendable {
@@ -220,56 +172,28 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         var presentationInteractionRevision: UInt64
     }
 
-    private struct ActiveMediaTransaction: @unchecked Sendable {
-        let generation: UInt64
-        var sessionTarget: AccessibilityTextTarget?
-        var expectedToken: String
-        var caretBounds: CGRect?
-        var command: MediaCommandKind
-        var panelState: RuntimeMediaPanelState
-        var results: [MediaCommandResult]
-        var grid: MediaCommandGrid
-        var attributions: [MediaCommandAttribution]
-        var captureGeneration: UInt64
-        var activityRevision: UInt64
-        var isVisible: Bool
-        var presentationInteractionRevision: UInt64
-    }
-
     private let queue: DispatchQueue
     private let managedMediaResolutionQueue: DispatchQueue
     private let interceptionGate: RuntimeInterceptionGate
     private let contextProvider: any RuntimeTextContextCapturing
     private let mainActorBridge: RuntimeMainActorBridge
     private let usageStore: (any EmojiUsageStore)?
-    private let frontmostApplication:
-        any RuntimeFrontmostApplicationProviding
     private let managedMediaResolver: any RuntimeManagedMediaResolving
     private let managedMediaPayloadBuilder:
         @Sendable (RuntimeResolvedManagedMedia) -> PasteboardItemPayload
     private let adaptiveGlyphPayloadService: AdaptiveGlyphPayloadService
-    private let mediaCommandCoordinator:
-        (any RuntimeMediaCommandCoordinating)?
-    private let remoteMediaCache:
-        (any RuntimeRemoteMediaCaching)?
     private let diagnosticHandler:
         (@Sendable (UnicodeAutocompleteRuntimeDiagnostic) -> Void)?
 
     private var parser: ShortcodeParser
-    private var mediaParser = MediaCommandParser()
     private var searchIndex: EmojiSearchIndex
     private var usageSnapshot: EmojiUsageSnapshot
     private var configuration: UnicodeAutocompleteRuntimeConfiguration
     private var activeTransaction: ActiveTransaction?
-    private var activeMediaTransaction: ActiveMediaTransaction?
-    private var mediaOperation: Task<Void, Never>?
-    private var mediaCoordinatorCancellation: Task<Void, Never>?
-    private var mediaGeneration: UInt64 = 0
     private var suggestionPresentationTask: Task<Void, Never>?
     private var pendingSendTask: Task<Void, Never>?
     private var pendingSendGeneration: UInt64 = 0
     private var managedMediaRoot: URL?
-    private var mediaNetworkOptions: MediaCommandNetworkOptions
     private var captureEnabled = false
     private var uiRevision: UInt64 = 0
     private var processingPredictionGeneration: UInt64?
@@ -285,9 +209,6 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         contextProvider: any RuntimeTextContextCapturing,
         mainActorBridge: RuntimeMainActorBridge,
         usageStore: (any EmojiUsageStore)? = nil,
-        frontmostApplication:
-            any RuntimeFrontmostApplicationProviding =
-                MacRuntimeFrontmostApplicationProvider(),
         managedMediaResolver:
             any RuntimeManagedMediaResolving =
                 RuntimeManagedMediaResolver(),
@@ -297,10 +218,6 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         managedMediaPayloadBuilder:
             @escaping @Sendable (RuntimeResolvedManagedMedia) ->
                 PasteboardItemPayload = { $0.pasteboardPayload },
-        mediaCommandCoordinator:
-            (any RuntimeMediaCommandCoordinating)? = nil,
-        remoteMediaCache:
-            (any RuntimeRemoteMediaCaching)? = nil,
         initialUsageSnapshot: EmojiUsageSnapshot = EmojiUsageSnapshot(),
         diagnosticHandler:
             (@Sendable (UnicodeAutocompleteRuntimeDiagnostic) -> Void)? = nil,
@@ -312,20 +229,14 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         self.contextProvider = contextProvider
         self.mainActorBridge = mainActorBridge
         self.usageStore = usageStore
-        self.frontmostApplication = frontmostApplication
         self.managedMediaResolver = managedMediaResolver
         self.managedMediaPayloadBuilder = managedMediaPayloadBuilder
         self.managedMediaRoot = managedMediaRoot?
             .standardizedFileURL
             .resolvingSymlinksInPath()
         self.adaptiveGlyphPayloadService = adaptiveGlyphPayloadService
-        self.mediaCommandCoordinator = mediaCommandCoordinator
-        self.remoteMediaCache = remoteMediaCache
         self.diagnosticHandler = diagnosticHandler
         usageSnapshot = initialUsageSnapshot
-        mediaNetworkOptions = MediaCommandNetworkOptions(
-            preferences: configuration.preferences.network
-        )
         parser = ShortcodeParser(
             configuration: ShortcodeParserConfiguration(
                 preferences: configuration.preferences.shortcode
@@ -371,9 +282,6 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             )
             contextProvider.updateExclusions(
                 configuration.preferences.exclusions
-            )
-            mediaNetworkOptions = MediaCommandNetworkOptions(
-                preferences: configuration.preferences.network
             )
             refreshExactCommitPredictionConfiguration()
             cancelAllTransactions(reason: .externallyCancelled)
@@ -501,27 +409,6 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         if handleCommitAction(
             action,
             interceptionOutcome: interceptionOutcome
-        ) {
-            return
-        }
-
-        if activeMediaTransaction?.isVisible == true {
-            if interceptionOutcome.mode == .media {
-                if handleMediaGridKey(snapshot) {
-                    return
-                }
-            } else if isMediaSurfaceKey(snapshot) {
-                cancelMediaTransaction(showCancelled: false)
-                return
-            }
-        }
-
-        let activeBundleIdentifier =
-            frontmostApplication.bundleIdentifier()
-        if processMediaParser(
-            action: action,
-            snapshot: snapshot,
-            bundleIdentifier: activeBundleIdentifier
         ) {
             return
         }
@@ -691,110 +578,6 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         }
     }
 
-    private func isMediaSurfaceKey(
-        _ snapshot: KeyboardEventSnapshot
-    ) -> Bool {
-        guard snapshot.type == .keyDown else {
-            return false
-        }
-        switch snapshot.keyCode {
-        case RuntimeKeyboardKeyCode.leftArrow,
-             RuntimeKeyboardKeyCode.rightArrow,
-             RuntimeKeyboardKeyCode.upArrow,
-             RuntimeKeyboardKeyCode.downArrow,
-             RuntimeKeyboardKeyCode.tab,
-             RuntimeKeyboardKeyCode.returnKey,
-             RuntimeKeyboardKeyCode.keypadEnter,
-             RuntimeKeyboardKeyCode.escape:
-            return true
-        default:
-            return false
-        }
-    }
-
-    private func processMediaParser(
-        action: RuntimeKeyboardAction,
-        snapshot: KeyboardEventSnapshot,
-        bundleIdentifier: String?
-    ) -> Bool {
-        let input: MediaCommandParserInput
-        switch action {
-        case let .character(character, _):
-            input = .text(String(character))
-        case .backspace:
-            input = .backspace
-        case .escape:
-            input = .escape
-        case .reset:
-            input = .contextInvalidated
-        case .navigation, .ignore:
-            return false
-        }
-
-        let mediaAction = mediaParser.consume(
-            MediaCommandParserEvent(
-                input: input,
-                bundleIdentifier: bundleIdentifier,
-                timestamp: Double(snapshot.timestamp) / 1_000_000_000,
-                modifiers: mediaModifiers(from: snapshot.flags)
-            )
-        )
-        switch mediaAction {
-        case .none, .recognized, .limitReached:
-            return false
-        case .cancelled:
-            if activeMediaTransaction != nil {
-                cancelMediaTransaction(showCancelled: false)
-            }
-            return false
-        case let .queryChanged(command, query):
-            guard let expectedToken = mediaParser.renderedToken else {
-                cancelMediaTransaction(showCancelled: false)
-                return true
-            }
-            if query.isEmpty {
-                suspendMediaTransactionKeepingParser()
-                return true
-            }
-            guard
-                expectedToken.utf16.count
-                    <= AccessibilityTextAdapter
-                        .maximumShortcodeContextLength
-            else {
-                showMediaValidationFailure(
-                    command: command,
-                    expectedToken: expectedToken
-                )
-                return true
-            }
-            beginMediaSearch(
-                command: command,
-                query: query,
-                expectedToken: expectedToken
-            )
-            return true
-        }
-    }
-
-    private func mediaModifiers(
-        from flags: CGEventFlags
-    ) -> MediaCommandModifierFlags {
-        var modifiers: MediaCommandModifierFlags = []
-        if flags.contains(.maskCommand) {
-            modifiers.insert(.command)
-        }
-        if flags.contains(.maskControl) {
-            modifiers.insert(.control)
-        }
-        if flags.contains(.maskAlternate) {
-            modifiers.insert(.option)
-        }
-        if flags.contains(.maskShift) {
-            modifiers.insert(.shift)
-        }
-        return modifiers
-    }
-
     private func parserInput(
         for action: RuntimeKeyboardAction
     ) -> ShortcodeParserInput? {
@@ -896,759 +679,6 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         case .ignore:
             return true
         }
-    }
-
-    private func beginMediaSearch(
-        command: MediaCommandKind,
-        query: String,
-        expectedToken: String
-    ) {
-        cancelUnicodeTransactionForMedia()
-        cancelLocalMediaOperation()
-        mediaGeneration &+= 1
-        if mediaGeneration == 0 {
-            mediaGeneration = 1
-        }
-        let generation = mediaGeneration
-        var transaction = ActiveMediaTransaction(
-            generation: generation,
-            sessionTarget: nil,
-            expectedToken: expectedToken,
-            caretBounds: nil,
-            command: command,
-            panelState: .loading,
-            results: [],
-            grid: MediaCommandGrid(columnCount: 4),
-            attributions: [],
-            captureGeneration: 0,
-            activityRevision: 0,
-            isVisible: false,
-            presentationInteractionRevision:
-                processingInteractionRevision
-                    ?? interceptionGate.interactionRevision
-        )
-        armMediaInactivityTimeout(for: &transaction)
-        activeMediaTransaction = transaction
-        scheduleMediaCapture(
-            generation: generation,
-            expectedToken: expectedToken,
-            purpose: .search(query: query)
-        )
-    }
-
-    private func showMediaValidationFailure(
-        command: MediaCommandKind,
-        expectedToken: String
-    ) {
-        cancelUnicodeTransactionForMedia()
-        cancelLocalMediaOperation()
-        mediaGeneration &+= 1
-        if mediaGeneration == 0 {
-            mediaGeneration = 1
-        }
-        let generation = mediaGeneration
-        var transaction = ActiveMediaTransaction(
-            generation: generation,
-            sessionTarget: nil,
-            expectedToken: expectedToken,
-            caretBounds: nil,
-            command: command,
-            panelState: .failed(.invalidQuery),
-            results: [],
-            grid: MediaCommandGrid(columnCount: 4),
-            attributions: [],
-            captureGeneration: 0,
-            activityRevision: 0,
-            isVisible: false,
-            presentationInteractionRevision:
-                processingInteractionRevision
-                    ?? interceptionGate.interactionRevision
-        )
-        armMediaInactivityTimeout(for: &transaction)
-        activeMediaTransaction = transaction
-        scheduleMediaCapture(
-            generation: generation,
-            expectedToken: expectedToken,
-            purpose: .validationFailure
-        )
-    }
-
-    private func scheduleMediaCapture(
-        generation: UInt64,
-        expectedToken: String,
-        purpose: MediaCapturePurpose
-    ) {
-        guard var transaction = activeMediaTransaction,
-              transaction.generation == generation else {
-            return
-        }
-        transaction.captureGeneration &+= 1
-        transaction.expectedToken = expectedToken
-        activeMediaTransaction = transaction
-        let captureGeneration = transaction.captureGeneration
-        let delay = configuration.accessibilitySettleDelayMilliseconds
-        queue.asyncAfter(
-            deadline: .now() + .milliseconds(delay)
-        ) { [weak self] in
-            self?.performMediaCapture(
-                generation: generation,
-                captureGeneration: captureGeneration,
-                expectedToken: expectedToken,
-                purpose: purpose,
-                attempt: 0
-            )
-        }
-    }
-
-    private func performMediaCapture(
-        generation: UInt64,
-        captureGeneration: UInt64,
-        expectedToken: String,
-        purpose: MediaCapturePurpose,
-        attempt: Int
-    ) {
-        guard
-            captureEnabled,
-            let transaction = activeMediaTransaction,
-            transaction.generation == generation,
-            transaction.captureGeneration == captureGeneration,
-            transaction.expectedToken == expectedToken
-        else {
-            return
-        }
-
-        do {
-            let capture = try contextProvider.capture(
-                expectedToken: expectedToken,
-                trigger: "/"
-            )
-            guard
-                capture.bundleIdentifier
-                    == MediaCommandParser.messagesBundleIdentifier
-            else {
-                cancelMediaTransaction(showCancelled: false)
-                return
-            }
-            finishMediaCapture(
-                generation: generation,
-                captureGeneration: captureGeneration,
-                expectedToken: expectedToken,
-                purpose: purpose,
-                capture: capture
-            )
-        } catch let error as RuntimeTextCaptureError {
-            if
-                error.isTransient,
-                attempt < configuration.accessibilityRetryLimit
-            {
-                let delay = Self.accessibilityRetryDelayMilliseconds(
-                    afterFailedAttempt: attempt
-                )
-                queue.asyncAfter(deadline: .now() + .milliseconds(delay)) {
-                    [weak self] in
-                    self?.performMediaCapture(
-                        generation: generation,
-                        captureGeneration: captureGeneration,
-                        expectedToken: expectedToken,
-                        purpose: purpose,
-                        attempt: attempt + 1
-                    )
-                }
-            } else {
-                emitDiagnostic(for: error)
-                cancelMediaTransaction(showCancelled: false)
-            }
-        } catch {
-            cancelMediaTransaction(showCancelled: false)
-        }
-    }
-
-    private func finishMediaCapture(
-        generation: UInt64,
-        captureGeneration: UInt64,
-        expectedToken: String,
-        purpose: MediaCapturePurpose,
-        capture: RuntimeTextCapture
-    ) {
-        guard
-            var transaction = activeMediaTransaction,
-            transaction.generation == generation,
-            transaction.captureGeneration == captureGeneration
-        else {
-            return
-        }
-        if let target = transaction.sessionTarget {
-            guard
-                target.processIdentifier
-                    == capture.target.processIdentifier
-            else {
-                cancelMediaTransaction(showCancelled: false)
-                return
-            }
-        } else {
-            transaction.sessionTarget = capture.target
-        }
-        transaction.caretBounds = capture.context.caretBounds
-        transaction.isVisible = true
-        activeMediaTransaction = transaction
-
-        switch purpose {
-        case let .search(query):
-            transaction.panelState = .loading
-            activeMediaTransaction = transaction
-            presentMedia(transaction)
-            let debounce = configuration.mediaSearchDebounceMilliseconds
-            queue.asyncAfter(
-                deadline: .now() + .milliseconds(debounce)
-            ) { [weak self] in
-                self?.launchMediaSearch(
-                    generation: generation,
-                    query: query
-                )
-            }
-
-        case .validationFailure:
-            presentMedia(transaction)
-
-        case let .insert(result):
-            guard
-                let sessionTarget = transaction.sessionTarget,
-                let request = RuntimeReplacementRequestFactory.make(
-                    sessionTarget: sessionTarget,
-                    capture: capture,
-                    expectedToken: expectedToken
-                )
-            else {
-                cancelMediaTransaction(showCancelled: false)
-                return
-            }
-            resolveAndInsertMediaCommandResult(
-                result,
-                request: request,
-                generation: generation,
-                expectedToken: expectedToken
-            )
-        }
-    }
-
-    private func launchMediaSearch(
-        generation: UInt64,
-        query: String
-    ) {
-        guard
-            let transaction = activeMediaTransaction,
-            transaction.generation == generation,
-            transaction.expectedToken == mediaParser.renderedToken
-        else {
-            return
-        }
-        guard let mediaCommandCoordinator else {
-            updateMediaPanel(
-                generation: generation,
-                state: .failed(.providerUnavailable)
-            )
-            return
-        }
-
-        let command = transaction.command
-        let options = mediaNetworkOptions
-        let limit = configuration.mediaResultLimit
-        let pendingCancellation = mediaCoordinatorCancellation
-        mediaOperation = Task { [weak self] in
-            await pendingCancellation?.value
-            guard !Task.isCancelled else {
-                return
-            }
-            let state = await mediaCommandCoordinator.search(
-                command: command,
-                query: query,
-                bundleIdentifier:
-                    MediaCommandParser.messagesBundleIdentifier,
-                networkOptions: options,
-                limit: limit
-            )
-            guard let self else {
-                return
-            }
-            queue.async { [weak self] in
-                self?.applyMediaSearchState(
-                    state,
-                    generation: generation
-                )
-            }
-        }
-    }
-
-    private func applyMediaSearchState(
-        _ state: MediaCommandSearchState,
-        generation: UInt64
-    ) {
-        guard
-            var transaction = activeMediaTransaction,
-            transaction.generation == generation
-        else {
-            return
-        }
-        mediaOperation = nil
-        let results = state.runtimeResults
-        transaction.panelState = state.runtimePanelState
-        transaction.results = results?.items ?? []
-        transaction.grid.updateItems(transaction.results)
-        transaction.attributions = results?.attributions ?? []
-        transaction.isVisible = true
-        activeMediaTransaction = transaction
-        presentMedia(transaction)
-    }
-
-    private func updateMediaPanel(
-        generation: UInt64,
-        state: RuntimeMediaPanelState
-    ) {
-        guard var transaction = activeMediaTransaction,
-              transaction.generation == generation else {
-            return
-        }
-        transaction.panelState = state
-        transaction.results = []
-        transaction.grid.updateItems([])
-        transaction.attributions = []
-        transaction.isVisible = true
-        activeMediaTransaction = transaction
-        presentMedia(transaction)
-    }
-
-    private func handleMediaGridKey(
-        _ snapshot: KeyboardEventSnapshot
-    ) -> Bool {
-        guard
-            snapshot.type == .keyDown,
-            var transaction = activeMediaTransaction,
-            transaction.isVisible,
-            !RuntimeKeyboardEventMapper
-                .hasUnsupportedInterceptionModifiers(
-                    snapshot,
-                    allowsShiftedTab: true
-                )
-        else {
-            return false
-        }
-
-        let key: MediaCommandGridKey
-        switch snapshot.keyCode {
-        case RuntimeKeyboardKeyCode.leftArrow:
-            key = .left
-        case RuntimeKeyboardKeyCode.rightArrow:
-            key = .right
-        case RuntimeKeyboardKeyCode.upArrow:
-            key = .up
-        case RuntimeKeyboardKeyCode.downArrow:
-            key = .down
-        case RuntimeKeyboardKeyCode.tab:
-            key = .tab(backward: snapshot.flags.contains(.maskShift))
-        case RuntimeKeyboardKeyCode.returnKey,
-             RuntimeKeyboardKeyCode.keypadEnter:
-            key = .returnKey
-        case RuntimeKeyboardKeyCode.escape:
-            key = .escape
-        default:
-            return false
-        }
-
-        if transaction.panelState == .resolving {
-            if key == .escape {
-                cancelMediaTransaction(showCancelled: true)
-            }
-            return true
-        }
-
-        guard transaction.panelState.allowsResultSelection else {
-            return false
-        }
-
-        armMediaInactivityTimeout(for: &transaction)
-        let action = transaction.grid.handle(key)
-        switch action {
-        case .ignored:
-            break
-        case .dismiss:
-            cancelMediaTransaction(showCancelled: true)
-            return true
-        case .moved:
-            activeMediaTransaction = transaction
-            presentMedia(transaction)
-        case let .activate(index):
-            guard transaction.results.indices.contains(index) else {
-                return true
-            }
-            let selectedResult = transaction.results[index]
-            transaction.panelState = .resolving
-            activeMediaTransaction = transaction
-            presentMedia(transaction)
-            scheduleMediaCapture(
-                generation: transaction.generation,
-                expectedToken: transaction.expectedToken,
-                purpose: .insert(result: selectedResult)
-            )
-        }
-        return true
-    }
-
-    private func armMediaInactivityTimeout(
-        for transaction: inout ActiveMediaTransaction
-    ) {
-        transaction.activityRevision &+= 1
-        let generation = transaction.generation
-        let activityRevision = transaction.activityRevision
-        let timeout = configuration.mediaInactivityTimeoutMilliseconds
-        queue.asyncAfter(deadline: .now() + .milliseconds(timeout)) {
-            [weak self] in
-            guard
-                let self,
-                let current = activeMediaTransaction,
-                current.generation == generation,
-                current.activityRevision == activityRevision
-            else {
-                return
-            }
-            cancelMediaTransaction(showCancelled: false)
-        }
-    }
-
-    private func resolveAndInsertMediaCommandResult(
-        _ result: MediaCommandResult,
-        request: AccessibilityReplacementRequest,
-        generation: UInt64,
-        expectedToken: String
-    ) {
-        guard let mediaCommandCoordinator else {
-            updateMediaPanel(
-                generation: generation,
-                state: .failed(.providerUnavailable)
-            )
-            return
-        }
-        let bridge = mainActorBridge
-        let remoteMediaCache = remoteMediaCache
-        mediaOperation = Task { [weak self] in
-            let download: MediaDownload
-            do {
-                download = try await RuntimeMediaDownloadResolver(
-                    coordinator: mediaCommandCoordinator,
-                    cache: remoteMediaCache
-                ).resolve(result)
-                try Task.checkCancellation()
-            } catch {
-                guard !Task.isCancelled else {
-                    return
-                }
-                guard let self else {
-                    return
-                }
-                queue.async { [weak self] in
-                    guard
-                        let self,
-                        activeMediaTransaction?.generation == generation
-                    else {
-                        return
-                    }
-                    diagnosticHandler?(
-                        .mediaCopyFallbackAvailable(
-                            RuntimeMediaCopyFallbackDiagnostic(
-                                source: .sticker,
-                                reason: .downloadFailed
-                            )
-                        )
-                    )
-                    updateMediaPanel(
-                        generation: generation,
-                        state: .failed(.unsupportedMedia)
-                    )
-                }
-                return
-            }
-
-            do {
-                let payload = try RuntimeMediaPayloadBuilder.payload(
-                    for: download
-                )
-                try Task.checkCancellation()
-                guard await self?.mediaInsertionIsStillActive(
-                    generation: generation,
-                    expectedToken: expectedToken
-                ) == true else {
-                    return
-                }
-                try Task.checkCancellation()
-                let insertionResult = await bridge.insertDownloadedMedia(
-                    payload,
-                    replacing: request
-                )
-                guard let self else {
-                    return
-                }
-                queue.async { [weak self] in
-                    guard
-                        let self,
-                        activeMediaTransaction?.generation == generation
-                    else {
-                        return
-                    }
-                    if case let .copyFallbackAvailable(reason) =
-                        insertionResult
-                    {
-                        diagnosticHandler?(
-                            .mediaCopyFallbackAvailable(
-                                RuntimeMediaCopyFallbackDiagnostic(
-                                    source: .sticker,
-                                    reason: .insertionFailed(reason),
-                                    payload: payload
-                                )
-                            )
-                        )
-                    } else if Self.clipboardRestoreFailed(
-                        in: insertionResult
-                    ) {
-                        diagnosticHandler?(.clipboardRestoreFailed)
-                    }
-                    clearMediaTransaction()
-                }
-            } catch {
-                guard !Task.isCancelled else {
-                    return
-                }
-                guard let self else {
-                    return
-                }
-                queue.async { [weak self] in
-                    guard
-                        let self,
-                        activeMediaTransaction?.generation == generation
-                    else {
-                        return
-                    }
-                    diagnosticHandler?(
-                        .mediaCopyFallbackAvailable(
-                            RuntimeMediaCopyFallbackDiagnostic(
-                                source: .sticker,
-                                reason: .unsupportedDownloadedMedia
-                            )
-                        )
-                    )
-                    updateMediaPanel(
-                        generation: generation,
-                        state: .failed(.unsupportedMedia)
-                    )
-                }
-            }
-        }
-    }
-
-    private func mediaInsertionIsStillActive(
-        generation: UInt64,
-        expectedToken: String
-    ) async -> Bool {
-        await withCheckedContinuation { continuation in
-            queue.async { [weak self] in
-                guard
-                    let self,
-                    let transaction = activeMediaTransaction,
-                    transaction.generation == generation,
-                    transaction.expectedToken == expectedToken,
-                    mediaParser.renderedToken == expectedToken
-                else {
-                    continuation.resume(returning: false)
-                    return
-                }
-                continuation.resume(returning: true)
-            }
-        }
-    }
-
-    private func presentMedia(_ transaction: ActiveMediaTransaction) {
-        guard
-            transaction.isVisible,
-            let caretBounds = transaction.caretBounds
-        else {
-            hideMediaSurface()
-            return
-        }
-        uiRevision &+= 1
-        let snapshot = RuntimeMediaPanelSnapshot(
-            revision: uiRevision,
-            command: transaction.command,
-            state: transaction.panelState,
-            items: transaction.results.map {
-                RuntimeMediaPanelItem(
-                    id: $0.id,
-                    title: $0.media.title,
-                    previewURL: $0.media.previewURL,
-                    provider: $0.media.provider
-                )
-            },
-            selectedIndex: transaction.grid.selectedIndex,
-            attributions: RuntimeMediaAttributionPolicy.normalized(
-                items: transaction.results,
-                declared: transaction.attributions
-            )
-        )
-        let revision = snapshot.revision
-        let generation = transaction.generation
-        guard interceptionGate.expectPresentation(
-            revision: revision,
-            interactionRevision:
-                transaction.presentationInteractionRevision
-        ) else {
-            return
-        }
-        let gate = interceptionGate
-        let bridge = mainActorBridge
-        let queue = queue
-        let capturesSelectionKeys = snapshot.capturesSelectionKeys
-        Task { @MainActor [weak self] in
-            let result = await bridge.applyMediaReportingVisibility(
-                .show(
-                    snapshot: snapshot,
-                    quartzCaretBounds: caretBounds
-                ),
-                willApply: {
-                    gate.activatePresentation(
-                        revision: revision,
-                        mode: .media,
-                        acceptsTab: capturesSelectionKeys,
-                        acceptsReturn: capturesSelectionKeys
-                    )
-                }
-            )
-            queue.async { [weak self] in
-                self?.finishMediaPresentation(
-                    revision: revision,
-                    generation: generation,
-                    result: result
-                )
-            }
-        }
-    }
-
-    private func finishMediaPresentation(
-        revision: UInt64,
-        generation: UInt64,
-        result: RuntimePresentationApplicationResult
-    ) {
-        guard
-            uiRevision == revision,
-            activeMediaTransaction?.generation == generation
-        else {
-            return
-        }
-        guard case let .applied(isVisible) = result else {
-            return
-        }
-        guard isVisible else {
-            cancelMediaTransaction(showCancelled: false)
-            return
-        }
-    }
-
-    private func hideMediaSurface() {
-        uiRevision &+= 1
-        let revision = uiRevision
-        interceptionGate.invalidatePresentation(revision: revision)
-        interceptionGate.setMode(
-            .hidden,
-            acceptsTab: configuration.preferences.shortcode.acceptsTab,
-            acceptsReturn:
-                configuration.preferences.shortcode.acceptsReturn
-        )
-        let bridge = mainActorBridge
-        Task { @MainActor in
-            bridge.applyMedia(.hide(revision: revision))
-        }
-    }
-
-    private func cancelMediaOperation() {
-        cancelLocalMediaOperation()
-        guard let mediaCommandCoordinator else {
-            return
-        }
-        let pendingCancellation = mediaCoordinatorCancellation
-        mediaCoordinatorCancellation = Task {
-            await pendingCancellation?.value
-            _ = await mediaCommandCoordinator.cancel()
-        }
-    }
-
-    private func cancelLocalMediaOperation() {
-        mediaOperation?.cancel()
-        mediaOperation = nil
-    }
-
-    private func cancelMediaTransaction(showCancelled: Bool) {
-        let cancelledTransaction = activeMediaTransaction
-        cancelMediaOperation()
-        mediaParser.reset()
-        mediaGeneration &+= 1
-        activeMediaTransaction = nil
-
-        guard
-            showCancelled,
-            var transaction = cancelledTransaction,
-            let caretBounds = transaction.caretBounds
-        else {
-            hideMediaSurface()
-            return
-        }
-        transaction.panelState = .cancelled
-        transaction.results = []
-        transaction.grid.updateItems([])
-        transaction.attributions = []
-        transaction.isVisible = false
-        interceptionGate.setMode(
-            .hidden,
-            acceptsTab: configuration.preferences.shortcode.acceptsTab,
-            acceptsReturn:
-                configuration.preferences.shortcode.acceptsReturn
-        )
-        uiRevision &+= 1
-        let revision = uiRevision
-        interceptionGate.invalidatePresentation(revision: revision)
-        let snapshot = RuntimeMediaPanelSnapshot(
-            revision: revision,
-            command: transaction.command,
-            state: .cancelled,
-            items: [],
-            selectedIndex: nil,
-            attributions: []
-        )
-        let bridge = mainActorBridge
-        Task { @MainActor in
-            bridge.applyMedia(
-                .show(
-                    snapshot: snapshot,
-                    quartzCaretBounds: caretBounds
-                )
-            )
-        }
-        queue.asyncAfter(deadline: .now() + .milliseconds(350)) {
-            [weak self] in
-            guard let self, uiRevision == revision else {
-                return
-            }
-            hideMediaSurface()
-        }
-    }
-
-    private func clearMediaTransaction() {
-        cancelMediaOperation()
-        mediaParser.reset()
-        activeMediaTransaction = nil
-        hideMediaSurface()
-    }
-
-    private func suspendMediaTransactionKeepingParser() {
-        cancelMediaOperation()
-        mediaGeneration &+= 1
-        activeMediaTransaction = nil
-        hideMediaSurface()
     }
 
     private func handle(_ actions: [ShortcodeParserAction]) {
@@ -2571,8 +1601,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             return
         }
         guard
-            captureBundleIdentifier
-                == MediaCommandParser.messagesBundleIdentifier
+            captureBundleIdentifier == Self.messagesBundleIdentifier
         else {
             buildManagedMediaPayload(
                 resolved,
@@ -2954,8 +1983,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         in transaction: ActiveTransaction
     ) {
         guard
-            transaction.bundleIdentifier
-                == MediaCommandParser.messagesBundleIdentifier,
+            transaction.bundleIdentifier == Self.messagesBundleIdentifier,
             let managedMediaRoot,
             transaction.results.indices.contains(transaction.selectedIndex)
         else {
@@ -2970,7 +1998,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                 .lowercased()
         case .browser:
             query = transaction.browserQuery.lowercased()
-        case .hidden, .media, .committing:
+        case .hidden, .committing:
             return
         }
         guard query.utf8.count >= 3 else {
@@ -3064,8 +2092,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         into bundleIdentifier: String?
     ) -> Bool {
         guard
-            bundleIdentifier
-                == MediaCommandParser.messagesBundleIdentifier
+            bundleIdentifier == Self.messagesBundleIdentifier
         else {
             return false
         }
@@ -3290,16 +2317,6 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         hideSurface()
     }
 
-    private func cancelUnicodeTransactionForMedia() {
-        guard
-            activeTransaction != nil
-                || parser.state.session != nil
-        else {
-            return
-        }
-        cancelCurrentTransaction(reason: .externallyCancelled)
-    }
-
     private func cancelPendingSend() {
         pendingSendGeneration &+= 1
         pendingSendTask?.cancel()
@@ -3309,7 +2326,6 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
     private func cancelAllTransactions(reason: ParserResetReason) {
         cancelContextRecovery()
         cancelCurrentTransaction(reason: reason)
-        cancelMediaTransaction(showCancelled: false)
     }
 
     private func displayGlyph(for item: EmojiItem) -> String {

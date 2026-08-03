@@ -15,7 +15,6 @@ final class MojiPondPreferencesTests: XCTestCase {
         XCTAssertTrue(preferences.shortcode.opensBrowserOnDoubleTrigger)
         XCTAssertEqual(preferences.shortcode.parserTimeout, 0)
         XCTAssertNil(preferences.defaultSkinTone)
-        XCTAssertFalse(preferences.network.allowsStickerSearch)
         XCTAssertTrue(preferences.network.allowsCrashReports)
     }
 
@@ -156,9 +155,11 @@ final class MojiPondPreferencesTests: XCTestCase {
         }
     }
 
-    func testLegacyNetworkPreferencesDefaultCrashReportsOn() throws {
+    func testRemovedNetworkPreferencesAreIgnoredAndCrashReportsDefaultOn()
+        throws
+    {
         let data = Data(
-            #"{"allowsStickerSearch":true,"allowsUpdateChecks":false}"#
+            #"{"allowsLegacyMediaSearch":true,"allowsUpdateChecks":false}"#
                 .utf8
         )
 
@@ -167,7 +168,6 @@ final class MojiPondPreferencesTests: XCTestCase {
             from: data
         )
 
-        XCTAssertTrue(preferences.allowsStickerSearch)
         XCTAssertTrue(preferences.allowsCrashReports)
     }
 

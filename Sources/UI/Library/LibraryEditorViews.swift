@@ -456,7 +456,7 @@ struct LibraryItemDetailView: View {
                     "Adds local aliases without changing the emoji pack."
                 )
                 .onSubmit(savePersonalAliases)
-                .onChange(of: customAliasesDraft) { _, _ in
+                .onChange(of: customAliasesDraft) { _ in
                     aliasSaveConfirmation = nil
                 }
 
@@ -655,10 +655,10 @@ struct LibraryPackDetailView: View {
                 height: hasManifestDetails(pack) ? 500 : 430
             )
         } else {
-            ContentUnavailableView(
+            PondEmptyState(
                 "Pack removed",
                 systemImage: "shippingbox",
-                description: Text("This pack is no longer in your library.")
+                description: "This pack is no longer in your library."
             )
             .frame(width: 520, height: 360)
         }

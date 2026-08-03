@@ -296,7 +296,7 @@ struct OnboardingView: View {
                 onSubmit: acceptFirstPracticeSuggestion
             )
             .frame(height: 28)
-            .onChange(of: practiceText) { _, _ in
+            .onChange(of: practiceText) { _ in
                 practiceSelectionIndex = 0
                 replaceExactPracticeTokenIfNeeded()
             }

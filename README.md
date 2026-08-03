@@ -14,7 +14,7 @@
 
 <p align="center">
   <a href="https://github.com/iamrajjoshi/mojipond/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/iamrajjoshi/mojipond/actions/workflows/ci.yml/badge.svg?branch=main"></a>
-  <a href="#build-from-source"><img alt="macOS 14 or newer" src="https://img.shields.io/badge/macOS-14%2B-000000?logo=apple&logoColor=white"></a>
+  <a href="#build-from-source"><img alt="macOS 13 or newer" src="https://img.shields.io/badge/macOS-13%2B-000000?logo=apple&logoColor=white"></a>
   <a href="https://www.swift.org/"><img alt="Swift 6" src="https://img.shields.io/badge/Swift-6.0-F05138?logo=swift&logoColor=white"></a>
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/github/license/iamrajjoshi/mojipond"></a>
 </p>
@@ -54,13 +54,14 @@
 - Keeps shortcut matching and pack processing on the Mac. It skips secure
   fields, password managers, terminals, remote desktop apps, chat apps with
   native emoji shortcuts, and apps or websites on your exclusion list.
-- Includes a small offline Noto Animated Emoji set for the Messages-only
-  `/sticker` command. Downloading the larger set is optional and off by default.
 
 ## Build from source
 
-You need macOS 14 or newer, Xcode with the macOS SDK, and
-[XcodeGen 2.46.0](https://github.com/yonaskolb/XcodeGen).
+You need macOS 13 or newer, Xcode with the macOS SDK, and
+[XcodeGen 2.46.0](https://github.com/yonaskolb/XcodeGen). Release builds are
+Universal binaries for Apple silicon and Intel Macs. See the
+[compatibility ledger](docs/COMPATIBILITY.md) for the hardware and macOS
+versions tested so far.
 
 ```sh
 brew install xcodegen
@@ -96,13 +97,12 @@ notarization, and release packaging are covered in the
 3. Type `:wa` in a supported text field.
 4. Choose with Up or Down Arrow, then press Tab or Return.
 
-| Input                       | Result                                      |
-| --------------------------- | ------------------------------------------- |
-| `:wa`                       | Opens matching suggestions                  |
-| `:wave:`                    | Inserts the exact Unicode match             |
-| `::`                        | Opens the searchable emoji browser          |
-| `/sticker frog` in Messages | Opens the sticker picker                    |
-| Escape                      | Closes the picker without changing the text |
+| Input    | Result                                      |
+| -------- | ------------------------------------------- |
+| `:wa`    | Opens matching suggestions                  |
+| `:wave:` | Inserts the exact Unicode match             |
+| `::`     | Opens the searchable emoji browser          |
+| Escape   | Closes the picker without changing the text |
 
 Settings let you change the trigger, acceptance keys, login behavior,
 exclusions, and whether a bare colon shows suggestions.
@@ -122,9 +122,8 @@ Full Disk Access, Contacts, or access to the Messages database.
 Autocomplete and pack processing stay on the Mac. There are no accounts or
 usage analytics. First-run setup shows the Sentry crash-reporting choice before
 the SDK starts; it defaults to on and remains available under
-**Settings → Privacy**. Online Noto downloads and automatic update checks
-default to off. The [privacy document](docs/PRIVACY.md) lists stored data and
-network behavior.
+**Settings → Privacy**. Automatic update checks default to off. The
+[privacy document](docs/PRIVACY.md) lists stored data and network behavior.
 
 ## Custom emoji packs
 

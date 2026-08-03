@@ -130,7 +130,7 @@ struct SettingsRootView: View {
                 "MojiPond will clear recent emoji and usage ranking. This can’t be undone."
             )
         }
-        .onChange(of: destination) { _, newDestination in
+        .onChange(of: destination) { newDestination in
             UserDefaults.standard.set(
                 newDestination.rawValue,
                 forKey: "settings.selectedDestination"
@@ -190,7 +190,7 @@ struct SettingsRootView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .focusEffectDisabled()
+                    .pondFocusEffectDisabled()
                     .focused($focusedDestination, equals: item)
                     .onMoveCommand(perform: moveSettingsDestination)
                     .accessibilityAddTraits(
@@ -290,33 +290,6 @@ struct SettingsRootView: View {
                         .font(.caption)
                         .foregroundStyle(PondDesign.warningForeground)
                         .padding(.top, 10)
-                }
-            }
-
-            SettingsCard(
-                title: "Stickers in Messages",
-                detail: "Built-in stickers work offline."
-            ) {
-                SettingsRow(
-                    icon: "face.smiling.inverse",
-                    title: "Enable sticker search",
-                    detail: "Use /sticker in Messages. Artwork downloads when you choose it."
-                ) {
-                    HStack(spacing: 10) {
-                        PondCommandToken(value: "/sticker")
-                        Toggle(
-                            "Allow /sticker downloads in Messages",
-                            isOn: preference(
-                                \.network.allowsStickerSearch
-                            )
-                        )
-                        .labelsHidden()
-                        .accessibilityLabel(
-                            "Allow /sticker downloads in Messages"
-                        )
-                        .toggleStyle(.switch)
-                        .tint(PondDesign.lily)
-                    }
                 }
             }
 
@@ -770,7 +743,7 @@ struct SettingsRootView: View {
                     TextField("example.com", text: $domainDraft)
                         .accessibilityLabel("Website domain")
                         .onSubmit(addDomainExclusion)
-                        .onChange(of: domainDraft) { _, _ in
+                        .onChange(of: domainDraft) { _ in
                             exclusionError = nil
                         }
                     Toggle(
@@ -778,7 +751,7 @@ struct SettingsRootView: View {
                         isOn: $domainIncludesSubdomains
                     )
                     .toggleStyle(.checkbox)
-                    .onChange(of: domainIncludesSubdomains) { _, _ in
+                    .onChange(of: domainIncludesSubdomains) { _ in
                         exclusionError = nil
                     }
                     Button("Add", action: addDomainExclusion)

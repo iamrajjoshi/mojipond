@@ -125,9 +125,7 @@ if [[ "${APPLICATION_VERSION}" != "${METADATA_VERSION}" \
 fi
 
 /usr/bin/codesign --verify --deep --strict --verbose=2 "${APPLICATION_PATH}"
-/usr/bin/lipo \
-  "${APPLICATION_PATH}/Contents/MacOS/MojiPond" \
-  -verify_arch arm64 x86_64
+"${0:A:h}/verify-app-compatibility.sh" "${APPLICATION_PATH}"
 /usr/bin/unzip -tq "${ZIP_PATH}"
 /usr/bin/hdiutil verify "${DMG_PATH}"
 

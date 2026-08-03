@@ -130,7 +130,6 @@ final class MojiPondRuntimeController: ObservableObject {
         preferences: MojiPondPreferences = .defaults,
         usageStore: (any EmojiUsageStore)? = nil,
         managedMediaRoot: URL? = nil,
-        mediaCacheRoot: URL? = nil,
         onCatalogLoadError:
             ((MojiPondRuntimeDiagnostic) -> Void)? = nil
     ) throws {
@@ -145,19 +144,11 @@ final class MojiPondRuntimeController: ObservableObject {
             )
             throw MojiPondRuntimeControllerError.builtInCatalog(error)
         }
-        // Sticker search is optional; its catalog must not disable Unicode
-        // autocomplete or the Library.
-        let mediaCommandCoordinator = try? RuntimeMediaNetworkPolicy
-            .liveCoordinator(bundle: bundle)
         self.init(
             searchIndex: searchIndex,
             preferences: preferences,
             usageStore: usageStore,
-            managedMediaRoot: managedMediaRoot,
-            mediaCommandCoordinator: mediaCommandCoordinator,
-            remoteMediaCache: mediaCacheRoot.map {
-                RuntimeNotoMediaDiskCache(rootURL: $0)
-            }
+            managedMediaRoot: managedMediaRoot
         )
     }
 
@@ -178,14 +169,7 @@ final class MojiPondRuntimeController: ObservableObject {
         managedMediaRoot: URL? = nil,
         managedMediaResolver:
             any RuntimeManagedMediaResolving =
-                RuntimeManagedMediaResolver(),
-        mediaCommandCoordinator:
-            (any RuntimeMediaCommandCoordinating)? = nil,
-        remoteMediaCache:
-            (any RuntimeRemoteMediaCaching)? = nil,
-        frontmostApplication:
-            any RuntimeFrontmostApplicationProviding =
-                MacRuntimeFrontmostApplicationProvider()
+                RuntimeManagedMediaResolver()
     ) {
         let gate = RuntimeInterceptionGate()
         let diagnostics = MojiPondRuntimeDiagnosticRelay()
@@ -217,11 +201,8 @@ final class MojiPondRuntimeController: ObservableObject {
             contextProvider: contextProvider,
             mainActorBridge: bridge,
             usageStore: usageStore,
-            frontmostApplication: frontmostApplication,
             managedMediaResolver: managedMediaResolver,
             managedMediaRoot: managedMediaRoot,
-            mediaCommandCoordinator: mediaCommandCoordinator,
-            remoteMediaCache: remoteMediaCache,
             diagnosticHandler: {
                 [diagnostics, mediaDiagnostics] diagnostic in
                 switch diagnostic {

@@ -63,12 +63,10 @@ token range, and token content.
 | --- | --- |
 | `Sources/App` | Application lifecycle, status item, windows, preferences, permission status, and managed paths |
 | `Sources/Core` | Emoji models, bundled gemoji decoding, parser, search/ranking, usage, tones, and exclusions |
-| `Sources/Runtime` | Event-to-parser bridge, safety policy, browser host lookup, Unicode and media popup state, managed-media revalidation, and autocomplete lifecycle |
+| `Sources/Runtime` | Event-to-parser bridge, safety policy, browser host lookup, Unicode popup state, managed-media revalidation, and autocomplete lifecycle |
 | `Sources/SystemIntegration` | macOS permission preflights, event tap, Accessibility text adapter, caret geometry, pasteboard transactions, and insertion |
 | `Sources/Library` | Versioned library model, asset validation, collision resolution, persistence, ZIP handling, and pack source metadata |
 | `Sources/Importing` | ZIP orchestration plus local, Slack, and public-GitHub import engines with bounded network and temporary storage |
-| `Sources/Media` | Noto client, direct HTTPS downloads, and bounded disk-cache primitives |
-| `Sources/MediaCommands` | Messages-only `/sticker` parser, state machine, result grid, offline catalog, and asset resolution |
 | `Sources/Updates` | Small adapter around Sparkle's standard updater controller and its configured appcast trust boundary |
 | `Sources/UI` | SwiftUI onboarding, settings, Library, ZIP-only import workflow, editors, previews, shared controls, and styling |
 
@@ -148,8 +146,6 @@ Default locations:
 ├── Import Staging/          app-owned import staging
 └── usage.json               local recency and use counts
 
-~/Library/Caches/MojiPond/
-└── Media/                   bounded, reproducible media cache
 ```
 
 Preferences and permission-request history use `UserDefaults`. One idempotent
@@ -205,20 +201,13 @@ internal model capability rather than a Library UI workflow. Custom Unicode
 entries join the same indexed Library and runtime search surfaces as the
 built-in catalog.
 
-## Messages media runtime
-
-The global worker contains two separate parsers: Slack-style shortcodes and the
-Messages-only `/sticker` command. A media query is debounced, bound to the same
-focused target and expected token, and displayed in a
-non-activating keyboard-navigable grid beside the caret. Arrow keys and Tab
-move selection, Return resolves and inserts the original, and Escape cancels.
+## Messages custom-image runtime
 
 Enabled custom-pack image results share `:query`, exact `:name:`, and `::`
 browsing with Unicode results, but their insertion is allowed only when the
 captured target is Messages. Immediately before paste, the managed resolver
 repeats the root-containment, symlink, regular-file, non-empty, 25 MiB,
-SHA-256, and magic-byte checks against the imported asset. Remote downloads
-are likewise size-, content-type-, and signature-checked. Failure leaves the
+SHA-256, and magic-byte checks against the imported asset. Failure leaves the
 source token intact and publishes a copy-fallback diagnostic.
 
 On macOS 15 or later, a custom image then passes through the adaptive-glyph
@@ -232,19 +221,16 @@ original animation remains stored unchanged. The successful pasteboard item
 deliberately omits raw PNG/TIFF representations so Messages does not prefer
 photo semantics.
 
-macOS 14 and rejected conversions retain the existing validated-media fallback
-policy. If animated WebP conversion fails, the runtime preserves the token and
-offers **Copy Media Instead** with the original animation. This path adds no
-permission beyond the existing Accessibility, Input Monitoring, and Event
-Posting requirements.
+macOS 13 and 14, along with rejected conversions on newer systems, retain the
+validated-media fallback policy. If animated WebP conversion fails, the
+runtime preserves the token and offers **Copy Media Instead** with the original
+animation. This path adds no permission beyond the existing Accessibility,
+Input Monitoring, and Event Posting requirements.
 
 ## Network boundaries
 
-Each user-facing online feature has its own preference. These features default
-to off:
-
-- online Noto sticker search;
-- automatic update checks.
+Automatic update checks default to off. Manual update checks run only after an
+explicit action in the status menu or About screen.
 
 Crash and hang reporting is controlled separately, defaults to on, and can be
 disabled in **Settings → Privacy**. On a fresh install, AppDelegate waits for
@@ -252,10 +238,8 @@ first-run setup to finish before starting Sentry, so the disclosed toggle takes
 effect before the SDK observes the process. Completed installations apply the
 saved preference at launch.
 
-The offline Noto subset and built-in Unicode catalog require no network.
-Selected online Noto originals may use the bounded on-demand disk cache. ZIP
-import preparation is local and never invokes the internal network import
-engines.
+The built-in Unicode catalog requires no network. ZIP import preparation is
+local and never invokes the internal network import engines.
 
 Updates use Sparkle 2.9.5 through `SPUStandardUpdaterController`. The release
 build pins an HTTPS appcast URL and a Base64 Ed25519 public key in its Info

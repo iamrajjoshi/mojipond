@@ -21,7 +21,6 @@ struct UserDefaultsPreferencesStore: PreferencesPersisting {
         static let acceptsReturn = "shortcuts.acceptReturn"
         static let exactReplacement = "shortcuts.exactReplacement"
         static let doubleTriggerBrowser = "shortcuts.doubleTriggerBrowser"
-        static let stickersEnabled = "media.stickersEnabled"
         static let giphyCustomerIdentifier =
             "com.rajjoshi.MojiPond.giphyCustomerIdentifier"
         static let giphyEnabled = "media.giphyEnabled"
@@ -126,11 +125,6 @@ struct UserDefaultsPreferencesStore: PreferencesPersisting {
         if defaults.object(forKey: LegacyKey.doubleTriggerBrowser) != nil {
             preferences.shortcode.opensBrowserOnDoubleTrigger = defaults.bool(
                 forKey: LegacyKey.doubleTriggerBrowser
-            )
-        }
-        if defaults.object(forKey: LegacyKey.stickersEnabled) != nil {
-            preferences.network.allowsStickerSearch = defaults.bool(
-                forKey: LegacyKey.stickersEnabled
             )
         }
         return preferences

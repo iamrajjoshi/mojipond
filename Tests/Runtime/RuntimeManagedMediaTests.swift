@@ -209,41 +209,6 @@ final class RuntimeManagedMediaTests: XCTestCase {
         }
     }
 
-    func testDownloadedGIFAndPNGPayloadsRetainOriginalBytes() throws {
-        let root = try makeTemporaryRoot()
-        let pngURL = try TestSupport.writeImage(
-            to: root.appendingPathComponent("download.png")
-        )
-        let downloads: [(Data, String, String)] = [
-            (
-                validGIFData,
-                "image/gif",
-                UTType.gif.identifier
-            ),
-            (
-                try Data(contentsOf: pngURL),
-                "image/png",
-                UTType.png.identifier
-            )
-        ]
-
-        for (data, contentType, typeIdentifier) in downloads {
-            let payload = try RuntimeMediaPayloadBuilder.payload(
-                for: MediaDownload(
-                    data: data,
-                    contentType: contentType,
-                    suggestedFilename: "asset"
-                )
-            )
-            XCTAssertEqual(
-                payload.representations.first {
-                    $0.typeIdentifier == typeIdentifier
-                }?.data,
-                data
-            )
-        }
-    }
-
     private func makeFixture(
         data: Data,
         filename: String

@@ -25,7 +25,6 @@ enum RuntimeInterceptionMode: Equatable, Sendable {
     case hidden
     case suggestions
     case browser
-    case media
     case committing
 }
 

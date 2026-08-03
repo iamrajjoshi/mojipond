@@ -418,9 +418,7 @@ jobs:
           /usr/bin/codesign --verify --deep --strict --verbose=2 "${extracted_app}"
           /usr/bin/xcrun stapler validate "${extracted_app}"
           /usr/sbin/spctl --assess --type execute --verbose=4 "${extracted_app}"
-          /usr/bin/lipo \
-            "${extracted_app}/Contents/MacOS/MojiPond" \
-            -verify_arch arm64 x86_64
+          ./scripts/verify-app-compatibility.sh "${extracted_app}"
 
           /usr/bin/hdiutil verify "${public_directory}/MojiPond.dmg"
           /usr/sbin/spctl \

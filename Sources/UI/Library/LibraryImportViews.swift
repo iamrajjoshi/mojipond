@@ -195,12 +195,11 @@ struct LibraryImportPreviewView: View {
             .padding(.vertical, 8)
 
             if session.preview.collisions.isEmpty {
-                ContentUnavailableView(
+                PondEmptyState(
                     "No shortcode conflicts",
                     systemImage: "checkmark.circle",
-                    description: Text(
+                    description:
                         "No incoming shortcodes conflict with your library."
-                    )
                 )
             } else {
                 List(session.preview.collisions) { collision in
@@ -400,10 +399,10 @@ struct LibraryImportPreviewView: View {
                 if session.duplicateContent.isEmpty,
                    session.preview.rejections.isEmpty,
                    session.preview.ignoredFileCount == 0 {
-                    ContentUnavailableView(
+                    PondEmptyState(
                         "No import issues",
                         systemImage: "checkmark.shield",
-                        description: Text("Every discovered file passed validation.")
+                        description: "Every discovered file passed validation."
                     )
                     .frame(maxWidth: .infinity, minHeight: 320)
                 }
@@ -694,7 +693,7 @@ private struct LibraryCollisionRow: View {
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            .background.secondary,
+            PondDesign.raisedSurface,
             in: RoundedRectangle(cornerRadius: 9)
         )
         .accessibilityElement(children: .combine)
@@ -798,7 +797,10 @@ private struct LibraryImportThumbnail: View {
             }
         }
         .frame(width: 42, height: 42)
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 8))
+        .background(
+            PondDesign.raisedSurface,
+            in: RoundedRectangle(cornerRadius: 8)
+        )
         .accessibilityHidden(true)
     }
 }

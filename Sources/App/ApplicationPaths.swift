@@ -20,7 +20,6 @@ struct ApplicationPaths: Equatable, Sendable {
     let usageFile: URL
     let importStagingRoot: URL
     let cachesRoot: URL
-    let mediaCacheRoot: URL
 
     init(applicationSupportBase: URL, cachesBase: URL) {
         applicationSupportRoot = applicationSupportBase
@@ -34,8 +33,6 @@ struct ApplicationPaths: Equatable, Sendable {
 
         cachesRoot = cachesBase
             .appendingPathComponent("MojiPond", isDirectory: true)
-        mediaCacheRoot = cachesRoot
-            .appendingPathComponent("Media", isDirectory: true)
     }
 
     static func live(
