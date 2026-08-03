@@ -70,11 +70,24 @@ enum ShortcodeParserInput: Equatable, Sendable {
 struct ParsedShortcodeToken: Equatable, Sendable {
     let trigger: ShortcodeTrigger
     let query: String
+    let renderedQuery: String
     let isClosed: Bool
+
+    init(
+        trigger: ShortcodeTrigger,
+        query: String,
+        renderedQuery: String? = nil,
+        isClosed: Bool
+    ) {
+        self.trigger = trigger
+        self.query = query
+        self.renderedQuery = renderedQuery ?? query
+        self.isClosed = isClosed
+    }
 
     var rendered: String {
         let close = isClosed ? String(trigger.character) : ""
-        return "\(trigger.rawValue)\(query)\(close)"
+        return "\(trigger.rawValue)\(renderedQuery)\(close)"
     }
 
     var utf16Length: Int {
@@ -87,10 +100,32 @@ struct ShortcodeParserSession: Equatable, Sendable {
     let openedAt: Date
     var lastInputAt: Date
     var query: String
+    var renderedQuery: String
     var recoverableSuffixLength: Int
 
+    init(
+        transactionID: ParserTransactionID,
+        openedAt: Date,
+        lastInputAt: Date,
+        query: String,
+        renderedQuery: String? = nil,
+        recoverableSuffixLength: Int
+    ) {
+        self.transactionID = transactionID
+        self.openedAt = openedAt
+        self.lastInputAt = lastInputAt
+        self.query = query
+        self.renderedQuery = renderedQuery ?? query
+        self.recoverableSuffixLength = recoverableSuffixLength
+    }
+
     func token(trigger: ShortcodeTrigger, closed: Bool = false) -> ParsedShortcodeToken {
-        ParsedShortcodeToken(trigger: trigger, query: query, isClosed: closed)
+        ParsedShortcodeToken(
+            trigger: trigger,
+            query: query,
+            renderedQuery: renderedQuery,
+            isClosed: closed
+        )
     }
 }
 
@@ -230,6 +265,54 @@ struct ShortcodeParser: Sendable {
         }
     }
 
+    /// Restores a parser session only after the runtime has rediscovered and
+    /// validated an open token at the current caret through Accessibility.
+    @discardableResult
+    mutating func restoreValidatedToken(
+        _ token: ParsedShortcodeToken,
+        at date: Date = Date()
+    ) -> ShortcodeParserTransition? {
+        guard
+            state == .idle,
+            token.trigger == configuration.preferences.trigger,
+            !token.isClosed,
+            token.query.utf8.count <= configuration.maximumTokenLength,
+            token.query.isEmpty
+                || EmojiAliasSyntax.isValidToken(token.query)
+        else {
+            return nil
+        }
+
+        let originalState = state
+        var actions: [ShortcodeParserAction] = []
+        let session = ShortcodeParserSession(
+            transactionID: ParserTransactionID(
+                rawValue: nextTransactionID
+            ),
+            openedAt: date,
+            lastInputAt: date,
+            query: EmojiAliasSyntax.normalizedToken(token.query),
+            renderedQuery: token.renderedQuery,
+            recoverableSuffixLength: 0
+        )
+        dismissedTransactionID = nil
+        nextTransactionID &+= 1
+        state = .collecting(session)
+        actions.append(.began(session))
+        if
+            !session.query.isEmpty
+                || configuration.preferences
+                    .showsSuggestionsOnBareTrigger
+        {
+            refreshSuggestions(for: session, actions: &actions)
+        }
+        return transition(
+            from: originalState,
+            actions: actions,
+            shouldConsume: false
+        )
+    }
+
     private mutating func handleCharacter(
         _ character: Character,
         modifiers: ParserModifiers,
@@ -299,7 +382,10 @@ struct ShortcodeParser: Sendable {
             return
         }
 
-        session.query.append(contentsOf: EmojiAliasSyntax.normalizedToken(String(character)))
+        session.query.append(
+            contentsOf: EmojiAliasSyntax.normalizedToken(String(character))
+        )
+        session.renderedQuery.append(character)
         session.lastInputAt = date
         state = .collecting(session)
         refreshSuggestions(for: session, actions: &actions)
@@ -370,6 +456,7 @@ struct ShortcodeParser: Sendable {
         }
 
         session.query.removeLast()
+        session.renderedQuery.removeLast()
         session.lastInputAt = date
         state = .collecting(session)
         refreshSuggestions(for: session, actions: &actions)
@@ -441,6 +528,7 @@ struct ShortcodeParser: Sendable {
             openedAt: date,
             lastInputAt: date,
             query: "",
+            renderedQuery: "",
             recoverableSuffixLength: 0
         )
         dismissedTransactionID = nil

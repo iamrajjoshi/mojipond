@@ -34,6 +34,9 @@ enum RuntimeKeyboardEventMapper {
             from: snapshot.flags,
             for: snapshot.keyCode
         )
+        if beginsSystemScreenshotFlow(snapshot) {
+            return .ignore
+        }
         switch snapshot.keyCode {
         case RuntimeKeyboardKeyCode.delete:
             return .backspace(modifiers: modifiers)
@@ -130,6 +133,38 @@ enum RuntimeKeyboardEventMapper {
         }
     }
 
+    static func beginsSystemScreenshotFlow(
+        _ snapshot: KeyboardEventSnapshot
+    ) -> Bool {
+        guard snapshot.type == .keyDown else {
+            return false
+        }
+        let modifiers = parserModifiers(
+            from: snapshot.flags,
+            for: snapshot.keyCode
+        )
+        guard
+            modifiers.contains([.command, .shift]),
+            modifiers.subtracting([
+                .command,
+                .shift,
+                .control,
+                .capsLock
+            ]).isEmpty
+        else {
+            return false
+        }
+        switch snapshot.keyCode {
+        case RuntimeKeyboardKeyCode.digit3,
+             RuntimeKeyboardKeyCode.digit4,
+             RuntimeKeyboardKeyCode.digit5,
+             RuntimeKeyboardKeyCode.digit6:
+            return true
+        default:
+            return false
+        }
+    }
+
     private static func isPhysicalArrow(_ keyCode: CGKeyCode) -> Bool {
         switch keyCode {
         case RuntimeKeyboardKeyCode.leftArrow,
@@ -177,6 +212,7 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
         var preactivationCommitSendRevision: UInt64?
         var queuedAcceptanceRevision: UInt64?
         var canReplayCommitSend = true
+        var systemScreenshotFlowActive = false
     }
 
     private let lock = NSLock()
@@ -188,6 +224,7 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
             if !enabled {
                 state.mode = .hidden
                 state.exactCommitPrediction = nil
+                state.systemScreenshotFlowActive = false
                 clearCommitIntent(state: &state)
                 state.interactionRevision &+= 1
             }
@@ -321,6 +358,43 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
     func disarmExactCommit() {
         lock.withLock {
             state.exactCommitPrediction = nil
+        }
+    }
+
+    /// Seeds the constant-time prediction from a token that Accessibility has
+    /// rediscovered and validated after a pass-through caret or text edit.
+    func restoreExactCommitPrediction(
+        expectedToken: String
+    ) -> UInt64? {
+        lock.withLock {
+            guard
+                state.captureEnabled,
+                state.exactCommitEnabled,
+                expectedToken.first == state.exactCommitTrigger,
+                expectedToken.count == 1
+                    || expectedToken.last != state.exactCommitTrigger
+            else {
+                return nil
+            }
+            let query = String(expectedToken.dropFirst())
+            guard
+                query.utf8.count <= Shortcode.maximumLength,
+                query.isEmpty || EmojiAliasSyntax.isValidToken(query)
+            else {
+                return nil
+            }
+            state.nextPredictionGeneration &+= 1
+            if state.nextPredictionGeneration == 0 {
+                state.nextPredictionGeneration = 1
+            }
+            let prediction = ExactCommitPrediction(
+                generation: state.nextPredictionGeneration,
+                trigger: state.exactCommitTrigger,
+                token: EmojiAliasSyntax.normalizedToken(query),
+                isVerified: true
+            )
+            state.exactCommitPrediction = prediction
+            return prediction.generation
         }
     }
 
@@ -483,16 +557,27 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
             current,
             predictionGeneration,
             previousMode,
-            passesUnreplayableReturn
+            passesUnreplayableReturn,
+            preservesAutocompleteContext
         ) = lock.withLock {
             let previousMode = state.mode
             let wasCommitting = previousMode == .committing
             var passesUnreplayableReturn = false
-            let generation = updateExactCommitPrediction(
-                for: snapshot,
-                state: &state
-            )
-            if
+            let preservesAutocompleteContext =
+                updateSystemScreenshotFlow(
+                    for: snapshot,
+                    state: &state
+                )
+            let generation: UInt64?
+            if preservesAutocompleteContext {
+                generation = state.exactCommitPrediction?.generation
+            } else {
+                generation = updateExactCommitPrediction(
+                    for: snapshot,
+                    state: &state
+                )
+            }
+            if !preservesAutocompleteContext,
                 state.captureEnabled,
                 wasCommitting,
                 state.mode == .committing,
@@ -510,7 +595,7 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
                 } else {
                     passesUnreplayableReturn = true
                 }
-            } else if
+            } else if !preservesAutocompleteContext,
                 state.captureEnabled,
                 !wasCommitting,
                 Self.isPresentationAcceptance(
@@ -535,7 +620,7 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
                     state.queuedAcceptanceRevision =
                         state.interactionRevision
                 }
-            } else if
+            } else if !preservesAutocompleteContext,
                 state.queuedAcceptanceRevision
                     == state.interactionRevision
             {
@@ -546,7 +631,16 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
                 state,
                 generation,
                 previousMode,
-                passesUnreplayableReturn
+                passesUnreplayableReturn,
+                preservesAutocompleteContext
+            )
+        }
+        if preservesAutocompleteContext {
+            return .passingThrough(
+                predictionGeneration: predictionGeneration,
+                interactionRevision: current.interactionRevision,
+                eventRevision: current.eventRevision,
+                preservesAutocompleteContext: true
             )
         }
         if
@@ -655,6 +749,45 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
                 interactionRevision: current.interactionRevision,
                 eventRevision: current.eventRevision
             )
+    }
+
+    private func updateSystemScreenshotFlow(
+        for snapshot: KeyboardEventSnapshot,
+        state: inout State
+    ) -> Bool {
+        guard state.captureEnabled else {
+            state.systemScreenshotFlowActive = false
+            return false
+        }
+        if RuntimeKeyboardEventMapper.beginsSystemScreenshotFlow(snapshot) {
+            state.systemScreenshotFlowActive =
+                snapshot.keyCode == RuntimeKeyboardKeyCode.digit4
+                    || snapshot.keyCode
+                        == RuntimeKeyboardKeyCode.digit5
+            return true
+        }
+        guard state.systemScreenshotFlowActive else {
+            return false
+        }
+        switch snapshot.type {
+        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+            state.systemScreenshotFlowActive = false
+            return true
+        case .keyDown:
+            switch snapshot.keyCode {
+            case RuntimeKeyboardKeyCode.escape,
+                 RuntimeKeyboardKeyCode.returnKey,
+                 RuntimeKeyboardKeyCode.keypadEnter:
+                state.systemScreenshotFlowActive = false
+            default:
+                break
+            }
+            return true
+        case .flagsChanged:
+            return true
+        default:
+            return false
+        }
     }
 
     private func updateExactCommitPrediction(

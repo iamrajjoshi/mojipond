@@ -275,6 +275,8 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
     private var processingPredictionGeneration: UInt64?
     private var processingInteractionRevision: UInt64?
     private var processingEventRevision: UInt64?
+    private var contextRecoveryGeneration: UInt64 = 0
+    private var needsContextRecovery = false
 
     init(
         searchIndex: EmojiSearchIndex,
@@ -477,6 +479,25 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             processingEventRevision = nil
         }
 
+        if interceptionOutcome.preservesAutocompleteContext {
+            return
+        }
+
+        let hadRecoverableUnicodeContext =
+            activeTransaction != nil
+                || parser.state.session != nil
+                || needsContextRecovery
+        if needsContextRecovery {
+            if isFreshTrigger(action) {
+                cancelContextRecovery()
+            } else if isContextRecoveryFollowUp(action) {
+                scheduleContextRecovery()
+                return
+            } else if action != .ignore {
+                cancelContextRecovery()
+            }
+        }
+
         if handleCommitAction(
             action,
             interceptionOutcome: interceptionOutcome
@@ -525,6 +546,12 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
 
         if case let .reset(reason) = action {
             cancelCurrentTransaction(reason: reason)
+            if
+                hadRecoverableUnicodeContext,
+                reason == .cursorMoved
+            {
+                scheduleContextRecovery()
+            }
             return
         }
 
@@ -540,6 +567,65 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         }
         let transition = parser.handle(input)
         handle(transition.actions)
+        if
+            hadRecoverableUnicodeContext,
+            shouldRecoverContext(after: action),
+            transition.actions.contains(where: { parserAction in
+                guard case .reset = parserAction else {
+                    return false
+                }
+                return true
+            })
+        {
+            scheduleContextRecovery()
+        }
+    }
+
+    private func isFreshTrigger(
+        _ action: RuntimeKeyboardAction
+    ) -> Bool {
+        guard
+            case let .character(character, modifiers) = action,
+            !modifiers.containsUnsupportedTypingModifier
+        else {
+            return false
+        }
+        return character
+            == configuration.preferences.shortcode.trigger.character
+    }
+
+    private func isContextRecoveryFollowUp(
+        _ action: RuntimeKeyboardAction
+    ) -> Bool {
+        switch action {
+        case let .character(character, modifiers):
+            return modifiers.containsUnsupportedTypingModifier
+                || EmojiAliasSyntax.isValidToken(String(character))
+        case .backspace:
+            return true
+        case .reset(.cursorMoved):
+            return true
+        case .navigation:
+            return true
+        case .escape, .reset, .ignore:
+            return false
+        }
+    }
+
+    private func shouldRecoverContext(
+        after action: RuntimeKeyboardAction
+    ) -> Bool {
+        switch action {
+        case let .character(_, modifiers),
+             let .backspace(modifiers):
+            return modifiers.containsUnsupportedTypingModifier
+        case let .navigation(_, modifiers):
+            return modifiers.containsNavigationModifier
+        case .reset(.cursorMoved):
+            return true
+        case .escape, .reset, .ignore:
+            return false
+        }
     }
 
     private func isSuggestionSurfaceAction(
@@ -2022,6 +2108,111 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         }
     }
 
+    private func scheduleContextRecovery() {
+        guard captureEnabled else {
+            cancelContextRecovery()
+            return
+        }
+        needsContextRecovery = true
+        contextRecoveryGeneration &+= 1
+        if contextRecoveryGeneration == 0 {
+            contextRecoveryGeneration = 1
+        }
+        let generation = contextRecoveryGeneration
+        let delay = configuration.accessibilitySettleDelayMilliseconds
+        queue.asyncAfter(
+            deadline: .now() + .milliseconds(delay)
+        ) { [weak self] in
+            self?.performContextRecovery(
+                generation: generation,
+                attempt: 0
+            )
+        }
+    }
+
+    private func performContextRecovery(
+        generation: UInt64,
+        attempt: Int
+    ) {
+        guard
+            captureEnabled,
+            needsContextRecovery,
+            generation == contextRecoveryGeneration,
+            activeTransaction == nil,
+            parser.state == .idle
+        else {
+            return
+        }
+        do {
+            let configuredTrigger =
+                configuration.preferences.shortcode.trigger
+            let capture = try contextProvider.captureCurrentToken(
+                trigger: configuredTrigger.character
+            )
+            guard
+                let renderedToken = capture.token,
+                renderedToken.first == configuredTrigger.character,
+                renderedToken.count == 1
+                    || renderedToken.last
+                        != configuredTrigger.character
+            else {
+                return
+            }
+            let query = String(renderedToken.dropFirst())
+            let token = ParsedShortcodeToken(
+                trigger: configuredTrigger,
+                query: EmojiAliasSyntax.normalizedToken(query),
+                renderedQuery: query,
+                isClosed: false
+            )
+            needsContextRecovery = false
+            let predictionGeneration = interceptionGate
+                .restoreExactCommitPrediction(
+                    expectedToken: renderedToken
+                )
+            processingPredictionGeneration = predictionGeneration
+            processingInteractionRevision =
+                interceptionGate.interactionRevision
+            defer {
+                processingPredictionGeneration = nil
+                processingInteractionRevision = nil
+            }
+            guard
+                let transition = parser.restoreValidatedToken(token)
+            else {
+                return
+            }
+            handle(transition.actions)
+        } catch let error as RuntimeTextCaptureError {
+            if
+                error.isTransient,
+                attempt < configuration.accessibilityRetryLimit
+            {
+                let delay = Self.accessibilityRetryDelayMilliseconds(
+                    afterFailedAttempt: attempt
+                )
+                queue.asyncAfter(
+                    deadline: .now() + .milliseconds(delay)
+                ) { [weak self] in
+                    self?.performContextRecovery(
+                        generation: generation,
+                        attempt: attempt + 1
+                    )
+                }
+            } else if case .denied = error {
+                cancelContextRecovery()
+                emitDiagnostic(for: error)
+            }
+        } catch {
+            cancelContextRecovery()
+        }
+    }
+
+    private func cancelContextRecovery() {
+        needsContextRecovery = false
+        contextRecoveryGeneration &+= 1
+    }
+
     private func performCapture(
         transactionID: ParserTransactionID,
         generation: UInt64,
@@ -3116,6 +3307,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
     }
 
     private func cancelAllTransactions(reason: ParserResetReason) {
+        cancelContextRecovery()
         cancelCurrentTransaction(reason: reason)
         cancelMediaTransaction(showCancelled: false)
     }

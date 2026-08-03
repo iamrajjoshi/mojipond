@@ -54,6 +54,168 @@ final class RuntimeKeyboardTests: XCTestCase {
         )
     }
 
+    func testScreenshotShortcutPassesThroughWithoutChangingParserInput() {
+        for keyCode in [
+            RuntimeKeyboardKeyCode.digit3,
+            RuntimeKeyboardKeyCode.digit4,
+            RuntimeKeyboardKeyCode.digit5,
+            RuntimeKeyboardKeyCode.digit6
+        ] {
+            XCTAssertEqual(
+                RuntimeKeyboardEventMapper.action(
+                    for: snapshot(
+                        keyCode: keyCode,
+                        flags: [.maskCommand, .maskShift]
+                    )
+                ),
+                .ignore
+            )
+        }
+    }
+
+    func testImmediateScreenshotDoesNotLeaveTheGateInScreenshotMode() {
+        let gate = RuntimeInterceptionGate()
+        gate.setCaptureEnabled(true)
+        gate.setMode(
+            .suggestions,
+            acceptsTab: true,
+            acceptsReturn: true
+        )
+
+        let screenshot = gate.outcome(
+            for: snapshot(
+                keyCode: RuntimeKeyboardKeyCode.digit3,
+                flags: [.maskCommand, .maskShift]
+            )
+        )
+        let followingCharacter = gate.outcome(
+            for: snapshot(keyCode: 3, characters: "f")
+        )
+
+        XCTAssertTrue(screenshot.preservesAutocompleteContext)
+        XCTAssertFalse(
+            followingCharacter.preservesAutocompleteContext
+        )
+    }
+
+    func testScreenshotFlowPreservesVisibleSuggestionsAndPrediction()
+        throws
+    {
+        let gate = RuntimeInterceptionGate()
+        gate.configureExactCommitPrediction(
+            trigger: ":",
+            isEnabled: true,
+            exactTokens: ["frog"]
+        )
+        gate.setCaptureEnabled(true)
+        let opening = gate.outcome(
+            for: snapshot(keyCode: 41, characters: ":")
+        )
+        _ = gate.outcome(
+            for: snapshot(keyCode: 3, characters: "f")
+        )
+        XCTAssertTrue(
+            gate.verifyExactCommitPrediction(
+                generation: opening.predictionGeneration,
+                expectedToken: ":f"
+            )
+        )
+        gate.setMode(
+            .suggestions,
+            acceptsTab: true,
+            acceptsReturn: true
+        )
+
+        let shortcut = gate.outcome(
+            for: snapshot(
+                keyCode: RuntimeKeyboardKeyCode.digit4,
+                flags: [.maskCommand, .maskShift]
+            )
+        )
+
+        XCTAssertEqual(shortcut.decision, .passThrough)
+        XCTAssertTrue(shortcut.preservesAutocompleteContext)
+        XCTAssertEqual(gate.mode, .suggestions)
+        XCTAssertTrue(gate.isExactCommitArmed)
+
+        let cancelScreenshot = gate.outcome(
+            for: snapshot(keyCode: RuntimeKeyboardKeyCode.escape)
+        )
+        XCTAssertEqual(cancelScreenshot.decision, .passThrough)
+        XCTAssertTrue(cancelScreenshot.preservesAutocompleteContext)
+        XCTAssertEqual(gate.mode, .suggestions)
+        XCTAssertTrue(gate.isExactCommitArmed)
+    }
+
+    func testScreenshotMouseSelectionDoesNotLookLikeACaretClick() {
+        let gate = RuntimeInterceptionGate()
+        gate.setCaptureEnabled(true)
+        gate.setMode(
+            .suggestions,
+            acceptsTab: true,
+            acceptsReturn: true
+        )
+        _ = gate.outcome(
+            for: snapshot(
+                keyCode: RuntimeKeyboardKeyCode.digit4,
+                flags: [.maskCommand, .maskShift]
+            )
+        )
+        let screenshotClick = KeyboardEventSnapshot(
+            typeRawValue: CGEventType.leftMouseDown.rawValue,
+            keyCode: 0,
+            flagsRawValue: 0,
+            timestamp: 1,
+            characters: nil
+        )
+
+        let capture = gate.outcome(for: screenshotClick)
+
+        XCTAssertTrue(capture.preservesAutocompleteContext)
+        XCTAssertEqual(gate.mode, .suggestions)
+
+        _ = gate.outcome(for: screenshotClick)
+        XCTAssertEqual(gate.mode, .hidden)
+    }
+
+    func testValidatedRecoveredTokenRearmsExactClosePrediction()
+        throws
+    {
+        let gate = RuntimeInterceptionGate()
+        gate.configureExactCommitPrediction(
+            trigger: ":",
+            isEnabled: true,
+            exactTokens: ["frog"]
+        )
+        gate.setCaptureEnabled(true)
+
+        let generation = try XCTUnwrap(
+            gate.restoreExactCommitPrediction(
+                expectedToken: ":frog"
+            )
+        )
+        gate.setMode(
+            .suggestions,
+            acceptsTab: true,
+            acceptsReturn: true
+        )
+
+        let close = gate.outcome(
+            for: snapshot(keyCode: 41, characters: ":")
+        )
+
+        XCTAssertEqual(close.predictionGeneration, generation)
+        XCTAssertEqual(gate.mode, .committing)
+        XCTAssertEqual(
+            gate.outcome(
+                for: snapshot(
+                    keyCode: RuntimeKeyboardKeyCode.returnKey
+                )
+            ),
+            .intercepting(.committing)
+        )
+    }
+
     func testGateOnlyOwnsVisibleUnmodifiedNavigation() {
         let gate = RuntimeInterceptionGate()
         let down = snapshot(

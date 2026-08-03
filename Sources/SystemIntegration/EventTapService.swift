@@ -2,6 +2,10 @@ import CoreGraphics
 import Foundation
 
 enum RuntimeKeyboardKeyCode {
+    static let digit3: CGKeyCode = 20
+    static let digit4: CGKeyCode = 21
+    static let digit6: CGKeyCode = 22
+    static let digit5: CGKeyCode = 23
     static let returnKey: CGKeyCode = 36
     static let tab: CGKeyCode = 48
     static let delete: CGKeyCode = 51
@@ -92,48 +96,57 @@ struct EventInterceptionOutcome: Equatable, Sendable {
     /// The worker uses this to keep older search work from hiding a surface
     /// after a newer correction has already been observed.
     let eventRevision: UInt64?
+    /// True only for an OS-owned interaction, such as the macOS screenshot
+    /// flow, that must pass through without invalidating the active token.
+    let preservesAutocompleteContext: Bool
 
     static let passThrough = Self(
         decision: .passThrough,
         mode: nil,
         predictionGeneration: nil,
         interactionRevision: nil,
-        eventRevision: nil
+        eventRevision: nil,
+        preservesAutocompleteContext: false
     )
     static let intercept = Self(
         decision: .intercept,
         mode: nil,
         predictionGeneration: nil,
         interactionRevision: nil,
-        eventRevision: nil
+        eventRevision: nil,
+        preservesAutocompleteContext: false
     )
 
     static func intercepting(
         _ mode: RuntimeInterceptionMode,
         predictionGeneration: UInt64? = nil,
         interactionRevision: UInt64? = nil,
-        eventRevision: UInt64? = nil
+        eventRevision: UInt64? = nil,
+        preservesAutocompleteContext: Bool = false
     ) -> Self {
         Self(
             decision: .intercept,
             mode: mode,
             predictionGeneration: predictionGeneration,
             interactionRevision: interactionRevision,
-            eventRevision: eventRevision
+            eventRevision: eventRevision,
+            preservesAutocompleteContext: preservesAutocompleteContext
         )
     }
 
     static func passingThrough(
         predictionGeneration: UInt64?,
         interactionRevision: UInt64? = nil,
-        eventRevision: UInt64? = nil
+        eventRevision: UInt64? = nil,
+        preservesAutocompleteContext: Bool = false
     ) -> Self {
         Self(
             decision: .passThrough,
             mode: nil,
             predictionGeneration: predictionGeneration,
             interactionRevision: interactionRevision,
-            eventRevision: eventRevision
+            eventRevision: eventRevision,
+            preservesAutocompleteContext: preservesAutocompleteContext
         )
     }
 

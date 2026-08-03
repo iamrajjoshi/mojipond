@@ -896,6 +896,166 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         }
     }
 
+    func testTypingAfterModifiedCaretMovementRebuildsSuggestions()
+        async throws
+    {
+        for flags in [
+            CGEventFlags.maskAlternate,
+            CGEventFlags.maskShift
+        ] {
+            let harness = try makeHarness(
+                items: [emoji(shortcode: "frog", value: "🐸")],
+                targetText: ":frog"
+            )
+            harness.worker.setCaptureEnabled(true)
+            deliver(":f", into: harness)
+            let initiallyShown = await eventually {
+                harness.gate.mode == .suggestions
+            }
+            XCTAssertTrue(initiallyShown)
+
+            let movement = keySnapshot(
+                keyCode: RuntimeKeyboardKeyCode.leftArrow,
+                flags: flags
+            )
+            let movementOutcome = harness.gate.outcome(for: movement)
+            XCTAssertEqual(movementOutcome.decision, .passThrough)
+            harness.worker.enqueue(
+                movement.delivered(with: movementOutcome)
+            )
+            harness.captureProvider.setCurrentToken(":fr")
+
+            let edit = keySnapshot(keyCode: 15, characters: "r")
+            let editOutcome = harness.gate.outcome(for: edit)
+            harness.worker.enqueue(edit.delivered(with: editOutcome))
+
+            let restored = await eventually {
+                harness.gate.mode == .suggestions
+                    && harness.presenter.latestShown?.rows
+                        .map(\.shortcode) == ["frog"]
+            }
+            XCTAssertTrue(
+                restored,
+                "Expected recovery after flags \(flags)"
+            )
+        }
+    }
+
+    func testTypingAfterOptionDeleteRebuildsTokenAtTheCaret()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":frog"
+        )
+        harness.worker.setCaptureEnabled(true)
+        deliver(":frog", into: harness)
+        let initiallyShown = await eventually {
+            harness.gate.mode == .suggestions
+        }
+        XCTAssertTrue(initiallyShown)
+
+        let deleteWord = keySnapshot(
+            keyCode: RuntimeKeyboardKeyCode.delete,
+            flags: [.maskAlternate]
+        )
+        let deleteOutcome = harness.gate.outcome(for: deleteWord)
+        XCTAssertEqual(deleteOutcome.decision, .passThrough)
+        harness.worker.enqueue(
+            deleteWord.delivered(with: deleteOutcome)
+        )
+        harness.captureProvider.setCurrentToken(":f")
+
+        let edit = keySnapshot(keyCode: 3, characters: "f")
+        let editOutcome = harness.gate.outcome(for: edit)
+        harness.worker.enqueue(edit.delivered(with: editOutcome))
+
+        let restored = await eventually {
+            harness.gate.mode == .suggestions
+                && harness.presenter.latestShown?.rows
+                    .map(\.shortcode) == ["frog"]
+        }
+        XCTAssertTrue(restored)
+    }
+
+    func testRecoveryPreservesTypedCaseForAccessibilityValidation()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":Frog"
+        )
+        harness.worker.setCaptureEnabled(true)
+        deliver(":f", into: harness)
+        let initiallyShown = await eventually {
+            harness.gate.mode == .suggestions
+        }
+        XCTAssertTrue(initiallyShown)
+
+        harness.captureProvider.setCurrentToken(":Frog")
+        harness.captureProvider.setExpectedCaptureToken(":Frog")
+        let movement = keySnapshot(
+            keyCode: RuntimeKeyboardKeyCode.leftArrow,
+            flags: [.maskAlternate]
+        )
+        let outcome = harness.gate.outcome(for: movement)
+        harness.worker.enqueue(movement.delivered(with: outcome))
+
+        let restored = await eventually {
+            harness.gate.mode == .suggestions
+                && harness.presenter.latestShown?.rows
+                    .map(\.shortcode) == ["frog"]
+        }
+        XCTAssertTrue(restored)
+    }
+
+    func testScreenshotFlowDoesNotHideOrDismissSuggestions()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":f"
+        )
+        harness.worker.setCaptureEnabled(true)
+        deliver(":f", into: harness)
+        let initiallyShown = await eventually {
+            harness.gate.mode == .suggestions
+        }
+        XCTAssertTrue(initiallyShown)
+        let updateCount = harness.presenter.updates.count
+
+        let screenshot = keySnapshot(
+            keyCode: RuntimeKeyboardKeyCode.digit4,
+            flags: [.maskCommand, .maskShift]
+        )
+        let screenshotOutcome = harness.gate.outcome(for: screenshot)
+        harness.worker.enqueue(
+            screenshot.delivered(with: screenshotOutcome)
+        )
+        let screenshotEscape = keySnapshot(
+            keyCode: RuntimeKeyboardKeyCode.escape
+        )
+        let escapeOutcome = harness.gate.outcome(
+            for: screenshotEscape
+        )
+        harness.worker.enqueue(
+            screenshotEscape.delivered(with: escapeOutcome)
+        )
+        try? await Task.sleep(for: .milliseconds(40))
+
+        XCTAssertTrue(screenshotOutcome.preservesAutocompleteContext)
+        XCTAssertTrue(escapeOutcome.preservesAutocompleteContext)
+        XCTAssertEqual(harness.gate.mode, .suggestions)
+        XCTAssertFalse(
+            harness.presenter.updates.dropFirst(updateCount).contains {
+                guard case .hide = $0 else {
+                    return false
+                }
+                return true
+            }
+        )
+    }
+
     func testHorizontalCaretMovementCannotBeRepaintedByStaleRefresh()
         async throws
     {
@@ -2159,6 +2319,8 @@ private final class FixedRuntimeTextCaptureProvider:
     private var storedCaptureCount = 0
     private var transientFailuresRemaining: Int
     private let delayMilliseconds: Int
+    private var currentToken: String?
+    private var expectedCaptureToken: String?
 
     init(
         target: AccessibilityTextTarget,
@@ -2191,28 +2353,33 @@ private final class FixedRuntimeTextCaptureProvider:
         }
     }
 
-    func capture(
-        expectedToken: String,
+    func setCurrentToken(_ token: String?) {
+        lock.withLock {
+            currentToken = token
+        }
+    }
+
+    func setExpectedCaptureToken(_ token: String?) {
+        lock.withLock {
+            expectedCaptureToken = token
+        }
+    }
+
+    func captureCurrentToken(
         trigger: Character
     ) throws -> RuntimeTextCapture {
-        _ = trigger
-        let capturedError: RuntimeTextCaptureError? = lock.withLock {
+        let token: String? = lock.withLock {
             storedCaptureCount += 1
-            if transientFailuresRemaining > 0 {
-                transientFailuresRemaining -= 1
-                return .invalidTokenContext
-            }
-            return error
+            return currentToken
         }
-        if delayMilliseconds > 0 {
-            Thread.sleep(
-                forTimeInterval: Double(delayMilliseconds) / 1_000
-            )
+        guard
+            let token,
+            token.first == trigger,
+            token.count == 1 || token.last != trigger
+        else {
+            throw RuntimeTextCaptureError.invalidTokenContext
         }
-        if let capturedError {
-            throw capturedError
-        }
-        let length = expectedToken.utf16.count
+        let length = token.utf16.count
         let tokenLocation = selectionLocation - length
         guard tokenLocation >= 0 else {
             throw RuntimeTextCaptureError.invalidTokenContext
@@ -2225,7 +2392,61 @@ private final class FixedRuntimeTextCaptureProvider:
                     length: 0
                 ),
                 caretBounds: caretBounds,
-                textFragment: expectedToken,
+                textFragment: token,
+                textFragmentRange: NSRange(
+                    location: tokenLocation,
+                    length: length
+                ),
+                tokenRange: NSRange(
+                    location: tokenLocation,
+                    length: length
+                )
+            )
+        )
+    }
+
+    func capture(
+        expectedToken: String,
+        trigger: Character
+    ) throws -> RuntimeTextCapture {
+        _ = trigger
+        let captureState: (
+            error: RuntimeTextCaptureError?,
+            renderedToken: String?
+        ) = lock.withLock {
+            storedCaptureCount += 1
+            if transientFailuresRemaining > 0 {
+                transientFailuresRemaining -= 1
+                return (.invalidTokenContext, nil)
+            }
+            return (error, expectedCaptureToken)
+        }
+        if delayMilliseconds > 0 {
+            Thread.sleep(
+                forTimeInterval: Double(delayMilliseconds) / 1_000
+            )
+        }
+        if let capturedError = captureState.error {
+            throw capturedError
+        }
+        let renderedToken = captureState.renderedToken ?? expectedToken
+        guard renderedToken == expectedToken else {
+            throw RuntimeTextCaptureError.invalidTokenContext
+        }
+        let length = renderedToken.utf16.count
+        let tokenLocation = selectionLocation - length
+        guard tokenLocation >= 0 else {
+            throw RuntimeTextCaptureError.invalidTokenContext
+        }
+        return RuntimeTextCapture(
+            target: target,
+            context: AccessibilityTextContext(
+                selection: NSRange(
+                    location: selectionLocation,
+                    length: 0
+                ),
+                caretBounds: caretBounds,
+                textFragment: renderedToken,
                 textFragmentRange: NSRange(
                     location: tokenLocation,
                     length: length

@@ -302,6 +302,105 @@ final class RuntimeSafetyAndCatalogTests: XCTestCase {
         XCTAssertEqual(request?.expectedToken, "")
     }
 
+    func testRuntimeDiscoveryCapturesTheOpenShortcodeEndingAtTheCaret()
+        throws
+    {
+        let system = FakeAccessibilityTextSystem()
+        system.text = "draft :Frog_1"
+        system.selection = NSRange(
+            location: system.text.utf16.count,
+            length: 0
+        )
+        let provider = makeRuntimeTextContextProvider(system: system)
+
+        let capture = try provider.captureCurrentToken(
+            trigger: ":"
+        )
+
+        XCTAssertEqual(capture.token, ":Frog_1")
+        XCTAssertEqual(
+            capture.context.tokenRange,
+            NSRange(location: 6, length: 7)
+        )
+        XCTAssertEqual(
+            capture.context.selection,
+            NSRange(location: 13, length: 0)
+        )
+    }
+
+    func testRuntimeDiscoveryAllowsABareOpeningTrigger() throws {
+        let system = FakeAccessibilityTextSystem()
+        system.text = "draft :"
+        system.selection = NSRange(
+            location: system.text.utf16.count,
+            length: 0
+        )
+        let provider = makeRuntimeTextContextProvider(system: system)
+
+        let capture = try provider.captureCurrentToken(
+            trigger: ":"
+        )
+
+        XCTAssertEqual(capture.token, ":")
+    }
+
+    func testRuntimeDiscoveryRejectsSelectionsMiddlePositionsAndClosedTokens()
+        throws
+    {
+        let cases: [(text: String, selection: NSRange)] = [
+            (
+                text: ":frog",
+                selection: NSRange(location: 1, length: 3)
+            ),
+            (
+                text: ":frog",
+                selection: NSRange(location: 3, length: 0)
+            ),
+            (
+                text: ":frog:",
+                selection: NSRange(location: 6, length: 0)
+            )
+        ]
+
+        for testCase in cases {
+            let system = FakeAccessibilityTextSystem()
+            system.text = testCase.text
+            system.selection = testCase.selection
+            let provider = makeRuntimeTextContextProvider(system: system)
+
+            XCTAssertThrowsError(
+                try provider.captureCurrentToken(trigger: ":"),
+                "Expected discovery to reject \(testCase)"
+            ) { error in
+                XCTAssertEqual(
+                    error as? RuntimeTextCaptureError,
+                    .invalidTokenContext
+                )
+            }
+        }
+    }
+
+    func testRuntimeDiscoveryRetainsTheExistingSafetyChecks() {
+        let system = FakeAccessibilityTextSystem()
+        system.text = ":frog"
+        system.selection = NSRange(location: 5, length: 0)
+        let provider = RuntimeAccessibilityTextContextProvider(
+            accessibility: AccessibilityTextAdapter(system: system),
+            permissionChecker: CachedRuntimePermissionChecker(),
+            secureInputChecker: InactiveRuntimeSecureInputChecker(),
+            applicationIdentity: MessagesRuntimeIdentityProvider()
+        )
+
+        XCTAssertThrowsError(
+            try provider.captureCurrentToken(trigger: ":")
+        ) { error in
+            XCTAssertEqual(
+                error as? RuntimeTextCaptureError,
+                .denied(.permissionUnavailable)
+            )
+        }
+    }
+
     func testCatalogLoaderBuildsExactLocalIndexFromInjectedData() throws {
         let data = Data(
             """
@@ -329,6 +428,17 @@ final class RuntimeSafetyAndCatalogTests: XCTestCase {
             return XCTFail("Expected Unicode content")
         }
         XCTAssertEqual(content.value, "🐸")
+    }
+
+    private func makeRuntimeTextContextProvider(
+        system: FakeAccessibilityTextSystem
+    ) -> RuntimeAccessibilityTextContextProvider {
+        RuntimeAccessibilityTextContextProvider(
+            accessibility: AccessibilityTextAdapter(system: system),
+            permissionChecker: GrantedRuntimePermissionChecker(),
+            secureInputChecker: InactiveRuntimeSecureInputChecker(),
+            applicationIdentity: MessagesRuntimeIdentityProvider()
+        )
     }
 }
 

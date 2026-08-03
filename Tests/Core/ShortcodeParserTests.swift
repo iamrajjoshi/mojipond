@@ -24,7 +24,12 @@ final class ShortcodeParserTests: XCTestCase {
                 .updateSuggestions(
                     transactionID: ParserTransactionID(rawValue: 41),
                     query: "l",
-                    token: ParsedShortcodeToken(trigger: .colon, query: "l", isClosed: false)
+                    token: ParsedShortcodeToken(
+                        trigger: .colon,
+                        query: "l",
+                        renderedQuery: "L",
+                        isClosed: false
+                    )
                 )
             ]
         )
@@ -559,6 +564,83 @@ final class ShortcodeParserTests: XCTestCase {
                     reason: .exactReplacementDisabled
                 )
             ]
+        )
+    }
+
+    func testRestoresAValidatedOpenTokenAfterRuntimeContextRecovery()
+        throws
+    {
+        var parser = ShortcodeParser(startingTransactionID: 7)
+        let token = ParsedShortcodeToken(
+            trigger: .colon,
+            query: "FrOg",
+            isClosed: false
+        )
+
+        let transition = try XCTUnwrap(
+            parser.restoreValidatedToken(token, at: start)
+        )
+
+        XCTAssertEqual(transition.currentState.session?.query, "frog")
+        XCTAssertEqual(
+            transition.actions,
+            [
+                .began(
+                    ShortcodeParserSession(
+                        transactionID: ParserTransactionID(rawValue: 7),
+                        openedAt: start,
+                        lastInputAt: start,
+                        query: "frog",
+                        renderedQuery: "FrOg",
+                        recoverableSuffixLength: 0
+                    )
+                ),
+                .updateSuggestions(
+                    transactionID: ParserTransactionID(rawValue: 7),
+                    query: "frog",
+                    token: ParsedShortcodeToken(
+                        trigger: .colon,
+                        query: "frog",
+                        renderedQuery: "FrOg",
+                        isClosed: false
+                    )
+                )
+            ]
+        )
+    }
+
+    func testDoesNotRestoreClosedMismatchedOrUnvalidatedTokens() {
+        var parser = ShortcodeParser()
+
+        XCTAssertNil(
+            parser.restoreValidatedToken(
+                ParsedShortcodeToken(
+                    trigger: .colon,
+                    query: "frog",
+                    isClosed: true
+                ),
+                at: start
+            )
+        )
+        XCTAssertNil(
+            parser.restoreValidatedToken(
+                ParsedShortcodeToken(
+                    trigger: .semicolon,
+                    query: "frog",
+                    isClosed: false
+                ),
+                at: start
+            )
+        )
+        XCTAssertNil(
+            parser.restoreValidatedToken(
+                ParsedShortcodeToken(
+                    trigger: .colon,
+                    query: "not valid",
+                    isClosed: false
+                ),
+                at: start
+            )
         )
     }
 }
