@@ -164,53 +164,6 @@ struct OnboardingView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                PondCard {
-                    SettingsRow(
-                        icon: "stethoscope",
-                        title: "Share crash reports",
-                        detail:
-                            "On by default. Sends crash and hang diagnostics, including stack traces and app/runtime context, to Sentry. Standard request metadata, including IP, reaches Sentry. Shortcut text, clipboard contents, screenshots, and emoji files stay on this Mac."
-                    ) {
-                        Toggle(
-                            "Share crash reports",
-                            isOn: Binding(
-                                get: {
-                                    appState.preferences.network
-                                        .allowsCrashReports
-                                },
-                                set: { enabled in
-                                    appState.updatePreferences {
-                                        $0.network.allowsCrashReports = enabled
-                                    }
-                                }
-                            )
-                        )
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .tint(PondDesign.lily)
-                        .accessibilityLabel("Share crash reports")
-                        .accessibilityIdentifier(
-                            "onboarding.crashReportsToggle"
-                        )
-                    }
-                }
-
-                if !appState.isInstalledInApplications {
-                    Label {
-                        Text(
-                            "Move MojiPond to Applications, then open that copy before granting access."
-                        )
-                    } icon: {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(PondDesign.warningForeground)
-                    }
-                    .padding(10)
-                    .background(
-                        PondDesign.warningBackground,
-                        in: RoundedRectangle(cornerRadius: 10)
-                    )
-                }
-
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Use it anywhere")
                         .font(.headline)
@@ -227,7 +180,7 @@ struct OnboardingView: View {
                             title: "Input Monitoring",
                             detail: "Notices when you start a shortcut.",
                             status: permissions.snapshot.inputMonitoring,
-                            requestEnabled: canRequestPermissions,
+                            requestEnabled: true,
                             request: { permissions.requestInputMonitoring() },
                             openSettings: {
                                 openPermissionSettings(.inputMonitoring)
@@ -242,7 +195,7 @@ struct OnboardingView: View {
                             title: "Accessibility",
                             detail: "Places the picker and inserts your choice.",
                             status: permissions.snapshot.accessibility,
-                            requestEnabled: canRequestPermissions,
+                            requestEnabled: true,
                             request: { permissions.requestAccessibility() },
                             openSettings: {
                                 openPermissionSettings(.accessibility)
@@ -280,6 +233,39 @@ struct OnboardingView: View {
                 )
                 .font(.callout)
                 .foregroundStyle(.secondary)
+
+                PondCard {
+                    SettingsRow(
+                        icon: "stethoscope",
+                        title: "Share crash reports",
+                        detail:
+                            "On by default. Sends crash and hang diagnostics, including stack traces and app/runtime context, to Sentry. Standard request metadata, including IP, reaches Sentry. Shortcut text, clipboard contents, screenshots, and emoji files stay on this Mac.",
+                        detailAccessibilityIdentifier:
+                            "onboarding.crashReportsDisclosure"
+                    ) {
+                        Toggle(
+                            "Share crash reports",
+                            isOn: Binding(
+                                get: {
+                                    appState.preferences.network
+                                        .allowsCrashReports
+                                },
+                                set: { enabled in
+                                    appState.updatePreferences {
+                                        $0.network.allowsCrashReports = enabled
+                                    }
+                                }
+                            )
+                        )
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .tint(PondDesign.lily)
+                        .accessibilityLabel("Share crash reports")
+                        .accessibilityIdentifier(
+                            "onboarding.crashReportsToggle"
+                        )
+                    }
+                }
             }
             .frame(maxWidth: 640)
             .padding(24)
@@ -428,13 +414,6 @@ struct OnboardingView: View {
 
     private var triggerText: String {
         appState.preferences.shortcode.trigger.rawValue
-    }
-
-    private var canRequestPermissions: Bool {
-        appState.isInstalledInApplications
-            || ProcessInfo.processInfo.arguments.contains(
-                AppLaunchConfiguration.uiTestingFlag
-            )
     }
 
     private func reloadPracticeCatalog() {

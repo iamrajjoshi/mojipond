@@ -8,6 +8,7 @@ interface Props {
 
 const { inverse = false, showRepositoryLink = false } = Astro.props;
 const repositoryURL = "https://github.com/iamrajjoshi/mojipond";
+const downloadURL = import.meta.env.PUBLIC_DOWNLOAD_URL?.trim();
 ---
 
 <header class:list={["site-header", { inverse }]}>
@@ -17,8 +18,17 @@ const repositoryURL = "https://github.com/iamrajjoshi/mojipond";
   </a>
   {
     showRepositoryLink && (
-      <nav class="source-links" aria-label="Source code">
+      <nav class="source-links" aria-label="MojiPond links">
         <a href={repositoryURL}>GitHub</a>
+        {downloadURL && (
+          <a
+            class="download-link"
+            href={downloadURL}
+            aria-label="Download MojiPond for macOS"
+          >
+            Download
+          </a>
+        )}
       </nav>
     )
   }
@@ -81,6 +91,29 @@ const repositoryURL = "https://github.com/iamrajjoshi/mojipond";
     text-decoration-color: currentcolor;
   }
 
+  .inverse .source-links .download-link {
+    min-height: 40px;
+    padding: 8px 16px;
+    color: var(--deep-water);
+    text-shadow: none;
+    background: #f5fffd;
+    border: 1px solid rgb(245 255 253 / 58%);
+    border-radius: 999px;
+    box-shadow: 0 8px 24px rgb(0 20 28 / 24%);
+  }
+
+  .inverse .source-links .download-link:hover {
+    color: var(--deep-water);
+    text-decoration-color: transparent;
+    background: #fff;
+    border-color: #fff;
+    transform: translateY(-1px);
+  }
+
+  .inverse .source-links .download-link:active {
+    transform: translateY(0) scale(0.98);
+  }
+
   img {
     display: block;
     width: 40px;
@@ -111,6 +144,11 @@ const repositoryURL = "https://github.com/iamrajjoshi/mojipond";
 
     .source-links a {
       font-size: 0.88rem;
+    }
+
+    .inverse .source-links .download-link {
+      min-height: 38px;
+      padding: 7px 12px;
     }
 
     img {

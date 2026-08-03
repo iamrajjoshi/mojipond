@@ -546,32 +546,42 @@ struct LibraryShellView: View {
         case .idle, .loading:
             LibraryLoadingView()
         case let .failed(message):
-            PondEmptyState(
-                "Library unavailable",
-                systemImage: "exclamationmark.triangle",
-                description: message
-            ) {
-                Button("Try Again") {
-                    Task {
-                        await viewModel.reload()
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        case .loaded, .partial:
-            if viewModel.visibleItems.isEmpty {
+            GeometryReader { proxy in
                 PondEmptyState(
-                    emptyTitle,
-                    systemImage: emptyIcon,
-                    description: emptyDescription
+                    "Library unavailable",
+                    systemImage: "exclamationmark.triangle",
+                    description: message
                 ) {
-                    if hasActiveFilters {
-                        Button("Clear Filters") {
-                            clearFilters()
+                    Button("Try Again") {
+                        Task {
+                            await viewModel.reload()
                         }
                     }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(
+                    width: proxy.size.width,
+                    height: proxy.size.height
+                )
+            }
+        case .loaded, .partial:
+            if viewModel.visibleItems.isEmpty {
+                GeometryReader { proxy in
+                    PondEmptyState(
+                        emptyTitle,
+                        systemImage: emptyIcon,
+                        description: emptyDescription
+                    ) {
+                        if hasActiveFilters {
+                            Button("Clear Filters") {
+                                clearFilters()
+                            }
+                        }
+                    }
+                    .frame(
+                        width: proxy.size.width,
+                        height: proxy.size.height
+                    )
+                }
             } else if viewModel.layout == .grid {
                 ScrollView {
                     LazyVGrid(

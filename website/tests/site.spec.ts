@@ -488,7 +488,14 @@ test("source links stay minimal and point to GitHub", async ({
     "href",
     "https://github.com/iamrajjoshi/mojipond",
   );
-  await expect(sourceLinks.getByRole("link")).toHaveCount(1);
+  const downloadLink = page.getByRole("link", {
+    name: "Download MojiPond for macOS",
+  });
+  await expect(downloadLink).toHaveAttribute(
+    "href",
+    "https://github.com/iamrajjoshi/mojipond/releases/latest/download/MojiPond.dmg",
+  );
+  await expect(sourceLinks.getByRole("link")).toHaveCount(2);
 
   const sourceLink = page.locator(".site-revision");
   await expect(sourceLink).toHaveAttribute(

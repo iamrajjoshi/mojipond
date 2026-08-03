@@ -23,21 +23,11 @@ final class MojiPondUITests: XCTestCase {
         XCTAssertFalse(
             application.staticTexts["Send & Media Pasting"].exists
         )
-        let crashReportsToggle = application.descendants(
-            matching: .any
-        )["onboarding.crashReportsToggle"]
-        XCTAssertTrue(crashReportsToggle.waitForExistence(timeout: 2))
-        XCTAssertEqual(String(describing: crashReportsToggle.value), "1")
-        XCTAssertTrue(
-            application.staticTexts.matching(
-                NSPredicate(
-                    format: "label CONTAINS[c] %@",
-                    "On by default"
-                )
-            ).firstMatch.exists
+        XCTAssertFalse(
+            application.staticTexts[
+                "Move MojiPond to Applications, then open that copy before granting access."
+            ].exists
         )
-        crashReportsToggle.click()
-        XCTAssertEqual(String(describing: crashReportsToggle.value), "0")
         let onboardingWindow = application.windows["MojiPond"]
         XCTAssertTrue(onboardingWindow.waitForExistence(timeout: 2))
         attachScreen(
@@ -67,6 +57,37 @@ final class MojiPondUITests: XCTestCase {
         attachScreen(
             named: "onboarding-setup",
             element: onboardingWindow
+        )
+
+        let crashReportsToggle = application.descendants(
+            matching: .any
+        )["onboarding.crashReportsToggle"]
+        XCTAssertTrue(crashReportsToggle.waitForExistence(timeout: 2))
+        let setupScrollView = application.scrollViews.firstMatch
+        for _ in 0..<3 where !crashReportsToggle.isHittable {
+            setupScrollView.swipeUp()
+        }
+        XCTAssertTrue(crashReportsToggle.isHittable)
+        XCTAssertEqual(
+            String(describing: crashReportsToggle.value ?? ""),
+            "1"
+        )
+        let crashReportsDisclosure = application.descendants(
+            matching: .any
+        )["onboarding.crashReportsDisclosure"]
+        XCTAssertTrue(
+            crashReportsDisclosure.waitForExistence(timeout: 2)
+        )
+        XCTAssertTrue(
+            String(describing: crashReportsDisclosure.value ?? "")
+                .localizedCaseInsensitiveContains(
+                    "On by default"
+                )
+        )
+        crashReportsToggle.click()
+        XCTAssertEqual(
+            String(describing: crashReportsToggle.value ?? ""),
+            "0"
         )
 
         application.buttons["Continue Without Shortcuts"].click()
@@ -138,11 +159,10 @@ final class MojiPondUITests: XCTestCase {
         ).firstMatch
         XCTAssertTrue(packButton.waitForExistence(timeout: 3))
         packButton.click()
-        XCTAssertTrue(
-            application.buttons["Pack Details"]
-                .waitForExistence(timeout: 2)
-        )
-        application.buttons["Pack Details"].click()
+        let packDetailsButton = application.buttons["Pack Details"]
+        XCTAssertTrue(packDetailsButton.waitForExistence(timeout: 2))
+        XCTAssertTrue(packDetailsButton.isHittable)
+        packDetailsButton.click()
         let detailsSheet = libraryWindow.sheets.firstMatch
         XCTAssertTrue(detailsSheet.waitForExistence(timeout: 2))
         XCTAssertTrue(

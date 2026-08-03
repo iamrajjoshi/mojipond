@@ -56,6 +56,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p website/public/releases
+          echo "PUBLIC_DOWNLOAD_URL=" >> "${GITHUB_ENV}"
 
           release_tag="$(
             gh release list \
@@ -77,10 +78,18 @@ jobs:
             jq -r 'any(.assets[]; .name == "appcast.xml")' \
               <<<"${release_json}"
           )"
-          if [[ "${has_appcast}" != "true" ]]; then
-            echo "Stable release ${release_tag} does not contain appcast.xml." >&2
+          has_dmg="$(
+            jq -r 'any(.assets[]; .name == "MojiPond.dmg")' \
+              <<<"${release_json}"
+          )"
+          if [[ "${has_appcast}" != "true" || "${has_dmg}" != "true" ]]; then
+            echo "Stable release ${release_tag} is missing appcast.xml or MojiPond.dmg." >&2
             exit 1
           fi
+
+          echo \
+            "PUBLIC_DOWNLOAD_URL=https://github.com/${GITHUB_REPOSITORY}/releases/download/${release_tag}/MojiPond.dmg" \
+            >> "${GITHUB_ENV}"
 
           gh release download \
             "${release_tag}" \

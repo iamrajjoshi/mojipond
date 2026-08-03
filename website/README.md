@@ -33,8 +33,10 @@ replaces that placeholder with the signed `appcast.xml` attached to the latest
 stable release. The appcast points to the tag-specific release ZIP; Pages
 does not copy or rename the update archive.
 
-The landing page does not advertise a development build. Add a public download
-only after the Developer ID release is notarized and the appcast is signed.
+Pages renders the Download button only when a stable release contains both the
+signed appcast and notarized `MojiPond.dmg`. Publishing that release triggers a
+fresh deployment with an immutable, tag-specific download URL; drafts and
+prereleases are intentionally excluded.
 
 Do not add generated `dist/`, `.astro/`, Playwright output, signing material,
 or private release assets to Git.
