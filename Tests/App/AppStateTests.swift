@@ -99,6 +99,34 @@ final class AppStateTests: XCTestCase {
             NSStringFromSelector(try XCTUnwrap(settingsItem.action)),
             "showSettings"
         )
+        XCTAssertNotNil(
+            menu.items.first(where: { $0.title == "Emoji Library…" })
+        )
+        XCTAssertNotNil(
+            menu.items.first(where: { $0.title == "Quit MojiPond" })
+        )
+        XCTAssertNil(
+            menu.items.first {
+                $0.title == "Insert Emoji at Caret…"
+            }
+        )
+        XCTAssertNil(
+            menu.items.first {
+                $0.title == "Setup & Permissions…"
+            }
+        )
+        XCTAssertEqual(
+            menu.items.contains { $0.title == "Finish Setup…" },
+            !delegate.appState.hasCompletedOnboarding
+        )
+        XCTAssertNil(
+            menu.items.first {
+                $0.title == "Check for Updates…"
+            }
+        )
+        XCTAssertNil(
+            menu.items.first(where: { $0.title == "Ready" })
+        )
     }
 }
 

@@ -130,7 +130,7 @@ Signing identities installed: none
 | Sparkle 2.9.5 dependency pin | Automated | `project.yml` pins the package exactly and package resolution is part of the build |
 | HTTPS appcast and Ed25519 public-key configuration | Automated | Configuration tests reject a non-HTTPS feed, missing host, and public keys that are not 32 bytes |
 | Signed feed and pre-extraction verification settings | Automated | The built Info property list enables `SURequireSignedFeed` and `SUVerifyUpdateBeforeExtraction`; Sparkle system profiling is disabled |
-| Manual and opt-in automatic checks | Automated | Controller tests cover one-time Sparkle startup, live check availability, manual checks, default-off automatic checks, and preference propagation after opt-in |
+| Manual and daily automatic checks | Automated | Controller tests cover one-time Sparkle startup, live check availability, manual checks, the daily default, and preference propagation after opt-out or opt-in |
 | Signed stable appcast at `mojipond.com` | Pending | The Pages workflow and signed placeholder must deploy, then the live endpoint needs an HTTP and XML check |
 | Release appcast generated from final notarized ZIP | Pending | Requires the first protected release run with `SPARKLE_EDDSA_PRIVATE_KEY` and inspection of the draft assets |
 | Real Developer ID update and relaunch | Pending | Requires two published same-channel builds, a clean Mac, and a live update through Sparkle's standard prompt |

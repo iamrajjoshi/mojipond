@@ -425,7 +425,11 @@ final class MojiPondUITests: XCTestCase {
                 "Checks daily. You choose when to install."
             ].exists
         )
-        XCTAssertTrue(application.menuItems["Check for Updates…"].exists)
+        XCTAssertTrue(
+            application.buttons["Check for Updates…"]
+                .waitForExistence(timeout: 2)
+        )
+        XCTAssertFalse(application.menuItems["Check for Updates…"].exists)
 
         let initialValue = String(describing: updateToggle.value)
         updateToggle.click()

@@ -65,7 +65,12 @@ final class AppUpdateControllerTests: XCTestCase {
         XCTAssertEqual(
             bundle.object(forInfoDictionaryKey: "SUEnableAutomaticChecks")
                 as? Bool,
-            false
+            true
+        )
+        XCTAssertEqual(
+            bundle.object(forInfoDictionaryKey: "SUScheduledCheckInterval")
+                as? Int,
+            86_400
         )
         XCTAssertEqual(
             bundle.object(forInfoDictionaryKey: "SUAutomaticallyUpdate")

@@ -388,7 +388,9 @@ struct OnboardingView: View {
     private var footer: some View {
         HStack {
             if !appState.canMonitorTyping {
-                Text("You can finish setup later from the MojiPond menu.")
+                Text(
+                    "You can return from Finish Setup in the MojiPond menu."
+                )
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
