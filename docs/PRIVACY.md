@@ -118,8 +118,9 @@ permanently so the user can paste the copied media manually.
 
 ## Network features
 
-Automatic update checks default to off, and manual checks run only when
-requested. Crash and hang reporting defaults to on, but Sentry does not start
+Automatic update checks run at most once a day by default and can be disabled
+in Settings; manual checks run only when requested. Crash and hang reporting
+defaults to on, but Sentry does not start
 on a fresh install until the user finishes first-run setup with that choice
 enabled. Turning it off stops future collection; a report captured before
 opt-out may still be queued or finish sending, and a report already transmitted
@@ -145,9 +146,10 @@ request. The archive may contain a portable manifest, a simple image folder, or
 a Slack-style manifest with local assets. Remote asset URLs are not fetched,
 and the retained GitHub import client has no public UI entry point.
 
-Manual update checks are user-initiated. Automatic checking runs only after
-the user enables it. Both paths stop when the app lacks its bundled HTTPS
-appcast URL or Ed25519 public key. Sparkle 2.9.5 reads
+Manual update checks are user-initiated. Automatic checking runs at most once
+a day by default and can be disabled under **Settings → General**. Both paths
+stop when the app lacks its bundled HTTPS appcast URL or Ed25519 public key.
+Sparkle 2.9.5 reads
 `https://mojipond.com/releases/appcast.xml`, requires a signed feed, and checks
 the selected release's Ed25519 enclosure signature before extraction. Sparkle
 system profiling is disabled. Automatic update download and installation

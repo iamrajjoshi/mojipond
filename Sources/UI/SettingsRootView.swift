@@ -37,7 +37,7 @@ private enum SettingsDestination: String, CaseIterable, Identifiable {
         case .privacy:
             "Crash reports, permissions, and exclusions."
         case .about:
-            "Version and update status."
+            "Version and acknowledgements."
         }
     }
 }
@@ -315,6 +315,22 @@ struct SettingsRootView: View {
                         .accessibilityLabel("Keep MojiPond up to date")
                         .toggleStyle(.switch)
                         .tint(PondDesign.lily)
+                    }
+
+                    SettingsDivider()
+
+                    SettingsActionRow(
+                        icon: "arrow.clockwise",
+                        title: "Check for updates",
+                        detail: updates.statusSummary
+                    ) {
+                        Button("Check for Updates…") {
+                            updates.checkManually()
+                        }
+                        .disabled(!updates.canCheckForUpdates)
+                        .accessibilityHint(
+                            "Uses Sparkle to securely check for a newer version."
+                        )
                     }
                 }
             }
@@ -810,16 +826,6 @@ struct SettingsRootView: View {
                     forInfoDictionaryKey: "CFBundleShortVersionString"
                 ) as? String ?? "Development"
             )
-            if updates.isConfigured {
-                LabeledContent("Updates", value: updates.statusSummary)
-                Button("Check for Updates…") {
-                    updates.checkManually()
-                }
-                .disabled(!updates.canCheckForUpdates)
-                .accessibilityHint(
-                    "Uses Sparkle to securely check for a newer version."
-                )
-            }
             Text(
                 "Shortcodes are processed on this Mac. MojiPond does not "
                     + "save your messages or require an account."

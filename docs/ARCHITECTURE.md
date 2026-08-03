@@ -229,8 +229,9 @@ Input Monitoring, and Event Posting requirements.
 
 ## Network boundaries
 
-Automatic update checks default to off. Manual update checks run only after an
-explicit action in the status menu or About screen.
+Automatic update checks run at most once a day by default and can be disabled
+under **Settings → General**. Manual checks run only after an explicit action
+on that page.
 
 Crash and hang reporting is controlled separately, defaults to on, and can be
 disabled in **Settings → Privacy**. On a fresh install, AppDelegate waits for
@@ -247,11 +248,11 @@ property list. `SURequireSignedFeed` and `SUVerifyUpdateBeforeExtraction` are
 enabled; Sparkle system profiling is disabled. An invalid or incomplete
 configuration disables update commands.
 
-The status menu and About screen can start a manual check. Automatic checks
-default to off and use Sparkle's daily schedule only after the user enables
-them. Sparkle verifies the signed appcast and enclosure signature before it
-installs a release. The app delegates download, extraction, installation, and
-rollback to Sparkle instead of maintaining a second updater security boundary.
+Settings → General can start a manual check. Automatic checks use Sparkle's
+daily schedule by default and remain user-configurable. Sparkle verifies the
+signed appcast and enclosure signature before it installs a release. The app
+delegates download, extraction, installation, and rollback to Sparkle instead
+of maintaining a second updater security boundary.
 
 The appcast lives at `https://mojipond.com/releases/appcast.xml`. Its enclosure
 points to a tag-specific GitHub Release ZIP. The release workflow signs

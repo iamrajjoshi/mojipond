@@ -106,8 +106,8 @@ https://mojipond.com/releases/appcast.xml
 ```
 
 `SURequireSignedFeed` and `SUVerifyUpdateBeforeExtraction` are enabled. Sparkle
-system profiling is disabled, automatic checks default to off, and the app does
-not enable automatic download or installation by default.
+system profiling is disabled, checks run at most once a day by default, and the
+app does not enable automatic download or installation by default.
 
 The repository contains a signed empty appcast so the endpoint returns valid
 XML before the first release. For each release, Sparkle's `generate_appcast`
@@ -200,8 +200,9 @@ curl --fail --silent --show-error \
   | xmllint --noout -
 ```
 
-Also open **Check for Updates…** from the prior installed version. A stable
-release must appear there. A prerelease must not alter the stable result.
+Also open **Settings → General → Check for Updates…** from the prior
+installed version. A stable release must appear there. A prerelease must not
+alter the stable result.
 
 ## Local packages
 

@@ -92,7 +92,7 @@ notarization, and release packaging are covered in the
 
 ## First use
 
-1. Open **MojiPond → Setup & Permissions** from the menu bar.
+1. Open MojiPond. First-run setup appears automatically.
 2. Grant Input Monitoring and Accessibility.
 3. Type `:wa` in a supported text field.
 4. Choose with Up or Down Arrow, then press Tab or Return.
@@ -122,7 +122,8 @@ Full Disk Access, Contacts, or access to the Messages database.
 Autocomplete and pack processing stay on the Mac. There are no accounts or
 usage analytics. First-run setup shows the Sentry crash-reporting choice before
 the SDK starts; it defaults to on and remains available under
-**Settings → Privacy**. Automatic update checks default to off. The
+**Settings → Privacy**. MojiPond checks for updates at most once a day by
+default; this can be disabled under **Settings → General**. The
 [privacy document](docs/PRIVACY.md) lists stored data and network behavior.
 
 ## Custom emoji packs

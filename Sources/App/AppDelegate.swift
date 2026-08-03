@@ -117,11 +117,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         enabledItem.state = appState.isEnabled ? .on : .off
         menu.addItem(enabledItem)
-        menu.addItem(
-            withTitle: appState.statusSummary,
-            action: nil,
-            keyEquivalent: ""
-        ).isEnabled = false
         if pendingMediaCopyFallback?.payload != nil {
             menu.addItem(
                 withTitle: "Copy Media Instead",
@@ -135,25 +130,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             action: #selector(showLibrary),
             keyEquivalent: "o"
         )
-        let browserItem = menu.addItem(
-            withTitle: "Insert Emoji at Caret…",
-            action: #selector(openEmojiBrowser),
-            keyEquivalent: "b"
-        )
-        browserItem.isEnabled = appState.isEnabled
-            && appState.canMonitorTyping
-        menu.addItem(
-            withTitle: "Setup & Permissions…",
-            action: #selector(showOnboarding),
-            keyEquivalent: ""
-        )
+        if !appState.hasCompletedOnboarding {
+            menu.addItem(
+                withTitle: "Finish Setup…",
+                action: #selector(showOnboarding),
+                keyEquivalent: ""
+            )
+        }
         let settingsItem = menu.addItem(
             withTitle: "Settings…",
             action: #selector(showSettings),
             keyEquivalent: ","
         )
         settingsItem.target = self
-        addUpdateItems(to: menu)
         menu.addItem(.separator())
         menu.addItem(
             withTitle: "Quit MojiPond",
@@ -370,11 +359,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc
-    private func openEmojiBrowser() {
-        runtimeController?.openBrowser()
-    }
-
-    @objc
     private func copyPendingMedia() {
         guard let payload = pendingMediaCopyFallback?.payload else {
             return
@@ -387,23 +371,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 : "MojiPond could not copy the media."
         )
         rebuildStatusMenu()
-    }
-
-    @objc
-    private func checkForUpdates() {
-        appState.updates.checkManually()
-    }
-
-    private func addUpdateItems(to menu: NSMenu) {
-        guard appState.updates.isConfigured else {
-            return
-        }
-        let updateItem = menu.addItem(
-            withTitle: "Check for Updates…",
-            action: #selector(checkForUpdates),
-            keyEquivalent: ""
-        )
-        updateItem.isEnabled = appState.updates.canCheckForUpdates
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -470,7 +437,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             appState.setRuntimeState(.failed(error.localizedDescription))
             appState.setRuntimeNotice(
-                "Startup failed. Open Setup & Permissions for details."
+                "Startup failed. Open Settings → Privacy for details."
             )
             return false
         }
@@ -574,6 +541,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .removeDuplicates()
             .sink { [weak self] preferences in
                 self?.runtimeController?.updatePreferences(preferences)
+            }
+            .store(in: &cancellables)
+
+        appState.$hasCompletedOnboarding
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in
+                self?.rebuildStatusMenu()
             }
             .store(in: &cancellables)
 
