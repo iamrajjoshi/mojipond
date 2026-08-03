@@ -182,6 +182,39 @@ struct RuntimeTextCapture: @unchecked Sendable {
         self.context = context
         self.bundleIdentifier = bundleIdentifier
     }
+
+    /// The exact token ending at the captured caret, if the context contains
+    /// one. Token ranges are absolute AX offsets while text fragments are
+    /// bounded local strings, so keep that conversion in one checked place.
+    var token: String? {
+        guard
+            context.selection.length == 0,
+            let tokenRange = context.tokenRange,
+            tokenRange.length > 0,
+            tokenRange.location + tokenRange.length
+                == context.selection.location,
+            tokenRange.location >= context.textFragmentRange.location
+        else {
+            return nil
+        }
+        let localRange = NSRange(
+            location:
+                tokenRange.location
+                    - context.textFragmentRange.location,
+            length: tokenRange.length
+        )
+        guard
+            (try? AccessibilityTextAdapter.validate(
+                localRange,
+                in: context.textFragment
+            )) != nil
+        else {
+            return nil
+        }
+        return (context.textFragment as NSString).substring(
+            with: localRange
+        )
+    }
 }
 
 enum RuntimeTextCaptureError: Error, Equatable, Sendable {
@@ -204,10 +237,20 @@ protocol RuntimeTextContextCapturing: Sendable {
         expectedToken: String,
         trigger: Character
     ) throws -> RuntimeTextCapture
+    func captureCurrentToken(
+        trigger: Character
+    ) throws -> RuntimeTextCapture
     func updateExclusions(_ exclusions: ExclusionPreferences)
 }
 
 extension RuntimeTextContextCapturing {
+    func captureCurrentToken(
+        trigger: Character
+    ) throws -> RuntimeTextCapture {
+        _ = trigger
+        throw RuntimeTextCaptureError.invalidTokenContext
+    }
+
     func updateExclusions(_ exclusions: ExclusionPreferences) {
         _ = exclusions
     }
@@ -256,6 +299,59 @@ final class RuntimeAccessibilityTextContextProvider:
     func capture(
         expectedToken: String,
         trigger: Character
+    ) throws -> RuntimeTextCapture {
+        let capture = try captureContext(
+            trigger: trigger,
+            locateShortcodeToken: !expectedToken.isEmpty
+        )
+        let context = expectedToken.isEmpty
+            ? try Self.caretContext(capture.context)
+            : trigger == "/"
+            ? try Self.mediaCommandContext(
+                capture.context,
+                expectedToken: expectedToken
+            )
+            : capture.context
+
+        guard Self.context(context, containsExactly: expectedToken) else {
+            throw RuntimeTextCaptureError.invalidTokenContext
+        }
+        return RuntimeTextCapture(
+            target: capture.target,
+            context: context,
+            bundleIdentifier: capture.bundleIdentifier
+        )
+    }
+
+    func captureCurrentToken(
+        trigger: Character
+    ) throws -> RuntimeTextCapture {
+        guard trigger.utf16.count == 1 else {
+            throw RuntimeTextCaptureError.invalidTokenContext
+        }
+        let capture = try captureContext(
+            trigger: trigger,
+            locateShortcodeToken: true
+        )
+        guard
+            let token = capture.token,
+            token.first == trigger,
+            token.count == 1 || token.last != trigger
+        else {
+            throw RuntimeTextCaptureError.invalidTokenContext
+        }
+        let query = String(token.dropFirst())
+        guard
+            query.isEmpty || EmojiAliasSyntax.isValidToken(query)
+        else {
+            throw RuntimeTextCaptureError.invalidTokenContext
+        }
+        return capture
+    }
+
+    private func captureContext(
+        trigger: Character,
+        locateShortcodeToken: Bool
     ) throws -> RuntimeTextCapture {
         let permissions = permissionChecker.currentPermissions()
         guard permissions.canMonitorTyping else {
@@ -340,30 +436,17 @@ final class RuntimeAccessibilityTextContextProvider:
 
         let context: AccessibilityTextContext
         do {
-            let capturedContext = try accessibility.context(
+            context = try accessibility.context(
                 for: target,
                 trigger: trigger,
-                locateShortcodeToken: !expectedToken.isEmpty
+                locateShortcodeToken: locateShortcodeToken
             )
-            context = expectedToken.isEmpty
-                ? try Self.caretContext(capturedContext)
-                : trigger == "/"
-                ? try Self.mediaCommandContext(
-                    capturedContext,
-                    expectedToken: expectedToken
-                )
-                : capturedContext
         } catch AccessibilityTextError.secureTextField {
             throw RuntimeTextCaptureError.denied(.secureField)
-        } catch RuntimeTextCaptureError.invalidTokenContext {
-            throw RuntimeTextCaptureError.invalidTokenContext
         } catch {
             throw RuntimeTextCaptureError.inaccessibleTarget
         }
 
-        guard Self.context(context, containsExactly: expectedToken) else {
-            throw RuntimeTextCaptureError.invalidTokenContext
-        }
         return RuntimeTextCapture(
             target: target,
             context: context,
