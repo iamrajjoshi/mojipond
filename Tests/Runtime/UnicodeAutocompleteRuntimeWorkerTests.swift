@@ -736,7 +736,7 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
             harness.presenter.latestShown
         )
         XCTAssertGreaterThan(shownSnapshot.rows.count, 1)
-        let expectedSelection = shownSnapshot.rows[1].glyph
+        let expectedSelection = shownSnapshot.rows[0].glyph
 
         harness.worker.enqueue(
             keySnapshot(keyCode: RuntimeKeyboardKeyCode.downArrow)
@@ -751,7 +751,7 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         XCTAssertTrue(selectedInserted)
     }
 
-    func testSuggestionSelectionContinuesPastVisibleRowsAndClampsAtEnds()
+    func testSuggestionSelectionScrollsPastVisibleRowsAndUsesSlackBoundaries()
         async throws
     {
         let items = (0..<8).map { index in
@@ -769,40 +769,37 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
 
         let suggestionsShown = await eventually {
             harness.presenter.latestShown?.rows.count == items.count
-                && harness.presenter.latestShown?.selectedIndex == 0
+                && harness.presenter.latestShown?.selectedIndex == -1
         }
         XCTAssertTrue(suggestionsShown)
         let initial = try XCTUnwrap(harness.presenter.latestShown)
         XCTAssertEqual(initial.visibleRows.count, 6)
 
-        let updateCountBeforeClampedUp = harness.presenter.updates.count
+        let updateCountBeforeSelectedUp = harness.presenter.updates.count
         harness.worker.enqueue(
             keySnapshot(keyCode: RuntimeKeyboardKeyCode.upArrow)
         )
-        let clampedAtFirstResult = await eventually {
-            harness.presenter.updates.count > updateCountBeforeClampedUp
-                && harness.presenter.latestShown?.selectedIndex == 0
+        let selectedLastResult = await eventually {
+            harness.presenter.updates.count > updateCountBeforeSelectedUp
+                && harness.presenter.latestShown?.selectedIndex
+                    == items.count - 1
         }
-        XCTAssertTrue(clampedAtFirstResult)
-
-        for _ in 0..<20 {
-            harness.worker.enqueue(
-                keySnapshot(keyCode: RuntimeKeyboardKeyCode.downArrow)
-            )
-        }
-        let clampedAtLastResult = await eventually {
-            harness.presenter.latestShown?.selectedIndex == items.count - 1
-        }
-        XCTAssertTrue(clampedAtLastResult)
+        XCTAssertTrue(selectedLastResult)
         let last = try XCTUnwrap(harness.presenter.latestShown)
         XCTAssertEqual(last.selectedRow?.shortcode, "pond_7")
         XCTAssertEqual(last.visibleRows.count, 6)
 
-        for _ in 0..<items.count - 1 {
-            harness.worker.enqueue(
-                keySnapshot(keyCode: RuntimeKeyboardKeyCode.upArrow)
-            )
+        harness.worker.enqueue(
+            keySnapshot(keyCode: RuntimeKeyboardKeyCode.downArrow)
+        )
+        let clearedBelowLastResult = await eventually {
+            harness.presenter.latestShown?.selectedIndex == -1
         }
+        XCTAssertTrue(clearedBelowLastResult)
+
+        harness.worker.enqueue(
+            keySnapshot(keyCode: RuntimeKeyboardKeyCode.downArrow)
+        )
         let selectedFirstResult = await eventually {
             harness.presenter.latestShown?.selectedIndex == 0
         }
@@ -864,35 +861,545 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         XCTAssertTrue(resumed)
     }
 
-    func testHorizontalCaretMovementDismissesSuggestions() async throws {
-        for keyCode in [
-            RuntimeKeyboardKeyCode.leftArrow,
-            RuntimeKeyboardKeyCode.rightArrow
+    func testCaretMovementInsideTokenKeepsSuggestionsVisible()
+        async throws
+    {
+        let cases: [(CGKeyCode, CGEventFlags, NSRange, Bool)] = [
+            (
+                RuntimeKeyboardKeyCode.leftArrow,
+                [],
+                NSRange(location: 4, length: 0),
+                true
+            ),
+            (
+                RuntimeKeyboardKeyCode.leftArrow,
+                [.maskShift],
+                NSRange(location: 4, length: 1),
+                true
+            ),
+            (
+                RuntimeKeyboardKeyCode.leftArrow,
+                [.maskAlternate],
+                NSRange(location: 1, length: 0),
+                false
+            ),
+            (
+                RuntimeKeyboardKeyCode.leftArrow,
+                [.maskCommand],
+                NSRange(location: 0, length: 0),
+                false
+            ),
+            (
+                RuntimeKeyboardKeyCode.upArrow,
+                [.maskShift],
+                NSRange(location: 0, length: 5),
+                true
+            ),
+            (
+                RuntimeKeyboardKeyCode.downArrow,
+                [.maskAlternate],
+                NSRange(location: 1, length: 0),
+                false
+            )
+        ]
+        for (keyCode, flags, selection, clearsSelection) in cases {
+            let harness = try makeHarness(
+                items: [emoji(shortcode: "frog", value: "🐸")],
+                targetText: ":frog"
+            )
+            harness.worker.setCaptureEnabled(true)
+            deliver(":frog", into: harness)
+            let initiallyShown = await eventually {
+                harness.gate.mode == .suggestions
+            }
+            XCTAssertTrue(initiallyShown)
+            harness.worker.enqueue(
+                keySnapshot(keyCode: RuntimeKeyboardKeyCode.downArrow)
+            )
+            let firstResultSelected = await eventually {
+                harness.presenter.latestShown?.selectedIndex == 0
+            }
+            XCTAssertTrue(firstResultSelected)
+            harness.captureProvider.setCurrentContext(
+                token: ":frog",
+                selection: selection,
+                tokenLocation: 0
+            )
+
+            let updateStart = harness.presenter.updates.count
+            let movement = keySnapshot(
+                keyCode: keyCode,
+                flags: flags
+            )
+            let outcome = harness.gate.outcome(for: movement)
+            XCTAssertEqual(outcome.decision, .passThrough)
+            XCTAssertFalse(outcome.requiresContextRecovery)
+            XCTAssertEqual(harness.gate.mode, .suggestions)
+            harness.worker.enqueue(movement.delivered(with: outcome))
+
+            let preserved = await eventually {
+                harness.gate.mode == .suggestions
+                    && harness.presenter.updates.count > updateStart
+                    && harness.presenter.latestShown?.selectedIndex
+                        == (clearsSelection ? -1 : 0)
+                    && harness.presenter.latestShown?.acceptsTab == false
+                    && harness.presenter.latestShown?.acceptsReturn == false
+            }
+            XCTAssertTrue(
+                preserved,
+                "Expected retained picker for key \(keyCode), flags \(flags)"
+            )
+            XCTAssertFalse(
+                harness.presenter.updates.dropFirst(updateStart).contains {
+                    guard case .hide = $0 else {
+                        return false
+                    }
+                    return true
+                }
+            )
+            XCTAssertEqual(
+                harness.gate.outcome(
+                    for: keySnapshot(keyCode: RuntimeKeyboardKeyCode.tab)
+                ).decision,
+                .passThrough
+            )
+        }
+    }
+
+    func testCaretMovementOutsideTokenHidesAfterSettledValidation()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":frog",
+            settleDelayMilliseconds: 80
+        )
+        harness.worker.setCaptureEnabled(true)
+        deliver(":frog", into: harness)
+        let initiallyShown = await eventually {
+            harness.gate.mode == .suggestions
+        }
+        XCTAssertTrue(initiallyShown)
+
+        harness.captureProvider.setCurrentContext(
+            token: ":frog",
+            selection: NSRange(location: 6, length: 0),
+            tokenLocation: 0
+        )
+        let updateStart = harness.presenter.updates.count
+        let movement = keySnapshot(
+            keyCode: RuntimeKeyboardKeyCode.rightArrow
+        )
+        let outcome = harness.gate.outcome(for: movement)
+        harness.worker.enqueue(movement.delivered(with: outcome))
+
+        let preserved = await eventually {
+            harness.gate.mode == .suggestions
+                && harness.presenter.latestShown?.selectedIndex == -1
+        }
+        XCTAssertTrue(preserved)
+        XCTAssertFalse(
+            harness.presenter.updates.dropFirst(updateStart).contains {
+                guard case .hide = $0 else {
+                    return false
+                }
+                return true
+            }
+        )
+
+        let hidden = await eventually(timeout: .milliseconds(400)) {
+            harness.gate.mode == .hidden
+                && harness.presenter.updates.dropFirst(updateStart).contains {
+                    guard case .hide = $0 else {
+                        return false
+                    }
+                    return true
+                }
+        }
+        XCTAssertTrue(hidden)
+    }
+
+    func testCaretMovementBackToTokenEndReenablesSafeAcceptance()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [emoji(shortcode: "frog", value: "🐸")],
+            targetText: ":frog"
+        )
+        harness.worker.setCaptureEnabled(true)
+        deliver(":frog", into: harness)
+        let initiallyShown = await eventually {
+            harness.gate.mode == .suggestions
+        }
+        XCTAssertTrue(initiallyShown)
+
+        harness.captureProvider.setCurrentContext(
+            token: ":frog",
+            selection: NSRange(location: 4, length: 0),
+            tokenLocation: 0
+        )
+        let left = keySnapshot(keyCode: RuntimeKeyboardKeyCode.leftArrow)
+        let leftOutcome = harness.gate.outcome(for: left)
+        harness.worker.enqueue(left.delivered(with: leftOutcome))
+        let disabledInsideToken = await eventually {
+            harness.presenter.latestShown?.acceptsTab == false
+                && harness.gate.mode == .suggestions
+        }
+        XCTAssertTrue(disabledInsideToken)
+
+        harness.captureProvider.setCurrentContext(
+            token: ":frog",
+            selection: NSRange(location: 5, length: 0),
+            tokenLocation: 0
+        )
+        let right = keySnapshot(keyCode: RuntimeKeyboardKeyCode.rightArrow)
+        let rightOutcome = harness.gate.outcome(for: right)
+        harness.worker.enqueue(right.delivered(with: rightOutcome))
+
+        let reenabledAtTokenEnd = await eventually {
+            harness.presenter.latestShown?.acceptsTab == true
+                && harness.gate.isExactCommitArmed
+        }
+        XCTAssertTrue(reenabledAtTokenEnd)
+        XCTAssertEqual(
+            harness.gate.outcome(
+                for: keySnapshot(keyCode: RuntimeKeyboardKeyCode.tab)
+            ).decision,
+            .intercept
+        )
+    }
+
+    func testSettledSelectionValidationDoesNotClearNewPickerNavigation()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [
+                emoji(shortcode: "frog", value: "🐸"),
+                emoji(shortcode: "frown", value: "☹️")
+            ],
+            targetText: ":fr",
+            settleDelayMilliseconds: 80
+        )
+        harness.worker.setCaptureEnabled(true)
+        deliver(":fr", into: harness)
+        let initiallyShown = await eventually {
+            harness.gate.mode == .suggestions
+        }
+        XCTAssertTrue(initiallyShown)
+
+        harness.captureProvider.setCurrentContext(
+            token: ":fr",
+            selection: NSRange(location: 2, length: 1),
+            tokenLocation: 0
+        )
+        let shiftLeft = keySnapshot(
+            keyCode: RuntimeKeyboardKeyCode.leftArrow,
+            flags: [.maskShift]
+        )
+        let shiftLeftOutcome = harness.gate.outcome(for: shiftLeft)
+        harness.worker.enqueue(
+            shiftLeft.delivered(with: shiftLeftOutcome)
+        )
+
+        let down = keySnapshot(keyCode: RuntimeKeyboardKeyCode.downArrow)
+        let downOutcome = harness.gate.outcome(for: down)
+        XCTAssertEqual(downOutcome.decision, .intercept)
+        harness.worker.enqueue(down.delivered(with: downOutcome))
+        let selected = await eventually {
+            harness.presenter.latestShown?.selectedIndex == 0
+        }
+        XCTAssertTrue(selected)
+
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertEqual(harness.presenter.latestShown?.selectedIndex, 0)
+        XCTAssertEqual(harness.gate.mode, .suggestions)
+    }
+
+    func testImmediateExactCloseAfterCaretRoundTripStillReplaces()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [
+                emoji(shortcode: "frog", value: "🐸"),
+                emoji(shortcode: "frogwave", value: "👋")
+            ],
+            targetText: ":frog:",
+            settleDelayMilliseconds: 80
+        )
+        harness.worker.setCaptureEnabled(true)
+        deliver(":frog", into: harness)
+        let initiallyShown = await eventually {
+            harness.gate.mode == .suggestions
+        }
+        XCTAssertTrue(initiallyShown)
+
+        harness.captureProvider.setCurrentContext(
+            token: ":frog",
+            selection: NSRange(location: 4, length: 0),
+            tokenLocation: 0
+        )
+        let left = keySnapshot(keyCode: RuntimeKeyboardKeyCode.leftArrow)
+        let leftOutcome = harness.gate.outcome(for: left)
+        harness.worker.enqueue(left.delivered(with: leftOutcome))
+
+        harness.captureProvider.setCurrentContext(
+            token: ":frog",
+            selection: NSRange(location: 5, length: 0),
+            tokenLocation: 0
+        )
+        let right = keySnapshot(keyCode: RuntimeKeyboardKeyCode.rightArrow)
+        let rightOutcome = harness.gate.outcome(for: right)
+        harness.worker.enqueue(right.delivered(with: rightOutcome))
+
+        harness.captureProvider.setCurrentContext(
+            token: ":frog:",
+            selection: NSRange(location: 6, length: 0),
+            tokenLocation: 0
+        )
+        let close = keySnapshot(keyCode: 41, characters: ":")
+        let closeOutcome = harness.gate.outcome(for: close)
+        XCTAssertTrue(closeOutcome.requiresContextRecovery)
+        harness.worker.enqueue(close.delivered(with: closeOutcome))
+
+        let replaced = await eventually(timeout: .milliseconds(700)) {
+            harness.system.text == "🐸"
+        }
+        XCTAssertTrue(replaced)
+
+        let updateStart = harness.presenter.updates.count
+        deliver("w", into: harness)
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(harness.gate.mode, .hidden)
+        XCTAssertFalse(
+            harness.presenter.updates.dropFirst(updateStart).contains {
+                guard case .show = $0 else {
+                    return false
+                }
+                return true
+            }
+        )
+    }
+
+    func testContextRecoveryCannotCrossFocusedTextTargets() async throws {
+        let harness = try makeHarness(
+            items: [
+                emoji(shortcode: "frog", value: "🐸"),
+                emoji(shortcode: "wave", value: "👋")
+            ],
+            targetText: ":frog",
+            settleDelayMilliseconds: 40
+        )
+        harness.worker.setCaptureEnabled(true)
+        deliver(":frog", into: harness)
+        let initiallyShown = await eventually {
+            harness.gate.mode == .suggestions
+        }
+        XCTAssertTrue(initiallyShown)
+
+        harness.captureProvider.setCurrentContext(
+            token: ":frog",
+            selection: NSRange(location: 4, length: 0),
+            tokenLocation: 0
+        )
+        let left = keySnapshot(keyCode: RuntimeKeyboardKeyCode.leftArrow)
+        let leftOutcome = harness.gate.outcome(for: left)
+        harness.worker.enqueue(left.delivered(with: leftOutcome))
+        let movementSettled = await eventually {
+            harness.presenter.latestShown?.acceptsTab == false
+        }
+        XCTAssertTrue(movementSettled)
+
+        harness.captureProvider.setCurrentContext(
+            token: ":wave",
+            selection: NSRange(location: 2, length: 0),
+            tokenLocation: 0
+        )
+        harness.captureProvider.setRepresentsSameTarget(false)
+        let edit = keySnapshot(keyCode: 13, characters: "w")
+        let editOutcome = harness.gate.outcome(for: edit)
+        XCTAssertTrue(editOutcome.requiresContextRecovery)
+        harness.worker.enqueue(edit.delivered(with: editOutcome))
+
+        let hidden = await eventually(timeout: .milliseconds(500)) {
+            harness.gate.mode == .hidden
+                && harness.presenter.updates.last.map { update in
+                    guard case .hide = update else {
+                        return false
+                    }
+                    return true
+                } == true
+        }
+        XCTAssertTrue(hidden)
+    }
+
+    func testRecoveredSuggestionsStayBoundToTheOriginalTextTarget()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [
+                emoji(shortcode: "frog", value: "🐸"),
+                emoji(shortcode: "wave", value: "👋")
+            ],
+            targetText: ":frog",
+            settleDelayMilliseconds: 40
+        )
+        harness.worker.setCaptureEnabled(true)
+        deliver(":frog", into: harness)
+        let initiallyShown = await eventually {
+            harness.gate.mode == .suggestions
+        }
+        XCTAssertTrue(initiallyShown)
+
+        harness.captureProvider.setCurrentContext(
+            token: ":frog",
+            selection: NSRange(location: 4, length: 0),
+            tokenLocation: 0
+        )
+        let left = keySnapshot(keyCode: RuntimeKeyboardKeyCode.leftArrow)
+        let leftOutcome = harness.gate.outcome(for: left)
+        harness.worker.enqueue(left.delivered(with: leftOutcome))
+        let movementSettled = await eventually {
+            harness.presenter.latestShown?.acceptsTab == false
+        }
+        XCTAssertTrue(movementSettled)
+
+        let updateStart = harness.presenter.updates.count
+        harness.captureProvider.setCurrentContext(
+            token: ":wave",
+            selection: NSRange(location: 2, length: 0),
+            tokenLocation: 0
+        )
+        harness.captureProvider.setTargetComparisonResults([true, false])
+        let edit = keySnapshot(keyCode: 13, characters: "w")
+        let editOutcome = harness.gate.outcome(for: edit)
+        XCTAssertTrue(editOutcome.requiresContextRecovery)
+        harness.worker.enqueue(edit.delivered(with: editOutcome))
+
+        let hidden = await eventually(timeout: .milliseconds(700)) {
+            harness.gate.mode == .hidden
+                && harness.presenter.updates.last.map { update in
+                    guard case .hide = update else {
+                        return false
+                    }
+                    return true
+                } == true
+        }
+        XCTAssertTrue(hidden)
+        XCTAssertFalse(
+            harness.presenter.updates.dropFirst(updateStart).contains {
+                guard case let .show(snapshot, _) = $0 else {
+                    return false
+                }
+                return snapshot.rows.map(\.shortcode) == ["wave"]
+            }
+        )
+    }
+
+    func testInteriorEditSearchesOnlyThroughTheNewCaret() async throws {
+        let harness = try makeHarness(
+            items: [
+                emoji(shortcode: "frog", value: "🐸"),
+                emoji(shortcode: "wave", value: "👋")
+            ],
+            targetText: ":frog"
+        )
+        harness.worker.setCaptureEnabled(true)
+        deliver(":frog", into: harness)
+        let initiallyShown = await eventually {
+            harness.gate.mode == .suggestions
+        }
+        XCTAssertTrue(initiallyShown)
+
+        harness.captureProvider.setCurrentContext(
+            token: ":frog",
+            selection: NSRange(location: 1, length: 0),
+            tokenLocation: 0
+        )
+        let movement = keySnapshot(
+            keyCode: RuntimeKeyboardKeyCode.leftArrow,
+            flags: [.maskCommand]
+        )
+        let movementOutcome = harness.gate.outcome(for: movement)
+        harness.worker.enqueue(
+            movement.delivered(with: movementOutcome)
+        )
+        let disabledAtInteriorCaret = await eventually {
+            harness.presenter.latestShown?.acceptsTab == false
+        }
+        XCTAssertTrue(disabledAtInteriorCaret)
+
+        let updateStart = harness.presenter.updates.count
+        harness.captureProvider.setCurrentContext(
+            token: ":wrog",
+            selection: NSRange(location: 2, length: 0),
+            tokenLocation: 0
+        )
+        let edit = keySnapshot(keyCode: 13, characters: "w")
+        let editOutcome = harness.gate.outcome(for: edit)
+        XCTAssertTrue(editOutcome.requiresContextRecovery)
+        harness.worker.enqueue(edit.delivered(with: editOutcome))
+
+        let refreshedFromPrefix = await eventually {
+            harness.gate.mode == .suggestions
+                && harness.presenter.latestShown?.rows
+                    .map(\.shortcode) == ["wave"]
+                && harness.presenter.latestShown?.acceptsTab == false
+        }
+        XCTAssertTrue(refreshedFromPrefix)
+        XCTAssertFalse(
+            harness.presenter.updates.dropFirst(updateStart).contains {
+                guard case .hide = $0 else {
+                    return false
+                }
+                return true
+            }
+        )
+    }
+
+    func testInvalidFollowUpAbandonsRetainedRecoverySurface()
+        async throws
+    {
+        for followUp in [
+            keySnapshot(keyCode: 49, characters: " "),
+            keySnapshot(keyCode: RuntimeKeyboardKeyCode.escape)
         ] {
             let harness = try makeHarness(
                 items: [emoji(shortcode: "frog", value: "🐸")],
-                targetText: ":f"
+                targetText: ":frog",
+                settleDelayMilliseconds: 80
             )
             harness.worker.setCaptureEnabled(true)
-            deliver(":f", into: harness)
+            deliver(":frog", into: harness)
             let initiallyShown = await eventually {
                 harness.gate.mode == .suggestions
             }
             XCTAssertTrue(initiallyShown)
 
-            let movement = keySnapshot(keyCode: keyCode)
-            let outcome = harness.gate.outcome(for: movement)
-            XCTAssertEqual(outcome.decision, .passThrough)
-            XCTAssertEqual(harness.gate.mode, .hidden)
-            harness.worker.enqueue(movement.delivered(with: outcome))
+            let movement = keySnapshot(
+                keyCode: RuntimeKeyboardKeyCode.leftArrow
+            )
+            let movementOutcome = harness.gate.outcome(for: movement)
+            harness.worker.enqueue(
+                movement.delivered(with: movementOutcome)
+            )
+            let edit = keySnapshot(keyCode: 7, characters: "x")
+            let editOutcome = harness.gate.outcome(for: edit)
+            harness.worker.enqueue(edit.delivered(with: editOutcome))
+            let followUpOutcome = harness.gate.outcome(for: followUp)
+            harness.worker.enqueue(
+                followUp.delivered(with: followUpOutcome)
+            )
 
-            let dismissed = await eventually {
-                guard case .hide? = harness.presenter.updates.last else {
-                    return false
-                }
-                return true
+            let hidden = await eventually {
+                harness.gate.mode == .hidden
+                    && harness.presenter.updates.contains {
+                        guard case .hide = $0 else {
+                            return false
+                        }
+                        return true
+                    }
             }
-            XCTAssertTrue(dismissed)
+            XCTAssertTrue(hidden)
         }
     }
 
@@ -1078,7 +1585,16 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
             XCTAssertTrue(initiallyShown)
 
             let updateStart = harness.presenter.updates.count
-            deliver("r", into: harness)
+            let refresh = keySnapshot(keyCode: 15, characters: "r")
+            let refreshOutcome = harness.gate.outcome(for: refresh)
+            XCTAssertEqual(
+                harness.gate.mode,
+                .suggestions,
+                "refresh=\(refreshOutcome)"
+            )
+            harness.worker.enqueue(
+                refresh.delivered(with: refreshOutcome)
+            )
             let refreshRetained = await eventually {
                 harness.presenter.updates.dropFirst(updateStart).contains {
                     guard case .retain = $0 else {
@@ -1089,32 +1605,41 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
             }
             XCTAssertTrue(refreshRetained)
 
+            harness.captureProvider.setCurrentContext(
+                token: ":fr",
+                selection: NSRange(location: 2, length: 0),
+                tokenLocation: 0
+            )
+
             let movement = keySnapshot(keyCode: keyCode)
             let outcome = harness.gate.outcome(for: movement)
             XCTAssertEqual(outcome.decision, .passThrough)
             harness.worker.enqueue(movement.delivered(with: outcome))
 
-            let hidden = await eventually {
-                guard case .hide? = harness.presenter.updates.last else {
-                    return false
-                }
-                return harness.gate.mode == .hidden
+            let preserved = await eventually(
+                timeout: .milliseconds(300)
+            ) {
+                harness.gate.mode == .suggestions
+                    && harness.presenter.latestShown?.selectedIndex == -1
+                    && harness.presenter.latestShown?.acceptsTab == false
             }
-            XCTAssertTrue(hidden)
-            let hideIndex = harness.presenter.updates.count - 1
+            XCTAssertTrue(
+                preserved,
+                "surface=\(outcome.preservesSuggestionSurface) "
+                    + "revision=\(String(describing: outcome.interactionRevision)) "
+                    + "gate=\(harness.gate.mode) "
+                    + "updates=\(harness.presenter.updates.dropFirst(updateStart))"
+            )
             try? await Task.sleep(for: .milliseconds(140))
             XCTAssertFalse(
-                harness.presenter.updates.dropFirst(hideIndex + 1).contains {
-                    guard case .show = $0 else {
+                harness.presenter.updates.dropFirst(updateStart).contains {
+                    guard case .hide = $0 else {
                         return false
                     }
                     return true
                 }
             )
-            guard case .hide? = harness.presenter.updates.last else {
-                XCTFail("A stale refresh replaced the dismissal")
-                continue
-            }
+            XCTAssertEqual(harness.gate.mode, .suggestions)
         }
     }
 
@@ -2321,6 +2846,10 @@ private final class FixedRuntimeTextCaptureProvider:
     private let delayMilliseconds: Int
     private var currentToken: String?
     private var expectedCaptureToken: String?
+    private var currentSelection: NSRange?
+    private var currentTokenLocation: Int?
+    private var storedRepresentsSameTarget = true
+    private var targetComparisonResults: [Bool] = []
 
     init(
         target: AccessibilityTextTarget,
@@ -2356,6 +2885,20 @@ private final class FixedRuntimeTextCaptureProvider:
     func setCurrentToken(_ token: String?) {
         lock.withLock {
             currentToken = token
+            currentSelection = nil
+            currentTokenLocation = nil
+        }
+    }
+
+    func setCurrentContext(
+        token: String?,
+        selection: NSRange,
+        tokenLocation: Int
+    ) {
+        lock.withLock {
+            currentToken = token
+            currentSelection = selection
+            currentTokenLocation = tokenLocation
         }
     }
 
@@ -2365,32 +2908,72 @@ private final class FixedRuntimeTextCaptureProvider:
         }
     }
 
+    func setRepresentsSameTarget(_ representsSameTarget: Bool) {
+        lock.withLock {
+            storedRepresentsSameTarget = representsSameTarget
+        }
+    }
+
+    func setTargetComparisonResults(_ results: [Bool]) {
+        lock.withLock {
+            targetComparisonResults = results
+        }
+    }
+
+    func representsSameTarget(
+        _ lhs: AccessibilityTextTarget,
+        _ rhs: AccessibilityTextTarget
+    ) -> Bool {
+        lock.withLock {
+            let comparisonResult = targetComparisonResults.isEmpty
+                ? storedRepresentsSameTarget
+                : targetComparisonResults.removeFirst()
+            return comparisonResult
+                && lhs.processIdentifier == rhs.processIdentifier
+                && lhs.element === rhs.element
+        }
+    }
+
     func captureCurrentToken(
         trigger: Character
     ) throws -> RuntimeTextCapture {
-        let token: String? = lock.withLock {
+        let state: (String?, NSRange?, Int?) = lock.withLock {
             storedCaptureCount += 1
-            return currentToken
+            return (
+                currentToken,
+                currentSelection,
+                currentTokenLocation
+            )
         }
         guard
-            let token,
-            token.first == trigger,
-            token.count == 1 || token.last != trigger
+            let token = state.0,
+            token.first == trigger
+        else {
+            throw RuntimeTextCaptureError.invalidTokenContext
+        }
+        let isClosed = token.count > 1 && token.last == trigger
+        let query = String(
+            token.dropFirst().dropLast(isClosed ? 1 : 0)
+        )
+        guard
+            !isClosed || !query.isEmpty,
+            query.isEmpty || EmojiAliasSyntax.isValidToken(query)
         else {
             throw RuntimeTextCaptureError.invalidTokenContext
         }
         let length = token.utf16.count
-        let tokenLocation = selectionLocation - length
+        let tokenLocation = state.2 ?? selectionLocation - length
         guard tokenLocation >= 0 else {
             throw RuntimeTextCaptureError.invalidTokenContext
         }
+        let selection = state.1 ?? NSRange(
+            location: selectionLocation,
+            length: 0
+        )
         return RuntimeTextCapture(
             target: target,
             context: AccessibilityTextContext(
-                selection: NSRange(
-                    location: selectionLocation,
-                    length: 0
-                ),
+                selection: selection,
                 caretBounds: caretBounds,
                 textFragment: token,
                 textFragmentRange: NSRange(
@@ -2412,14 +2995,23 @@ private final class FixedRuntimeTextCaptureProvider:
         _ = trigger
         let captureState: (
             error: RuntimeTextCaptureError?,
-            renderedToken: String?
+            renderedToken: String?,
+            currentToken: String?,
+            selection: NSRange?,
+            tokenLocation: Int?
         ) = lock.withLock {
             storedCaptureCount += 1
             if transientFailuresRemaining > 0 {
                 transientFailuresRemaining -= 1
-                return (.invalidTokenContext, nil)
+                return (.invalidTokenContext, nil, nil, nil, nil)
             }
-            return (error, expectedCaptureToken)
+            return (
+                error,
+                expectedCaptureToken,
+                currentToken,
+                currentSelection,
+                currentTokenLocation
+            )
         }
         if delayMilliseconds > 0 {
             Thread.sleep(
@@ -2429,22 +3021,41 @@ private final class FixedRuntimeTextCaptureProvider:
         if let capturedError = captureState.error {
             throw capturedError
         }
-        let renderedToken = captureState.renderedToken ?? expectedToken
-        guard renderedToken == expectedToken else {
+        let renderedToken = captureState.renderedToken
+            ?? captureState.currentToken
+            ?? expectedToken
+        let length = renderedToken.utf16.count
+        let tokenLocation = captureState.tokenLocation
+            ?? selectionLocation - length
+        guard tokenLocation >= 0 else {
             throw RuntimeTextCaptureError.invalidTokenContext
         }
-        let length = renderedToken.utf16.count
-        let tokenLocation = selectionLocation - length
-        guard tokenLocation >= 0 else {
+        let selection = captureState.selection ?? NSRange(
+            location: selectionLocation,
+            length: 0
+        )
+        guard
+            selection.location >= tokenLocation,
+            selection.location <= Int.max - selection.length,
+            tokenLocation <= Int.max - length,
+            selection.location + selection.length
+                <= tokenLocation + length
+        else {
+            throw RuntimeTextCaptureError.invalidTokenContext
+        }
+        let capturesFullToken = renderedToken == expectedToken
+        let capturesInteriorPrefix =
+            selection.length == 0
+                && renderedToken.hasPrefix(expectedToken)
+                && tokenLocation + expectedToken.utf16.count
+                    == selection.location
+        guard capturesFullToken || capturesInteriorPrefix else {
             throw RuntimeTextCaptureError.invalidTokenContext
         }
         return RuntimeTextCapture(
             target: target,
             context: AccessibilityTextContext(
-                selection: NSRange(
-                    location: selectionLocation,
-                    length: 0
-                ),
+                selection: selection,
                 caretBounds: caretBounds,
                 textFragment: renderedToken,
                 textFragmentRange: NSRange(

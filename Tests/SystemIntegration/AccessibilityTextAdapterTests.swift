@@ -51,6 +51,47 @@ final class AccessibilityTextAdapterTests: XCTestCase {
         )
     }
 
+    func testShortcodeTokenRangeFindsWholeOpenTokenAroundCaretOrSelection() {
+        let text = "🐸 Say :party_parrot later"
+        let tokenRange = (text as NSString).range(of: ":party_parrot")
+        let cases = [
+            NSRange(location: tokenRange.location + 1, length: 0),
+            NSRange(location: tokenRange.location + 6, length: 0),
+            NSRange(location: tokenRange.location + 1, length: 5),
+            NSRange(location: tokenRange.location, length: 6),
+            tokenRange
+        ]
+
+        for selection in cases {
+            XCTAssertEqual(
+                AccessibilityTextAdapter.shortcodeTokenRange(
+                    in: text,
+                    selection: selection
+                ),
+                tokenRange,
+                "Expected the token around selection \(selection)"
+            )
+        }
+    }
+
+    func testShortcodeTokenRangeRejectsSelectionCrossingTokenBoundary() {
+        let text = "Say :frog later"
+
+        for selection in [
+            NSRange(location: 3, length: 3),
+            NSRange(location: 5, length: 6),
+            NSRange(location: 4, length: 7)
+        ] {
+            XCTAssertNil(
+                AccessibilityTextAdapter.shortcodeTokenRange(
+                    in: text,
+                    selection: selection
+                ),
+                "Expected selection \(selection) to leave the token"
+            )
+        }
+    }
+
     func testShortcodeTokenRangeSupportsConfiguredTrigger() {
         XCTAssertEqual(
             AccessibilityTextAdapter.shortcodeTokenRange(
@@ -62,18 +103,19 @@ final class AccessibilityTextAdapterTests: XCTestCase {
         )
     }
 
-    func testShortcodeTokenRangeRequiresWordBoundaries() {
+    func testShortcodeTokenRangeRequiresOpeningWordBoundary() {
         XCTAssertNil(
             AccessibilityTextAdapter.shortcodeTokenRange(
                 in: "hello:f",
                 selection: NSRange(location: 7, length: 0)
             )
         )
-        XCTAssertNil(
+        XCTAssertEqual(
             AccessibilityTextAdapter.shortcodeTokenRange(
                 in: "hello :fworld",
                 selection: NSRange(location: 8, length: 0)
-            )
+            ),
+            NSRange(location: 6, length: 7)
         )
 
         for text in [":f", "hello :f", "hello (:f"] {
@@ -101,7 +143,7 @@ final class AccessibilityTextAdapterTests: XCTestCase {
         )
     }
 
-    func testContextRejectsTokenWhenCaretIsInsideFollowingWord() throws {
+    func testContextFindsWholeTokenWhenCaretIsInsideQuery() throws {
         let system = FakeAccessibilityTextSystem()
         system.text = "hello :fworld"
         system.selection = NSRange(location: 8, length: 0)
@@ -109,11 +151,14 @@ final class AccessibilityTextAdapterTests: XCTestCase {
 
         let context = try adapter.context(for: adapter.focusedTarget())
 
-        XCTAssertNil(context.tokenRange)
-        XCTAssertEqual(context.textFragment, "hello :f")
+        XCTAssertEqual(
+            context.tokenRange,
+            NSRange(location: 6, length: 7)
+        )
+        XCTAssertEqual(context.textFragment, "hello :fworld")
         XCTAssertEqual(
             context.textFragmentRange,
-            NSRange(location: 0, length: 8)
+            NSRange(location: 0, length: 13)
         )
     }
 
@@ -238,6 +283,104 @@ final class AccessibilityTextAdapterTests: XCTestCase {
         XCTAssertEqual(context.tokenRange, NSRange(location: 4, length: 5))
         XCTAssertEqual(context.textFragment, "Say :frog")
         XCTAssertEqual(system.fullValueReadCount, 0)
+    }
+
+    func testContextReadsOnlyABoundedWindowAroundInteriorSelection() throws {
+        let system = FakeAccessibilityTextSystem()
+        let prefix = String(repeating: "a", count: 200) + " "
+        let suffix = " " + String(repeating: "z", count: 200)
+        system.text = prefix + ":party_parrot" + suffix
+        let tokenRange = (system.text as NSString).range(of: ":party_parrot")
+        system.selection = NSRange(
+            location: tokenRange.location + 3,
+            length: 4
+        )
+        let adapter = AccessibilityTextAdapter(system: system)
+
+        let context = try adapter.context(for: adapter.focusedTarget())
+
+        XCTAssertEqual(context.tokenRange, tokenRange)
+        XCTAssertEqual(context.selection, system.selection)
+        XCTAssertEqual(
+            context.textFragmentRange.location,
+            system.selection.location
+                - AccessibilityTextAdapter.maximumShortcodeContextLength
+        )
+        XCTAssertLessThanOrEqual(
+            context.textFragmentRange.length,
+            AccessibilityTextAdapter.maximumShortcodeContextLength * 2
+                + system.selection.length
+        )
+        XCTAssertEqual(system.rangedStringReads, [context.textFragmentRange])
+        XCTAssertEqual(system.fullValueReadCount, 0)
+    }
+
+    func testContextAlignsBoundedSuffixAroundSurrogatePair() throws {
+        let system = FakeAccessibilityTextSystem()
+        let trailingASCII = String(repeating: "z", count: 62)
+        system.text = ":frog " + trailingASCII + "🐸"
+        system.selection = NSRange(location: 3, length: 0)
+        let adapter = AccessibilityTextAdapter(system: system)
+
+        let context = try adapter.context(for: adapter.focusedTarget())
+
+        XCTAssertEqual(
+            context.tokenRange,
+            NSRange(location: 0, length: 5)
+        )
+        XCTAssertEqual(
+            context.textFragmentRange.location
+                + context.textFragmentRange.length,
+            68,
+            "The bounded range should stop before a split surrogate pair"
+        )
+        XCTAssertEqual(system.fullValueReadCount, 0)
+    }
+
+    func testContextAlignsBoundedPrefixAroundSurrogatePair() throws {
+        let system = FakeAccessibilityTextSystem()
+        system.text = "🐸" + String(repeating: "a", count: 63) + " :"
+        system.selection = NSRange(location: 67, length: 0)
+        let adapter = AccessibilityTextAdapter(system: system)
+
+        let context = try adapter.context(for: adapter.focusedTarget())
+
+        XCTAssertEqual(
+            context.tokenRange,
+            NSRange(location: 66, length: 1)
+        )
+        XCTAssertEqual(
+            context.textFragmentRange.location,
+            2,
+            "The bounded range should start after a split surrogate pair"
+        )
+        XCTAssertEqual(system.fullValueReadCount, 0)
+    }
+
+    func testContextFindsInteriorTokenWhenCharacterCountIsUnavailable()
+        throws
+    {
+        let system = FakeAccessibilityTextSystem()
+        system.text = "Say :party_parrot later"
+        let tokenRange = (system.text as NSString).range(of: ":party_parrot")
+        system.selection = NSRange(
+            location: tokenRange.location + 4,
+            length: 0
+        )
+        system.characterCountError = .axFailure(
+            operation: "read text character count",
+            code: .noValue
+        )
+        let adapter = AccessibilityTextAdapter(system: system)
+
+        let context = try adapter.context(for: adapter.focusedTarget())
+
+        XCTAssertEqual(context.tokenRange, tokenRange)
+        XCTAssertEqual(system.fullValueReadCount, 0)
+        XCTAssertLessThanOrEqual(
+            system.rangedStringReads.count,
+            AccessibilityTextAdapter.maximumShortcodeContextLength + 1
+        )
     }
 
     func testContextFallsBackToPreviousCharacterWhenCollapsedCaretHasNoGeometry()

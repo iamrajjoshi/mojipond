@@ -98,6 +98,13 @@ struct EventInterceptionOutcome: Equatable, Sendable {
     /// True only for an OS-owned interaction, such as the macOS screenshot
     /// flow, that must pass through without invalidating the active token.
     let preservesAutocompleteContext: Bool
+    /// True when the key must reach the target app before Accessibility can
+    /// safely rebuild the active shortcode around the resulting caret or
+    /// selection.
+    let requiresContextRecovery: Bool
+    /// True when Slack-style caret navigation should leave the cached picker
+    /// on screen while the target app changes its caret or selection.
+    let preservesSuggestionSurface: Bool
 
     static let passThrough = Self(
         decision: .passThrough,
@@ -105,7 +112,9 @@ struct EventInterceptionOutcome: Equatable, Sendable {
         predictionGeneration: nil,
         interactionRevision: nil,
         eventRevision: nil,
-        preservesAutocompleteContext: false
+        preservesAutocompleteContext: false,
+        requiresContextRecovery: false,
+        preservesSuggestionSurface: false
     )
     static let intercept = Self(
         decision: .intercept,
@@ -113,7 +122,9 @@ struct EventInterceptionOutcome: Equatable, Sendable {
         predictionGeneration: nil,
         interactionRevision: nil,
         eventRevision: nil,
-        preservesAutocompleteContext: false
+        preservesAutocompleteContext: false,
+        requiresContextRecovery: false,
+        preservesSuggestionSurface: false
     )
 
     static func intercepting(
@@ -121,7 +132,9 @@ struct EventInterceptionOutcome: Equatable, Sendable {
         predictionGeneration: UInt64? = nil,
         interactionRevision: UInt64? = nil,
         eventRevision: UInt64? = nil,
-        preservesAutocompleteContext: Bool = false
+        preservesAutocompleteContext: Bool = false,
+        requiresContextRecovery: Bool = false,
+        preservesSuggestionSurface: Bool = false
     ) -> Self {
         Self(
             decision: .intercept,
@@ -129,7 +142,9 @@ struct EventInterceptionOutcome: Equatable, Sendable {
             predictionGeneration: predictionGeneration,
             interactionRevision: interactionRevision,
             eventRevision: eventRevision,
-            preservesAutocompleteContext: preservesAutocompleteContext
+            preservesAutocompleteContext: preservesAutocompleteContext,
+            requiresContextRecovery: requiresContextRecovery,
+            preservesSuggestionSurface: preservesSuggestionSurface
         )
     }
 
@@ -137,7 +152,9 @@ struct EventInterceptionOutcome: Equatable, Sendable {
         predictionGeneration: UInt64?,
         interactionRevision: UInt64? = nil,
         eventRevision: UInt64? = nil,
-        preservesAutocompleteContext: Bool = false
+        preservesAutocompleteContext: Bool = false,
+        requiresContextRecovery: Bool = false,
+        preservesSuggestionSurface: Bool = false
     ) -> Self {
         Self(
             decision: .passThrough,
@@ -145,7 +162,9 @@ struct EventInterceptionOutcome: Equatable, Sendable {
             predictionGeneration: predictionGeneration,
             interactionRevision: interactionRevision,
             eventRevision: eventRevision,
-            preservesAutocompleteContext: preservesAutocompleteContext
+            preservesAutocompleteContext: preservesAutocompleteContext,
+            requiresContextRecovery: requiresContextRecovery,
+            preservesSuggestionSurface: preservesSuggestionSurface
         )
     }
 
