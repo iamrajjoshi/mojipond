@@ -221,6 +221,7 @@ final class MojiPondRuntimeController: ObservableObject {
                 }
             }
         )
+        worker.connectSuggestionPanelInteractions()
 
         self.permissionChecker = permissionChecker
         self.cachedPermissions = cachedPermissions

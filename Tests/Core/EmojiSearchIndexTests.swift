@@ -4,43 +4,43 @@ import XCTest
 final class EmojiSearchIndexTests: XCTestCase {
     func testRankingUsesFrozenTextMatchPrecedence() {
         let items = [
-            CoreTestFixtures.item(id: "fuzzy", shortcode: "wobble_alpha_velvet_echo"),
             CoreTestFixtures.item(id: "substring", shortcode: "microwave"),
-            CoreTestFixtures.item(id: "keyword", shortcode: "farewell", keywords: ["wave"]),
-            CoreTestFixtures.item(id: "name", shortcode: "salute", name: "Wave hello"),
-            CoreTestFixtures.item(id: "alias-prefix", shortcode: "greeting", aliases: ["wave_back"]),
-            CoreTestFixtures.item(id: "shortcode-prefix", shortcode: "wave_hello"),
+            CoreTestFixtures.item(id: "token-exact", shortcode: "hello-wave"),
             CoreTestFixtures.item(id: "exact-alias", shortcode: "hello", aliases: ["wave"]),
             CoreTestFixtures.item(id: "exact-shortcode", shortcode: "wave")
         ]
-        let results = EmojiSearchIndex(items: items).search("wave", limit: 20)
+        let index = EmojiSearchIndex(items: items)
 
         XCTAssertEqual(
-            results.map(\.item.id),
+            index.search("wave", limit: 20).map(\.item.id),
             [
                 "exact-shortcode",
                 "exact-alias",
-                "shortcode-prefix",
-                "alias-prefix",
-                "name",
-                "keyword",
-                "substring",
-                "fuzzy"
+                "token-exact",
+                "substring"
             ]
         )
         XCTAssertEqual(
-            results.map(\.matchKind),
+            index.search("wave", limit: 20).map(\.matchKind),
             [
                 .exactShortcode,
                 .exactAlias,
-                .shortcodePrefix,
-                .aliasPrefix,
-                .namePrefix,
-                .keyword,
-                .substring,
-                .fuzzy
+                .tokenExact,
+                .substring
             ]
         )
+    }
+
+    func testTokenPrefixPrecedesUnorderedAllTokenMatch() {
+        let index = EmojiSearchIndex(items: [
+            CoreTestFixtures.item(id: "unordered", shortcode: "hug-bufo"),
+            CoreTestFixtures.item(id: "prefix", shortcode: "bufo-hug")
+        ])
+
+        let results = index.search("bu h", limit: 20)
+
+        XCTAssertEqual(results.map(\.item.id), ["prefix", "unordered"])
+        XCTAssertEqual(results.map(\.matchKind), [.tokenPrefix, .allTokens])
     }
 
     func testRecencyPrecedesPackPriorityWithinSameTextMatch() {
@@ -69,7 +69,7 @@ final class EmojiSearchIndexTests: XCTestCase {
         XCTAssertEqual(results.map(\.item.id), ["recent", "high"])
     }
 
-    func testUsedSubstringCanOutrankUnusedPrefixButNotExactMatch() {
+    func testTextRelevanceAlwaysPrecedesPersonalization() {
         let exact = CoreTestFixtures.item(
             id: "exact",
             shortcode: "wave"
@@ -80,7 +80,7 @@ final class EmojiSearchIndexTests: XCTestCase {
         )
         let usedSubstring = CoreTestFixtures.item(
             id: "used-substring",
-            shortcode: "bufo-wave"
+            shortcode: "microwave"
         )
         let usage = EmojiUsageSnapshot(
             statisticsByItemID: [
@@ -97,8 +97,33 @@ final class EmojiSearchIndexTests: XCTestCase {
 
         XCTAssertEqual(
             results.map(\.item.id),
-            ["exact", "used-substring", "prefix"]
+            ["exact", "prefix", "used-substring"]
         )
+    }
+
+    func testTighterDistancePrecedesUsageWithinTheSameMatchTier() {
+        let shortPrefix = CoreTestFixtures.item(
+            id: "hat",
+            shortcode: "bufo-hat"
+        )
+        let loosePrefix = CoreTestFixtures.item(
+            id: "hyperventilating",
+            shortcode: "bufo-hyperventilating"
+        )
+        let usage = EmojiUsageSnapshot(
+            statisticsByItemID: [
+                "hyperventilating": EmojiUsageStatistics(
+                    useCount: 10_000,
+                    lastUsedAt: Date(timeIntervalSince1970: 100_000)
+                )
+            ]
+        )
+
+        let results = EmojiSearchIndex(items: [loosePrefix, shortPrefix])
+            .search("bufo-h", usage: usage, limit: 20)
+
+        XCTAssertEqual(results.map(\.item.id), ["hat", "hyperventilating"])
+        XCTAssertTrue(results.allSatisfy { $0.matchKind == .tokenPrefix })
     }
 
     func testRecencyThenUseCountBreakTiesWithinPack() {
@@ -174,8 +199,151 @@ final class EmojiSearchIndexTests: XCTestCase {
 
         XCTAssertNil(index.exactMatch(for: "liz"))
         XCTAssertNil(index.exactMatch(for: "lzzrd"))
+        XCTAssertNil(index.exactMatch(for: " lizard "))
+        XCTAssertNil(index.exactMatch(for: "ｌｉｚａｒｄ"))
         XCTAssertEqual(index.exactMatch(for: "lizard")?.item.id, "lizard")
         XCTAssertEqual(index.exactMatch(for: "REPTILE")?.matchKind, .exactAlias)
+    }
+
+    func testSeparatorOnlyQueryNeverFallsBackToBrowse() {
+        let index = EmojiSearchIndex(items: [
+            CoreTestFixtures.item(
+                id: "underscore",
+                shortcode: "underscore",
+                aliases: ["_"]
+            ),
+            CoreTestFixtures.item(id: "wave", shortcode: "wave")
+        ])
+
+        let aliasResult = index.search("_", limit: 20)
+
+        XCTAssertEqual(aliasResult.map(\.item.id), ["underscore"])
+        XCTAssertEqual(aliasResult.first?.matchKind, .exactAlias)
+        XCTAssertTrue(index.search("---", limit: 20).isEmpty)
+        XCTAssertEqual(index.exactMatch(for: "_")?.item.id, "underscore")
+    }
+
+    func testSeparatorsAreEquivalentForSearchButNotClosingTokenReplacement() {
+        let index = EmojiSearchIndex(items: [
+            CoreTestFixtures.item(id: "hug", shortcode: "bufo-hug")
+        ])
+
+        XCTAssertEqual(index.search("bufo_hug").first?.item.id, "hug")
+        XCTAssertEqual(
+            index.search("bufo hug").first?.matchKind,
+            .separatorEquivalent
+        )
+        XCTAssertNil(index.exactMatch(for: "bufo_hug"))
+        XCTAssertEqual(index.exactMatch(for: "bufo-hug")?.item.id, "hug")
+    }
+
+    func testStandaloneWordFindsMatchingTokenInsidePackShortcode() {
+        let index = EmojiSearchIndex(items: [
+            CoreTestFixtures.item(id: "hug", shortcode: "bufo-hug"),
+            CoreTestFixtures.item(id: "laugh", shortcode: "bufo-laughing-popcorn")
+        ])
+
+        XCTAssertEqual(index.search("hug").first?.item.id, "hug")
+        XCTAssertEqual(index.search("hug").first?.matchKind, .tokenExact)
+    }
+
+    func testSourceFilenameKeywordTailParticipatesInTokenSearch() {
+        let index = EmojiSearchIndex(items: [
+            CoreTestFixtures.item(
+                id: "hug",
+                shortcode: "truncated-import-name",
+                keywords: ["all-the-bufo/bufo_hug_waving_original.png"]
+            )
+        ])
+
+        XCTAssertEqual(index.search("original").first?.item.id, "hug")
+        XCTAssertEqual(index.search("original").first?.matchKind, .tokenExact)
+    }
+
+    func testTokenMatchForYesBeatsSubstringInEyes() {
+        let index = EmojiSearchIndex(items: [
+            CoreTestFixtures.item(id: "eyes", shortcode: "eyes"),
+            CoreTestFixtures.item(id: "yes", shortcode: "bufo-yes")
+        ])
+
+        let results = index.search("yes", limit: 20)
+
+        XCTAssertEqual(results.map(\.item.id), ["yes", "eyes"])
+        XCTAssertEqual(results.map(\.matchKind), [.tokenExact, .substring])
+    }
+
+    func testCanonicalShortcodeTokenBeatsExactKeywordToken() {
+        let index = EmojiSearchIndex(items: [
+            CoreTestFixtures.item(
+                id: "keyword",
+                shortcode: "bufo-embrace",
+                keywords: ["hug"]
+            ),
+            CoreTestFixtures.item(id: "shortcode", shortcode: "bufo-hug")
+        ])
+
+        let results = index.search("hug", limit: 20)
+
+        XCTAssertEqual(results.map(\.item.id), ["shortcode", "keyword"])
+        XCTAssertEqual(results.map(\.matchKind), [.tokenExact, .tokenExact])
+        XCTAssertEqual(results.first?.matchedTerm, "bufo-hug")
+    }
+
+    func testBufoPrefixStaysAheadOfRecentlyUsedTypoCandidate() {
+        let prefix = CoreTestFixtures.item(id: "hug", shortcode: "bufo-hugging")
+        let typo = CoreTestFixtures.item(id: "used", shortcode: "bufo-hgu")
+        let usage = EmojiUsageSnapshot(
+            statisticsByItemID: [
+                "used": EmojiUsageStatistics(
+                    useCount: 500,
+                    lastUsedAt: Date(timeIntervalSince1970: 10_000)
+                )
+            ]
+        )
+        let index = EmojiSearchIndex(items: [typo, prefix])
+
+        let results = index.search("bufo-hug", usage: usage, limit: 20)
+
+        XCTAssertEqual(results.first?.item.id, "hug")
+        XCTAssertEqual(results.first?.matchKind, .tokenPrefix)
+        XCTAssertEqual(results.last?.item.id, "used")
+        XCTAssertEqual(results.last?.matchKind, .fuzzy)
+    }
+
+    func testBoundedTypoMatchingHandlesTranspositionWithoutNoisySubsequence() {
+        let index = EmojiSearchIndex(items: [
+            CoreTestFixtures.item(id: "hug", shortcode: "bufo-hug"),
+            CoreTestFixtures.item(id: "noise", shortcode: "huge_green_unicycle")
+        ])
+
+        XCTAssertEqual(index.search("hgu").first?.item.id, "hug")
+        XCTAssertEqual(index.search("hgu").first?.matchKind, .fuzzy)
+        XCTAssertTrue(index.search("wve", limit: 20).isEmpty)
+    }
+
+    func testTypoCorrectionFillsSpareResultsAfterAValidPrefix() {
+        let index = EmojiSearchIndex(items: [
+            CoreTestFixtures.item(id: "intended", shortcode: "wave"),
+            CoreTestFixtures.item(id: "prefix", shortcode: "waveemoji")
+        ])
+
+        let results = index.search("wavee", limit: 20)
+
+        XCTAssertEqual(results.map(\.item.id), ["prefix", "intended"])
+        XCTAssertEqual(results.map(\.matchKind), [.tokenPrefix, .fuzzy])
+    }
+
+    func testShortQueriesOnlyReturnExactOrPrefixQualityMatches() {
+        let index = EmojiSearchIndex(items: [
+            CoreTestFixtures.item(id: "prefix", shortcode: "notice"),
+            CoreTestFixtures.item(id: "substring", shortcode: "snow"),
+            CoreTestFixtures.item(id: "typo", shortcode: "nu")
+        ])
+
+        let results = index.search("no", limit: 20)
+
+        XCTAssertEqual(results.map(\.item.id), ["prefix"])
+        XCTAssertEqual(results.map(\.matchKind), [.tokenPrefix])
     }
 
     func testCustomAliasesParticipateAsExactAliases() {

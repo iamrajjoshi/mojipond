@@ -34,6 +34,7 @@ final class LibraryThumbnailPipelineTests: XCTestCase {
             aliases: [],
             displayName: "Pond frog",
             tags: [],
+            sourceFilename: nil,
             category: "Pond",
             unicode: nil,
             assetURL: URL(fileURLWithPath: "/private/tmp/frog.png"),

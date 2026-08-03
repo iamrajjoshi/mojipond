@@ -101,6 +101,7 @@ final class LibrarySearchAdapterTests: XCTestCase {
         XCTAssertEqual(media.dimensions, MediaDimensions(width: 128, height: 96))
         XCTAssertEqual(media.mediaType, .gif)
         XCTAssertTrue(media.isAnimated)
+        XCTAssertEqual(catalog.items[0].keywords, ["dance"])
         XCTAssertEqual(
             catalog.source,
             .github(
@@ -110,6 +111,50 @@ final class LibrarySearchAdapterTests: XCTestCase {
                 subdirectory: "emojis"
             )
         )
+    }
+
+    func testAdapterIndexesCompleteImportedFilenameAsSearchOnlyMetadata() throws {
+        let filename =
+            "bufo-extremely-long-prefix-that-exceeds-the-shortcode-limit-tail-wave.gif"
+        let item = LibraryEmoji(
+            shortcode: try Shortcode(
+                validating: "bufo-extremely-long-prefix-that-exceeds-the-shortcode-limit-tail"
+            ),
+            aliases: [try Shortcode(validating: "friendly_bufo")],
+            displayName: "Long Bufo",
+            tags: ["frog"],
+            sourceFilename: "assets/\(filename)",
+            payload: .asset(
+                StoredAsset(
+                    relativePath: "packs/bufo/\(filename)",
+                    format: .gif,
+                    sha256: String(repeating: "c", count: 64),
+                    byteCount: 123,
+                    pixelWidth: 64,
+                    pixelHeight: 64,
+                    frameCount: 1
+                )
+            )
+        )
+        let pack = EmojiPack(
+            name: "Bufo",
+            source: PackSource(kind: .folder),
+            items: [item]
+        )
+
+        let catalog = try EmojiLibrarySearchAdapter.catalogPack(
+            from: pack,
+            priority: 0
+        )
+
+        XCTAssertEqual(
+            catalog.items[0].keywords,
+            [
+                "frog",
+                "bufo-extremely-long-prefix-that-exceeds-the-shortcode-limit-tail-wave"
+            ]
+        )
+        XCTAssertEqual(catalog.items[0].aliases, ["friendly_bufo"])
     }
 
     func testAdapterMarksAnimatedPNGForFirstFrameInsertion() throws {

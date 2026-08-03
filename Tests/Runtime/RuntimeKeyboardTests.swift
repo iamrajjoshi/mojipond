@@ -54,6 +54,60 @@ final class RuntimeKeyboardTests: XCTestCase {
         )
     }
 
+    func testMouseDownInsideSuggestionPanelPreservesTransaction() {
+        let gate = RuntimeInterceptionGate()
+        gate.setCaptureEnabled(true)
+        gate.setMode(
+            .suggestions,
+            acceptsTab: true,
+            acceptsReturn: true
+        )
+        gate.setSuggestionPanelQuartzFrame(
+            CGRect(x: 100, y: 200, width: 380, height: 240)
+        )
+        let click = KeyboardEventSnapshot(
+            typeRawValue: CGEventType.leftMouseDown.rawValue,
+            keyCode: 0,
+            flagsRawValue: 0,
+            timestamp: 1,
+            characters: nil,
+            globalLocation: CGPoint(x: 220, y: 280)
+        )
+
+        let outcome = gate.outcome(for: click)
+
+        XCTAssertEqual(outcome.decision, .passThrough)
+        XCTAssertTrue(outcome.preservesAutocompleteContext)
+        XCTAssertEqual(gate.mode, .suggestions)
+    }
+
+    func testMouseDownOutsideSuggestionPanelDismissesTransaction() {
+        let gate = RuntimeInterceptionGate()
+        gate.setCaptureEnabled(true)
+        gate.setMode(
+            .suggestions,
+            acceptsTab: true,
+            acceptsReturn: true
+        )
+        gate.setSuggestionPanelQuartzFrame(
+            CGRect(x: 100, y: 200, width: 380, height: 240)
+        )
+        let click = KeyboardEventSnapshot(
+            typeRawValue: CGEventType.leftMouseDown.rawValue,
+            keyCode: 0,
+            flagsRawValue: 0,
+            timestamp: 1,
+            characters: nil,
+            globalLocation: CGPoint(x: 20, y: 20)
+        )
+
+        let outcome = gate.outcome(for: click)
+
+        XCTAssertEqual(outcome.decision, .passThrough)
+        XCTAssertFalse(outcome.preservesAutocompleteContext)
+        XCTAssertEqual(gate.mode, .hidden)
+    }
+
     func testScreenshotShortcutPassesThroughWithoutChangingParserInput() {
         for keyCode in [
             RuntimeKeyboardKeyCode.digit3,

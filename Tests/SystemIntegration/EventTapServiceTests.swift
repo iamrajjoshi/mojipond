@@ -40,6 +40,7 @@ final class EventTapServiceTests: XCTestCase {
         )
 
         XCTAssertEqual(snapshot.characters, expected)
+        XCTAssertNil(snapshot.globalLocation)
     }
 
     func testSnapshotDoesNotReadKeyboardTextFromMouseEvent() throws {
@@ -47,7 +48,7 @@ final class EventTapServiceTests: XCTestCase {
             CGEvent(
                 mouseEventSource: nil,
                 mouseType: .leftMouseDown,
-                mouseCursorPosition: .zero,
+                mouseCursorPosition: CGPoint(x: 128, y: 256),
                 mouseButton: .left
             )
         )
@@ -58,6 +59,10 @@ final class EventTapServiceTests: XCTestCase {
         )
 
         XCTAssertNil(snapshot.characters)
+        XCTAssertEqual(
+            snapshot.globalLocation,
+            CGPoint(x: 128, y: 256)
+        )
     }
 
     func testSnapshotDoesNotReadKeyboardTextFromFlagsEvent() throws {

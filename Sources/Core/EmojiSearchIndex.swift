@@ -3,10 +3,10 @@ import Foundation
 enum EmojiSearchMatchKind: Int, Codable, Comparable, Sendable {
     case exactShortcode
     case exactAlias
-    case shortcodePrefix
-    case aliasPrefix
-    case namePrefix
-    case keyword
+    case separatorEquivalent
+    case tokenExact
+    case tokenPrefix
+    case allTokens
     case substring
     case fuzzy
     case browse
@@ -22,6 +22,21 @@ struct EmojiSearchResult: Equatable, Sendable {
     let matchedTerm: String
     /// A lower value is a tighter match within the same match kind.
     let matchDistance: Int
+    fileprivate let matchField: EmojiSearchMatchField
+}
+
+fileprivate enum EmojiSearchMatchField: Int, Comparable, Sendable {
+    case shortcode
+    case alias
+    case name
+    case keyword
+
+    static func < (
+        lhs: EmojiSearchMatchField,
+        rhs: EmojiSearchMatchField
+    ) -> Bool {
+        lhs.rawValue < rhs.rawValue
+    }
 }
 
 /// An immutable local index. Replacing the value rebuilds the index
@@ -90,19 +105,26 @@ struct EmojiSearchIndex: Sendable {
             return []
         }
 
-        let normalizedQuery = SearchNormalizer.normalize(query)
-        let results = entries.compactMap { entry -> EmojiSearchResult? in
-            if normalizedQuery.isEmpty {
-                return EmojiSearchResult(
+        let normalizedQuery = SearchQuery(query)
+        if normalizedQuery.isEmpty {
+            return entries.map { entry in
+                EmojiSearchResult(
                     item: entry.item,
                     matchKind: .browse,
                     matchedTerm: entry.item.shortcode.rawValue,
-                    matchDistance: 0
+                    matchDistance: 0,
+                    matchField: .shortcode
                 )
             }
+            .sorted { lhs, rhs in
+                Self.isOrderedBefore(lhs, rhs, usage: usage)
+            }
+            .prefix(limit)
+            .map { $0 }
+        }
 
+        let strongResults = entries.compactMap { entry -> EmojiSearchResult? in
             let customAliases = usage.customAliasesByItemID[entry.item.id, default: []]
-                .map(SearchNormalizer.normalize)
             guard let match = entry.bestMatch(
                 query: normalizedQuery,
                 customAliases: customAliases
@@ -113,8 +135,45 @@ struct EmojiSearchIndex: Sendable {
                 item: entry.item,
                 matchKind: match.kind,
                 matchedTerm: match.originalTerm,
-                matchDistance: match.distance
+                matchDistance: match.distance,
+                matchField: match.field
             )
+        }
+        var results = strongResults
+        let queryCharacterCount = normalizedQuery.tokens.reduce(0) {
+            $0 + $1.count
+        }
+        let hasHighConfidenceResult = strongResults.contains {
+            $0.matchKind <= .tokenExact
+        }
+        let hasOnlyWeakSubstringResults = !strongResults.isEmpty
+            && strongResults.allSatisfy { $0.matchKind == .substring }
+        let shouldIncludeTypoResults = strongResults.isEmpty || (
+            strongResults.count < limit
+                && !hasHighConfidenceResult
+                && (queryCharacterCount >= 4 || hasOnlyWeakSubstringResults)
+        )
+        if shouldIncludeTypoResults {
+            let strongItemIDs = Set(strongResults.map(\.item.id))
+            results.append(contentsOf: entries.compactMap { entry -> EmojiSearchResult? in
+                guard !strongItemIDs.contains(entry.item.id) else {
+                    return nil
+                }
+                let customAliases = usage.customAliasesByItemID[entry.item.id, default: []]
+                guard let match = entry.typoMatch(
+                    query: normalizedQuery,
+                    customAliases: customAliases
+                ) else {
+                    return nil
+                }
+                return EmojiSearchResult(
+                    item: entry.item,
+                    matchKind: match.kind,
+                    matchedTerm: match.originalTerm,
+                    matchDistance: match.distance,
+                    matchField: match.field
+                )
+            })
         }
 
         return results
@@ -132,13 +191,31 @@ struct EmojiSearchIndex: Sendable {
         for shortcode: String,
         usage: EmojiUsageSnapshot = EmojiUsageSnapshot()
     ) -> EmojiSearchResult? {
-        let query = SearchNormalizer.normalize(shortcode)
-        guard !query.isEmpty else {
+        guard EmojiAliasSyntax.isValidToken(shortcode) else {
             return nil
         }
+        let literal = EmojiAliasSyntax.normalizedToken(shortcode)
 
-        return search(query, usage: usage, limit: entries.count)
-            .first { $0.matchKind == .exactShortcode || $0.matchKind == .exactAlias }
+        return entries.compactMap { entry -> EmojiSearchResult? in
+            let customAliases = usage.customAliasesByItemID[entry.item.id, default: []]
+            guard let match = entry.exactMatch(
+                literal: literal,
+                customAliases: customAliases
+            ) else {
+                return nil
+            }
+            return EmojiSearchResult(
+                item: entry.item,
+                matchKind: match.kind,
+                matchedTerm: match.originalTerm,
+                matchDistance: match.distance,
+                matchField: match.field
+            )
+        }
+        .sorted { lhs, rhs in
+            Self.isOrderedBefore(lhs, rhs, usage: usage)
+        }
+        .first
     }
 
     private static func isOrderedBefore(
@@ -146,15 +223,17 @@ struct EmojiSearchIndex: Sendable {
         _ rhs: EmojiSearchResult,
         usage: EmojiUsageSnapshot
     ) -> Bool {
-        let lhsIsExact = lhs.matchKind == .exactShortcode
-            || lhs.matchKind == .exactAlias
-        let rhsIsExact = rhs.matchKind == .exactShortcode
-            || rhs.matchKind == .exactAlias
-        if
-            (lhsIsExact || rhsIsExact),
-            lhs.matchKind != rhs.matchKind
-        {
+        // Textual relevance is a hard boundary. Personalization may reorder
+        // equally relevant candidates, but can never promote a loose or typo
+        // match above an exact, token, or prefix match.
+        if lhs.matchKind != rhs.matchKind {
             return lhs.matchKind < rhs.matchKind
+        }
+        if lhs.matchField != rhs.matchField {
+            return lhs.matchField < rhs.matchField
+        }
+        if lhs.matchDistance != rhs.matchDistance {
+            return lhs.matchDistance < rhs.matchDistance
         }
 
         let lhsFavorite = usage.isFavorite(lhs.item.id)
@@ -171,12 +250,6 @@ struct EmojiSearchIndex: Sendable {
         }
         if lhsStatistics.useCount != rhsStatistics.useCount {
             return lhsStatistics.useCount > rhsStatistics.useCount
-        }
-        if lhs.matchKind != rhs.matchKind {
-            return lhs.matchKind < rhs.matchKind
-        }
-        if lhs.matchDistance != rhs.matchDistance {
-            return lhs.matchDistance < rhs.matchDistance
         }
         if lhs.item.packPriority != rhs.item.packPriority {
             return lhs.item.packPriority > rhs.item.packPriority
@@ -212,102 +285,166 @@ private struct IndexedEntry: Sendable {
         keywords = item.keywords.map(IndexedTerm.init)
     }
 
-    func bestMatch(query: String, customAliases: [String]) -> SearchMatch? {
+    func exactMatch(literal: String, customAliases: [String]) -> SearchMatch? {
         let allAliases = aliases + customAliases.map(IndexedTerm.init)
-        var candidates: [SearchMatch] = []
 
-        if shortcode.normalized == query {
-            candidates.append(.init(kind: .exactShortcode, term: shortcode, distance: 0))
-        }
-        candidates.append(contentsOf: allAliases.compactMap { term -> SearchMatch? in
-            guard term.normalized == query else {
-                return nil
-            }
-            return SearchMatch(kind: .exactAlias, term: term, distance: 0)
-        })
-
-        if shortcode.normalized.hasPrefix(query), shortcode.normalized != query {
-            candidates.append(
-                .init(
-                    kind: .shortcodePrefix,
-                    term: shortcode,
-                    distance: shortcode.normalized.count - query.count
-                )
+        if shortcode.normalized == literal {
+            return .init(
+                kind: .exactShortcode,
+                field: .shortcode,
+                term: shortcode,
+                distance: 0
             )
         }
-        candidates.append(contentsOf: allAliases.compactMap { term in
-            guard term.normalized.hasPrefix(query), term.normalized != query else {
+        if let alias = allAliases.first(where: { $0.normalized == literal }) {
+            return .init(
+                kind: .exactAlias,
+                field: .alias,
+                term: alias,
+                distance: 0
+            )
+        }
+        return nil
+    }
+
+    func bestMatch(query: SearchQuery, customAliases: [String]) -> SearchMatch? {
+        let allAliases = aliases + customAliases.map(IndexedTerm.init)
+        if let exact = exactMatch(
+            literal: query.literal,
+            customAliases: customAliases
+        ) {
+            return exact
+        }
+
+        let identifierTerms = [
+            SearchableTerm(term: shortcode, field: .shortcode)
+        ] + allAliases.map {
+            SearchableTerm(term: $0, field: .alias)
+        }
+        if let separatorMatch = identifierTerms.compactMap({ searchableTerm -> SearchMatch? in
+            let term = searchableTerm.term
+            guard term.normalized != query.literal,
+                  !query.key.isEmpty,
+                  term.key == query.key else {
                 return nil
             }
             return .init(
-                kind: .aliasPrefix,
+                kind: .separatorEquivalent,
+                field: searchableTerm.field,
                 term: term,
-                distance: term.normalized.count - query.count
+                distance: 0
             )
-        })
-        if name.normalized.hasPrefix(query) {
-            candidates.append(
-                .init(
-                    kind: .namePrefix,
-                    term: name,
-                    distance: name.normalized.count - query.count
-                )
-            )
+        }).min() {
+            return separatorMatch
         }
-        candidates.append(contentsOf: keywords.compactMap { term in
-            guard term.normalized == query || term.normalized.hasPrefix(query) else {
-                return nil
-            }
-            return .init(
-                kind: .keyword,
-                term: term,
-                distance: term.normalized.count - query.count
-            )
-        })
 
-        let searchableTerms = [shortcode] + allAliases + [name] + keywords
-        candidates.append(contentsOf: searchableTerms.compactMap { term in
-            guard term.normalized != query,
-                  !term.normalized.hasPrefix(query),
-                  let range = term.normalized.range(of: query) else {
+        let searchableTerms = searchableTerms(with: allAliases)
+        if let tokenMatch = searchableTerms.compactMap({ searchableTerm -> SearchMatch? in
+            let term = searchableTerm.term
+            guard let tokenMatch = TokenMatcher.match(query: query, candidate: term) else {
                 return nil
             }
-            let leadingDistance = term.normalized.distance(
-                from: term.normalized.startIndex,
-                to: range.lowerBound
-            )
             return .init(
-                kind: .substring,
+                kind: tokenMatch.kind,
+                field: searchableTerm.field,
                 term: term,
-                distance: leadingDistance + term.normalized.count - query.count
+                distance: tokenMatch.distance
             )
-        })
-        candidates.append(contentsOf: searchableTerms.compactMap { term in
-            guard let distance = FuzzyMatcher.distance(
+        }).min() {
+            return tokenMatch
+        }
+        if let substringMatch = searchableTerms.compactMap({ searchableTerm -> SearchMatch? in
+            let term = searchableTerm.term
+            guard let distance = SubstringMatcher.distance(
                 query: query,
-                candidate: term.normalized
+                candidate: term
             ) else {
                 return nil
             }
-            return .init(kind: .fuzzy, term: term, distance: distance)
-        })
-
-        return candidates.min()
+            return .init(
+                kind: .substring,
+                field: searchableTerm.field,
+                term: term,
+                distance: distance
+            )
+        }).min() {
+            return substringMatch
+        }
+        return nil
     }
+
+    func typoMatch(query: SearchQuery, customAliases: [String]) -> SearchMatch? {
+        let allAliases = aliases + customAliases.map(IndexedTerm.init)
+        return searchableTerms(with: allAliases).compactMap { searchableTerm in
+            let term = searchableTerm.term
+            guard let distance = TypoMatcher.distance(query: query, candidate: term) else {
+                return nil
+            }
+            return .init(
+                kind: .fuzzy,
+                field: searchableTerm.field,
+                term: term,
+                distance: distance
+            )
+        }
+        .min()
+    }
+
+    private func searchableTerms(
+        with allAliases: [IndexedTerm]
+    ) -> [SearchableTerm] {
+        var seenTerms = Set<String>()
+        return (
+            [SearchableTerm(term: shortcode, field: .shortcode)]
+                + allAliases.map {
+                    SearchableTerm(term: $0, field: .alias)
+                }
+                + [SearchableTerm(term: name, field: .name)]
+                + keywords.map {
+                    SearchableTerm(term: $0, field: .keyword)
+                }
+        ).filter { seenTerms.insert($0.term.normalized).inserted }
+    }
+}
+
+private struct SearchableTerm: Sendable {
+    let term: IndexedTerm
+    let field: EmojiSearchMatchField
 }
 
 private struct IndexedTerm: Equatable, Sendable {
     let original: String
     let normalized: String
+    let key: String
+    let tokens: [String]
 
     init(original: String) {
         self.original = original
-        normalized = SearchNormalizer.normalize(original)
+        normalized = SearchNormalizer.normalizeLiteral(original)
+        tokens = SearchNormalizer.tokens(fromNormalized: normalized)
+        key = tokens.joined(separator: " ")
+    }
+}
+
+private struct SearchQuery: Sendable {
+    let literal: String
+    let key: String
+    let tokens: [String]
+
+    init(_ value: String) {
+        literal = SearchNormalizer.normalizeLiteral(value)
+        tokens = SearchNormalizer.tokens(fromNormalized: literal)
+        key = tokens.joined(separator: " ")
+    }
+
+    var isEmpty: Bool {
+        literal.isEmpty
     }
 }
 
 private struct SearchMatch: Comparable, Sendable {
     let kind: EmojiSearchMatchKind
+    let field: EmojiSearchMatchField
     let term: IndexedTerm
     let distance: Int
 
@@ -319,6 +456,9 @@ private struct SearchMatch: Comparable, Sendable {
         if lhs.kind != rhs.kind {
             return lhs.kind < rhs.kind
         }
+        if lhs.field != rhs.field {
+            return lhs.field < rhs.field
+        }
         if lhs.distance != rhs.distance {
             return lhs.distance < rhs.distance
         }
@@ -327,7 +467,7 @@ private struct SearchMatch: Comparable, Sendable {
 }
 
 private enum SearchNormalizer {
-    static func normalize(_ value: String) -> String {
+    static func normalizeLiteral(_ value: String) -> String {
         value
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .folding(
@@ -336,37 +476,244 @@ private enum SearchNormalizer {
             )
             .lowercased(with: Locale(identifier: "en_US_POSIX"))
     }
+
+    static func tokens(fromNormalized value: String) -> [String] {
+        value.split { character in
+            !character.isLetter && !character.isNumber && character != "+"
+        }
+        .map(String.init)
+    }
 }
 
-private enum FuzzyMatcher {
-    static func distance(query: String, candidate: String) -> Int? {
-        let queryScalars = Array(query.unicodeScalars)
-        let candidateScalars = Array(candidate.unicodeScalars)
-        guard !queryScalars.isEmpty, queryScalars.count <= candidateScalars.count else {
+private enum TokenMatcher {
+    struct Match {
+        let kind: EmojiSearchMatchKind
+        let distance: Int
+    }
+
+    static func match(query: SearchQuery, candidate: IndexedTerm) -> Match? {
+        guard !query.tokens.isEmpty,
+              query.tokens.count <= candidate.tokens.count else {
             return nil
         }
 
-        var queryIndex = 0
-        var firstMatch: Int?
-        var lastMatch: Int?
-        var internalGaps = 0
-
-        for (candidateIndex, scalar) in candidateScalars.enumerated()
-        where queryIndex < queryScalars.count && scalar == queryScalars[queryIndex] {
-            if firstMatch == nil {
-                firstMatch = candidateIndex
-            }
-            if let lastMatch {
-                internalGaps += candidateIndex - lastMatch - 1
-            }
-            lastMatch = candidateIndex
-            queryIndex += 1
+        if let start = contiguousMatchStart(
+            queryTokens: query.tokens,
+            candidateTokens: candidate.tokens,
+            requiresExactTokens: true
+        ) {
+            return Match(
+                kind: .tokenExact,
+                distance: sequenceDistance(
+                    start: start,
+                    queryTokens: query.tokens,
+                    candidateTokens: candidate.tokens
+                )
+            )
         }
 
-        guard queryIndex == queryScalars.count, let firstMatch, let lastMatch else {
+        if let start = contiguousMatchStart(
+            queryTokens: query.tokens,
+            candidateTokens: candidate.tokens,
+            requiresExactTokens: false
+        ) {
+            let expansion = zip(
+                query.tokens,
+                candidate.tokens[start ..< start + query.tokens.count]
+            ).reduce(into: 0) { total, pair in
+                total += pair.1.count - pair.0.count
+            }
+            return Match(
+                kind: .tokenPrefix,
+                distance: sequenceDistance(
+                    start: start,
+                    queryTokens: query.tokens,
+                    candidateTokens: candidate.tokens
+                ) + expansion
+            )
+        }
+
+        if let distance = unorderedTokenDistance(
+            queryTokens: query.tokens,
+            candidateTokens: candidate.tokens
+        ) {
+            return Match(kind: .allTokens, distance: distance)
+        }
+        return nil
+    }
+
+    private static func contiguousMatchStart(
+        queryTokens: [String],
+        candidateTokens: [String],
+        requiresExactTokens: Bool
+    ) -> Int? {
+        let finalStart = candidateTokens.count - queryTokens.count
+        for start in 0 ... finalStart {
+            let isMatch = queryTokens.indices.allSatisfy { index in
+                let queryToken = queryTokens[index]
+                let candidateToken = candidateTokens[start + index]
+                if requiresExactTokens {
+                    return candidateToken == queryToken
+                }
+                return candidateToken.hasPrefix(queryToken)
+            }
+            if isMatch {
+                return start
+            }
+        }
+        return nil
+    }
+
+    private static func sequenceDistance(
+        start: Int,
+        queryTokens: [String],
+        candidateTokens: [String]
+    ) -> Int {
+        start * 16 + candidateTokens.count - queryTokens.count
+    }
+
+    private static func unorderedTokenDistance(
+        queryTokens: [String],
+        candidateTokens: [String]
+    ) -> Int? {
+        var unusedIndices = Set(candidateTokens.indices)
+        var distance = 0
+
+        // Match the most specific query tokens first so a short prefix cannot
+        // consume the only token that satisfies a longer one.
+        for queryToken in queryTokens.sorted(by: { $0.count > $1.count }) {
+            let match = unusedIndices
+                .compactMap { index -> (index: Int, expansion: Int)? in
+                    let candidateToken = candidateTokens[index]
+                    guard candidateToken.hasPrefix(queryToken) else {
+                        return nil
+                    }
+                    return (index, candidateToken.count - queryToken.count)
+                }
+                .min { lhs, rhs in
+                    if lhs.expansion != rhs.expansion {
+                        return lhs.expansion < rhs.expansion
+                    }
+                    return lhs.index < rhs.index
+                }
+            guard let match else {
+                return nil
+            }
+            unusedIndices.remove(match.index)
+            distance += match.expansion + match.index * 2
+        }
+        return distance + candidateTokens.count - queryTokens.count
+    }
+}
+
+private enum SubstringMatcher {
+    static func distance(query: SearchQuery, candidate: IndexedTerm) -> Int? {
+        guard query.tokens.reduce(0, { $0 + $1.count }) >= 3,
+              query.key != candidate.key,
+              let range = candidate.key.range(of: query.key) else {
             return nil
         }
-        let trailing = candidateScalars.count - lastMatch - 1
-        return firstMatch + internalGaps * 2 + trailing
+        let leadingDistance = candidate.key.distance(
+            from: candidate.key.startIndex,
+            to: range.lowerBound
+        )
+        return leadingDistance + candidate.key.count - query.key.count
+    }
+}
+
+private enum TypoMatcher {
+    static func distance(query: SearchQuery, candidate: IndexedTerm) -> Int? {
+        guard !query.tokens.isEmpty,
+              query.tokens.count <= candidate.tokens.count else {
+            return nil
+        }
+
+        let finalStart = candidate.tokens.count - query.tokens.count
+        return (0 ... finalStart).compactMap { start -> Int? in
+            var totalEdits = 0
+            for queryIndex in query.tokens.indices {
+                let queryToken = query.tokens[queryIndex]
+                let candidateToken = candidate.tokens[start + queryIndex]
+                let maximumDistance = maximumDistance(for: queryToken)
+
+                if maximumDistance == 0 {
+                    guard queryToken == candidateToken else {
+                        return nil
+                    }
+                    continue
+                }
+                guard let edits = BoundedDamerauLevenshtein.distance(
+                    from: queryToken,
+                    to: candidateToken,
+                    maximum: maximumDistance
+                ) else {
+                    return nil
+                }
+                totalEdits += edits
+                guard totalEdits <= 2 else {
+                    return nil
+                }
+            }
+
+            guard totalEdits > 0 else {
+                return nil
+            }
+            return totalEdits * 100 + start * 4
+        }
+        .min()
+    }
+
+    private static func maximumDistance(for token: String) -> Int {
+        switch token.count {
+        case 0 ... 2: 0
+        case 3 ... 5: 1
+        default: 2
+        }
+    }
+}
+
+private enum BoundedDamerauLevenshtein {
+    static func distance(from source: String, to target: String, maximum: Int) -> Int? {
+        let sourceCharacters = Array(source)
+        let targetCharacters = Array(target)
+        guard !sourceCharacters.isEmpty,
+              !targetCharacters.isEmpty,
+              abs(sourceCharacters.count - targetCharacters.count) <= maximum else {
+            return nil
+        }
+
+        var previousPrevious = Array(0 ... targetCharacters.count)
+        var previous = previousPrevious
+
+        for sourceIndex in 1 ... sourceCharacters.count {
+            var current = Array(repeating: 0, count: targetCharacters.count + 1)
+            current[0] = sourceIndex
+
+            for targetIndex in 1 ... targetCharacters.count {
+                let substitutionCost = sourceCharacters[sourceIndex - 1]
+                    == targetCharacters[targetIndex - 1] ? 0 : 1
+                current[targetIndex] = min(
+                    previous[targetIndex] + 1,
+                    current[targetIndex - 1] + 1,
+                    previous[targetIndex - 1] + substitutionCost
+                )
+
+                if sourceIndex > 1,
+                   targetIndex > 1,
+                   sourceCharacters[sourceIndex - 1] == targetCharacters[targetIndex - 2],
+                   sourceCharacters[sourceIndex - 2] == targetCharacters[targetIndex - 1] {
+                    current[targetIndex] = min(
+                        current[targetIndex],
+                        previousPrevious[targetIndex - 2] + 1
+                    )
+                }
+            }
+
+            previousPrevious = previous
+            previous = current
+        }
+
+        let result = previous[targetCharacters.count]
+        return result <= maximum ? result : nil
     }
 }

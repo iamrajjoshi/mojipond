@@ -34,6 +34,7 @@ struct KeyboardEventSnapshot: Equatable, Sendable {
     let flagsRawValue: UInt64
     let timestamp: UInt64
     let characters: String?
+    let globalLocation: CGPoint?
     let interceptionOutcome: EventInterceptionOutcome?
 
     init(
@@ -42,6 +43,7 @@ struct KeyboardEventSnapshot: Equatable, Sendable {
         flagsRawValue: UInt64,
         timestamp: UInt64,
         characters: String?,
+        globalLocation: CGPoint? = nil,
         interceptionOutcome: EventInterceptionOutcome? = nil
     ) {
         self.typeRawValue = typeRawValue
@@ -49,6 +51,7 @@ struct KeyboardEventSnapshot: Equatable, Sendable {
         self.flagsRawValue = flagsRawValue
         self.timestamp = timestamp
         self.characters = characters
+        self.globalLocation = globalLocation
         self.interceptionOutcome = interceptionOutcome
     }
 
@@ -69,6 +72,7 @@ struct KeyboardEventSnapshot: Equatable, Sendable {
             flagsRawValue: flagsRawValue,
             timestamp: timestamp,
             characters: characters,
+            globalLocation: globalLocation,
             interceptionOutcome: outcome
         )
     }
@@ -508,8 +512,18 @@ final class SessionEventTapService: @unchecked Sendable {
             ),
             flagsRawValue: event.flags.rawValue,
             timestamp: event.timestamp,
-            characters: keyboardCharacters(type: type, from: event)
+            characters: keyboardCharacters(type: type, from: event),
+            globalLocation: Self.isMouseDown(type) ? event.location : nil
         )
+    }
+
+    private static func isMouseDown(_ type: CGEventType) -> Bool {
+        switch type {
+        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+            true
+        default:
+            false
+        }
     }
 
     private static func keyboardCharacters(

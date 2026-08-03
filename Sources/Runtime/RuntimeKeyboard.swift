@@ -207,6 +207,7 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
         var canReplayCommitSend = true
         var systemScreenshotFlowActive = false
         var revalidatesTextEdits = false
+        var suggestionPanelQuartzFrame: CGRect?
     }
 
     private let lock = NSLock()
@@ -220,6 +221,7 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
                 state.exactCommitPrediction = nil
                 state.systemScreenshotFlowActive = false
                 state.revalidatesTextEdits = false
+                state.suggestionPanelQuartzFrame = nil
                 clearCommitIntent(state: &state)
                 state.interactionRevision &+= 1
             }
@@ -264,6 +266,28 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
             if mode == .hidden || mode == .browser {
                 state.revalidatesTextEdits = false
             }
+            if mode == .hidden {
+                state.suggestionPanelQuartzFrame = nil
+            }
+        }
+    }
+
+    func setSuggestionPanelQuartzFrame(_ frame: CGRect?) {
+        lock.withLock {
+            guard
+                state.mode == .suggestions || state.mode == .browser,
+                let frame,
+                frame.width > 0,
+                frame.height > 0,
+                frame.origin.x.isFinite,
+                frame.origin.y.isFinite,
+                frame.width.isFinite,
+                frame.height.isFinite
+            else {
+                state.suggestionPanelQuartzFrame = nil
+                return
+            }
+            state.suggestionPanelQuartzFrame = frame.standardized
         }
     }
 
@@ -467,6 +491,7 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
             state.preactivationCommitSendRevision = nil
             state.queuedAcceptanceRevision = nil
             state.mode = .committing
+            state.suggestionPanelQuartzFrame = nil
             state.acceptsTab = acceptsTab
             state.acceptsReturn = acceptsReturn
             state.exactCommitPrediction = nil
@@ -568,11 +593,19 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
             let previousMode = state.mode
             let wasCommitting = previousMode == .committing
             var passesUnreplayableReturn = false
-            let preservesAutocompleteContext =
+            let preservesSystemInteraction =
                 updateSystemScreenshotFlow(
                     for: snapshot,
                     state: &state
                 )
+            let preservesPanelInteraction =
+                !preservesSystemInteraction
+                    && Self.isSuggestionPanelInteraction(
+                        snapshot,
+                        state: state
+                    )
+            let preservesAutocompleteContext =
+                preservesSystemInteraction || preservesPanelInteraction
             let generation: UInt64?
             let preservesSuggestionSurface =
                 !preservesAutocompleteContext
@@ -821,6 +854,26 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
             return true
         case .flagsChanged:
             return true
+        default:
+            return false
+        }
+    }
+
+    private static func isSuggestionPanelInteraction(
+        _ snapshot: KeyboardEventSnapshot,
+        state: State
+    ) -> Bool {
+        guard
+            state.captureEnabled,
+            state.mode == .suggestions || state.mode == .browser,
+            let frame = state.suggestionPanelQuartzFrame,
+            let location = snapshot.globalLocation
+        else {
+            return false
+        }
+        switch snapshot.type {
+        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+            return frame.contains(location)
         default:
             return false
         }

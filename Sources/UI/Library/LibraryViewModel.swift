@@ -194,12 +194,18 @@ final class LibraryViewModel: ObservableObject {
             return contentFiltered
         }
         return contentFiltered.filter { item in
-            let values = [
+            var values = [
                 item.shortcode,
                 item.displayName,
                 item.category,
                 item.packName
-            ] + item.aliases + customAliases(for: item) + item.tags
+            ]
+            values.append(contentsOf: item.aliases)
+            values.append(contentsOf: customAliases(for: item))
+            values.append(contentsOf: item.tags)
+            if let sourceFilename = item.sourceFilename {
+                values.append((sourceFilename as NSString).lastPathComponent)
+            }
             return values.contains {
                 Self.normalizedSearch($0).contains(query)
             }
@@ -1059,6 +1065,7 @@ final class LibraryViewModel: ObservableObject {
                 aliases: item.aliases,
                 displayName: item.name,
                 tags: item.keywords,
+                sourceFilename: nil,
                 category: item.category,
                 unicode: unicode,
                 assetURL: nil,
@@ -1085,6 +1092,7 @@ final class LibraryViewModel: ObservableObject {
                     aliases: item.aliases.map(\.rawValue),
                     displayName: item.displayName ?? item.shortcode.rawValue,
                     tags: item.tags,
+                    sourceFilename: item.sourceFilename,
                     category: item.category ?? "Custom",
                     unicode: item.payload.unicode,
                     assetURL: assetURL,
