@@ -204,6 +204,25 @@ final class RuntimeSafetyAndCatalogTests: XCTestCase {
                 expectedToken: ":frog:"
             )
         )
+
+        let noncollapsedCapture = RuntimeTextCapture(
+            target: capture.target,
+            context: AccessibilityTextContext(
+                selection: NSRange(location: 8, length: 1),
+                caretBounds: .zero,
+                textFragment: "x :frog:!",
+                textFragmentRange: NSRange(location: 0, length: 9),
+                tokenRange: NSRange(location: 2, length: 6)
+            )
+        )
+        XCTAssertNil(
+            RuntimeReplacementRequestFactory.make(
+                sessionTarget: originalTarget,
+                capture: noncollapsedCapture,
+                expectedToken: ":frog:"
+            ),
+            "Replacement requires a collapsed caret at the token end"
+        )
     }
 
     func testRuntimeCaptureCanSafelyAnchorAnEmptyCaretReplacement() throws {
@@ -283,7 +302,7 @@ final class RuntimeSafetyAndCatalogTests: XCTestCase {
         XCTAssertEqual(capture.token, ":")
     }
 
-    func testRuntimeDiscoveryRejectsSelectionsMiddlePositionsAndClosedTokens()
+    func testRuntimeDiscoveryCapturesOpenTokenAroundCaretOrSelection()
         throws
     {
         let cases: [(text: String, selection: NSRange)] = [
@@ -294,10 +313,104 @@ final class RuntimeSafetyAndCatalogTests: XCTestCase {
             (
                 text: ":frog",
                 selection: NSRange(location: 3, length: 0)
+            )
+        ]
+
+        for testCase in cases {
+            let system = FakeAccessibilityTextSystem()
+            system.text = testCase.text
+            system.selection = testCase.selection
+            let provider = makeRuntimeTextContextProvider(system: system)
+
+            let capture = try provider.captureCurrentToken(trigger: ":")
+
+            XCTAssertEqual(capture.token, ":frog")
+            XCTAssertEqual(
+                capture.context.tokenRange,
+                NSRange(location: 0, length: 5)
+            )
+            XCTAssertEqual(capture.context.selection, testCase.selection)
+            XCTAssertNil(
+                RuntimeReplacementRequestFactory.make(
+                    sessionTarget: capture.target,
+                    capture: capture,
+                    expectedToken: ":frog"
+                ),
+                "Interior discovery must not weaken replacement validation"
+            )
+        }
+    }
+
+    func testExpectedTokenCaptureAllowsInteriorCaretOrContainedSelection()
+        throws
+    {
+        let selections = [
+            NSRange(location: 3, length: 0),
+            NSRange(location: 1, length: 3),
+            NSRange(location: 0, length: 5)
+        ]
+
+        for selection in selections {
+            let system = FakeAccessibilityTextSystem()
+            system.text = ":frog"
+            system.selection = selection
+            let provider = makeRuntimeTextContextProvider(system: system)
+
+            let capture = try provider.capture(
+                expectedToken: ":frog",
+                trigger: ":"
+            )
+
+            XCTAssertEqual(capture.token, ":frog")
+            XCTAssertEqual(capture.context.selection, selection)
+            XCTAssertNil(
+                RuntimeReplacementRequestFactory.make(
+                    sessionTarget: capture.target,
+                    capture: capture,
+                    expectedToken: ":frog"
+                )
+            )
+        }
+    }
+
+    func testExpectedTokenCaptureUsesPrefixEndingAtInteriorCaret() throws {
+        let system = FakeAccessibilityTextSystem()
+        system.text = ":wrog"
+        system.selection = NSRange(location: 2, length: 0)
+        let provider = makeRuntimeTextContextProvider(system: system)
+
+        let capture = try provider.capture(
+            expectedToken: ":w",
+            trigger: ":"
+        )
+
+        XCTAssertEqual(capture.token, ":wrog")
+        XCTAssertEqual(capture.tokenPrefixThroughSelection, ":w")
+        XCTAssertEqual(
+            capture.context.tokenRange,
+            NSRange(location: 0, length: 5)
+        )
+        XCTAssertNil(
+            RuntimeReplacementRequestFactory.make(
+                sessionTarget: capture.target,
+                capture: capture,
+                expectedToken: ":w"
+            ),
+            "Interior prefix search must not authorize replacement"
+        )
+    }
+
+    func testRuntimeDiscoveryRejectsBoundaryCrossingSelections()
+        throws
+    {
+        let cases: [(text: String, selection: NSRange)] = [
+            (
+                text: "say :frog later",
+                selection: NSRange(location: 3, length: 4)
             ),
             (
-                text: ":frog:",
-                selection: NSRange(location: 6, length: 0)
+                text: "say :frog later",
+                selection: NSRange(location: 5, length: 6)
             )
         ]
 
@@ -317,6 +430,24 @@ final class RuntimeSafetyAndCatalogTests: XCTestCase {
                 )
             }
         }
+    }
+
+    func testRuntimeDiscoveryCanValidateClosedTokenAtItsEnd() throws {
+        let system = FakeAccessibilityTextSystem()
+        system.text = ":frog:"
+        system.selection = NSRange(location: 6, length: 0)
+        let provider = makeRuntimeTextContextProvider(system: system)
+
+        let capture = try provider.captureCurrentToken(trigger: ":")
+
+        XCTAssertEqual(capture.token, ":frog:")
+        XCTAssertNotNil(
+            RuntimeReplacementRequestFactory.make(
+                sessionTarget: capture.target,
+                capture: capture,
+                expectedToken: ":frog:"
+            )
+        )
     }
 
     func testRuntimeDiscoveryRetainsTheExistingSafetyChecks() {

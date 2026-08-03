@@ -534,31 +534,42 @@ final class AccessibilityTextAdapter {
             for: selection,
             in: target.element
         )
-        let fragmentStart = max(
-            0,
-            selection.location - Self.maximumShortcodeContextLength
-        )
-        let fragmentRange = NSRange(
-            location: fragmentStart,
-            length: selection.location - fragmentStart
-        )
         let fragment: String
+        let fragmentRange: NSRange
         let tokenRange: NSRange?
-        if locateShortcodeToken, selection.length == 0 {
-            fragment = try text(
-                in: fragmentRange,
-                from: target.element
+        if
+            locateShortcodeToken,
+            selection.length <= Self.maximumShortcodeContextLength,
+            selection.length <= Int.max - selection.location
+        {
+            let selectionEnd = selection.location + selection.length
+            let fragmentStart = max(
+                0,
+                selection.location - Self.maximumShortcodeContextLength
             )
-            let followingCharacter = try characterAfterSelection(
-                selection,
+            let fragmentEnd = try boundedShortcodeFragmentEnd(
+                after: selectionEnd,
                 in: target.element
             )
-            let detectionFragment = fragment + (followingCharacter ?? "")
+            guard fragmentEnd >= fragmentStart else {
+                throw AccessibilityTextError.invalidUTF16Range
+            }
+            let requestedFragmentRange = NSRange(
+                location: fragmentStart,
+                length: fragmentEnd - fragmentStart
+            )
+            let boundedFragment = try scalarAlignedTextFragment(
+                requestedRange: requestedFragmentRange,
+                containing: selection,
+                in: target.element
+            )
+            fragmentRange = boundedFragment.range
+            fragment = boundedFragment.text
             if let localRange = Self.shortcodeTokenRange(
-                in: detectionFragment,
+                in: fragment,
                 selection: NSRange(
-                    location: fragment.utf16.count,
-                    length: 0
+                    location: selection.location - fragmentRange.location,
+                    length: selection.length
                 ),
                 trigger: trigger
             ) {
@@ -571,6 +582,10 @@ final class AccessibilityTextAdapter {
             }
         } else {
             fragment = ""
+            fragmentRange = NSRange(
+                location: selection.location,
+                length: 0
+            )
             tokenRange = nil
         }
 
@@ -663,6 +678,14 @@ final class AccessibilityTextAdapter {
         return system.elementsAreEqual(currentElement, target.element)
     }
 
+    func representsSameTarget(
+        _ lhs: AccessibilityTextTarget,
+        _ rhs: AccessibilityTextTarget
+    ) -> Bool {
+        lhs.processIdentifier == rhs.processIdentifier
+            && system.elementsAreEqual(lhs.element, rhs.element)
+    }
+
     func insertionWasAcknowledged(
         for request: AccessibilityReplacementRequest
     ) -> Bool {
@@ -741,16 +764,14 @@ final class AccessibilityTextAdapter {
         }
     }
 
-    /// Returns the active `:shortcode` or complete `:shortcode:` surrounding the
-    /// caret. The returned locations are UTF-16 offsets, matching AX APIs.
+    /// Returns the active `:shortcode` or complete `:shortcode:` surrounding a
+    /// collapsed caret or wholly-contained selection. The returned locations
+    /// are UTF-16 offsets, matching AX APIs.
     static func shortcodeTokenRange(
         in string: String,
         selection: NSRange,
         trigger: Character = ":"
     ) -> NSRange? {
-        guard selection.length == 0 else {
-            return nil
-        }
         guard (try? validate(selection, in: string)) != nil else {
             return nil
         }
@@ -759,8 +780,17 @@ final class AccessibilityTextAdapter {
         guard trigger.utf16.count == 1, let trigger = trigger.utf16.first else {
             return nil
         }
-        if selection.location > 0,
-           utf16.character(at: selection.location - 1) == trigger {
+        let selectionEnd = selection.location + selection.length
+        if selection.length == 0,
+           selection.location > 0,
+           utf16.character(at: selection.location - 1) == trigger,
+           selection.location > 1,
+           (
+               utf16.character(at: selection.location - 2) == trigger
+                   || isShortcodeCharacter(
+                       utf16.character(at: selection.location - 2)
+                   )
+           ) {
             let closingTriggerLocation = selection.location - 1
             var candidateStart = closingTriggerLocation
             while candidateStart > 0,
@@ -787,27 +817,50 @@ final class AccessibilityTextAdapter {
                 : nil
         }
 
-        var start = selection.location
-        while start > 0 {
-            let character = utf16.character(at: start - 1)
-            if character == trigger {
-                start -= 1
-                break
+        let start: Int
+        if
+            selection.length > 0,
+            selection.location < utf16.length,
+            utf16.character(at: selection.location) == trigger
+        {
+            start = selection.location
+        } else {
+            var candidateStart = selection.location
+            while candidateStart > 0 {
+                let character = utf16.character(at: candidateStart - 1)
+                if character == trigger {
+                    candidateStart -= 1
+                    break
+                }
+                guard isShortcodeCharacter(character) else {
+                    return nil
+                }
+                candidateStart -= 1
             }
+
+            guard
+                candidateStart < selection.location,
+                utf16.character(at: candidateStart) == trigger
+            else {
+                return nil
+            }
+            start = candidateStart
+        }
+
+        var selectedCharacterLocation = start + 1
+        while selectedCharacterLocation < selectionEnd {
+            let character = utf16.character(at: selectedCharacterLocation)
             guard isShortcodeCharacter(character) else {
                 return nil
             }
-            start -= 1
+            selectedCharacterLocation += 1
         }
 
-        guard
-            start < selection.location,
-            utf16.character(at: start) == trigger
-        else {
-            return nil
+        var end = selectionEnd
+        while end < utf16.length,
+              isShortcodeCharacter(utf16.character(at: end)) {
+            end += 1
         }
-
-        var end = selection.location
         if end < utf16.length,
            utf16.character(at: end) == trigger {
             end += 1
@@ -854,16 +907,10 @@ final class AccessibilityTextAdapter {
         }
     }
 
-    private func rejectSecureTarget(_ target: AccessibilityTextTarget) throws {
-        if try subrole(of: target) == kAXSecureTextFieldSubrole {
-            throw AccessibilityTextError.secureTextField
-        }
-    }
-
-    private func characterAfterSelection(
-        _ selection: NSRange,
+    private func boundedShortcodeFragmentEnd(
+        after selectionEnd: Int,
         in element: AccessibilityElementReference
-    ) throws -> String? {
+    ) throws -> Int {
         let characterCount: Int?
         do {
             characterCount = try system.numberOfCharacters(in: element)
@@ -871,20 +918,106 @@ final class AccessibilityTextAdapter {
             where code == .noValue {
             characterCount = nil
         }
-        if let characterCount, selection.location >= characterCount {
-            return nil
+        guard let characterCount else {
+            var fragmentEnd = selectionEnd
+            while
+                fragmentEnd - selectionEnd
+                    < Self.maximumShortcodeContextLength
+            {
+                let nextCharacter: String?
+                do {
+                    nextCharacter = try system.string(
+                        for: NSRange(location: fragmentEnd, length: 1),
+                        in: element
+                    )
+                } catch AccessibilityTextError.invalidUTF16Range {
+                    return fragmentEnd
+                } catch AccessibilityTextError.axFailure(_, let code)
+                    where code == .illegalArgument || code == .noValue {
+                    return fragmentEnd
+                }
+                guard
+                    let nextCharacter,
+                    nextCharacter.utf16.count == 1,
+                    let codeUnit = nextCharacter.utf16.first
+                else {
+                    return fragmentEnd
+                }
+                fragmentEnd += 1
+                if !Self.isShortcodeCharacter(codeUnit) {
+                    return fragmentEnd
+                }
+            }
+            return fragmentEnd
         }
+        guard selectionEnd <= characterCount else {
+            throw AccessibilityTextError.invalidUTF16Range
+        }
+        return selectionEnd + min(
+            characterCount - selectionEnd,
+            Self.maximumShortcodeContextLength
+        )
+    }
 
-        do {
-            let following = try text(
-                in: NSRange(location: selection.location, length: 1),
-                from: element
+    /// AX ranges use UTF-16 offsets. A bounded window endpoint can land
+    /// between a surrogate pair even when the editor's selection is valid, so
+    /// retry the four possible one-unit endpoint alignments before failing.
+    private func scalarAlignedTextFragment(
+        requestedRange: NSRange,
+        containing selection: NSRange,
+        in element: AccessibilityElementReference
+    ) throws -> (text: String, range: NSRange) {
+        let selectionEnd = selection.location + selection.length
+        var candidates = [requestedRange]
+        if requestedRange.length > 0 {
+            candidates.append(
+                NSRange(
+                location: requestedRange.location + 1,
+                    length: requestedRange.length - 1
+                )
             )
-            return following.utf16.count == 1 ? following : nil
-        } catch AccessibilityTextError.invalidUTF16Range {
-            return nil
-        } catch AccessibilityTextError.unsupportedAttribute {
-            return nil
+            candidates.append(
+                NSRange(
+                    location: requestedRange.location,
+                    length: requestedRange.length - 1
+                )
+            )
+        }
+        if requestedRange.length > 1 {
+            candidates.append(
+                NSRange(
+                    location: requestedRange.location + 1,
+                    length: requestedRange.length - 2
+                )
+            )
+        }
+        var lastRangeError: AccessibilityTextError?
+        for candidate in candidates where
+            candidate.location <= selection.location
+                && candidate.location + candidate.length >= selectionEnd
+        {
+            do {
+                return (
+                    try text(in: candidate, from: element),
+                    candidate
+                )
+            } catch let error as AccessibilityTextError {
+                switch error {
+                case .invalidUTF16Range:
+                    lastRangeError = error
+                case .axFailure(_, let code) where code == .illegalArgument:
+                    lastRangeError = error
+                default:
+                    throw error
+                }
+            }
+        }
+        throw lastRangeError ?? AccessibilityTextError.invalidUTF16Range
+    }
+
+    private func rejectSecureTarget(_ target: AccessibilityTextTarget) throws {
+        if try subrole(of: target) == kAXSecureTextFieldSubrole {
+            throw AccessibilityTextError.secureTextField
         }
     }
 

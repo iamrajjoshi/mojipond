@@ -206,6 +206,7 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
         var queuedAcceptanceRevision: UInt64?
         var canReplayCommitSend = true
         var systemScreenshotFlowActive = false
+        var revalidatesTextEdits = false
     }
 
     private let lock = NSLock()
@@ -218,6 +219,7 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
                 state.mode = .hidden
                 state.exactCommitPrediction = nil
                 state.systemScreenshotFlowActive = false
+                state.revalidatesTextEdits = false
                 clearCommitIntent(state: &state)
                 state.interactionRevision &+= 1
             }
@@ -258,6 +260,9 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
             if mode == .browser {
                 state.exactCommitPrediction = nil
                 clearCommitIntent(state: &state)
+            }
+            if mode == .hidden || mode == .browser {
+                state.revalidatesTextEdits = false
             }
         }
     }
@@ -301,7 +306,8 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
         revision: UInt64,
         mode: RuntimeInterceptionMode,
         acceptsTab: Bool,
-        acceptsReturn: Bool
+        acceptsReturn: Bool,
+        revalidatesTextEdits: Bool = false
     ) -> Bool {
         lock.withLock {
             guard
@@ -316,6 +322,7 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
             state.mode = mode
             state.acceptsTab = acceptsTab
             state.acceptsReturn = acceptsReturn
+            state.revalidatesTextEdits = revalidatesTextEdits
             return true
         }
     }
@@ -339,6 +346,7 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
             state.exactCommitEnabled = isEnabled
             state.exactCommitTokens = exactTokens
             state.exactCommitPrediction = nil
+            state.revalidatesTextEdits = false
             state.interactionRevision &+= 1
             if state.mode == .committing {
                 state.mode = .hidden
@@ -462,6 +470,7 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
             state.acceptsTab = acceptsTab
             state.acceptsReturn = acceptsReturn
             state.exactCommitPrediction = nil
+            state.revalidatesTextEdits = false
             state.interactionRevision &+= 1
             return generation
         }
@@ -504,6 +513,7 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
             }
             state.mode = .hidden
             state.exactCommitPrediction = nil
+            state.revalidatesTextEdits = false
             clearCommitIntent(state: &state)
             state.presentationRevision &+= 1
             state.interactionRevision &+= 1
@@ -551,7 +561,9 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
             predictionGeneration,
             previousMode,
             passesUnreplayableReturn,
-            preservesAutocompleteContext
+            preservesAutocompleteContext,
+            requiresContextRecovery,
+            preservesSuggestionSurface
         ) = lock.withLock {
             let previousMode = state.mode
             let wasCommitting = previousMode == .committing
@@ -562,11 +574,29 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
                     state: &state
                 )
             let generation: UInt64?
+            let preservesSuggestionSurface =
+                !preservesAutocompleteContext
+                    && state.mode == .suggestions
+                    && Self.movesCaretWithoutInterception(
+                        snapshot.keyCode,
+                        modifiers: RuntimeKeyboardEventMapper
+                            .parserModifiers(
+                                from: snapshot.flags,
+                                for: snapshot.keyCode
+                            )
+                    )
+            let requiresContextRecovery =
+                !preservesAutocompleteContext
+                    && Self.requiresContextRecovery(
+                        for: snapshot,
+                        state: state
+                    )
             if preservesAutocompleteContext {
                 generation = state.exactCommitPrediction?.generation
             } else {
                 generation = updateExactCommitPrediction(
                     for: snapshot,
+                    requiresContextRecovery: requiresContextRecovery,
                     state: &state
                 )
             }
@@ -625,7 +655,9 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
                 generation,
                 previousMode,
                 passesUnreplayableReturn,
-                preservesAutocompleteContext
+                preservesAutocompleteContext,
+                requiresContextRecovery,
+                preservesSuggestionSurface
             )
         }
         if preservesAutocompleteContext {
@@ -633,7 +665,9 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
                 predictionGeneration: predictionGeneration,
                 interactionRevision: current.interactionRevision,
                 eventRevision: current.eventRevision,
-                preservesAutocompleteContext: true
+                preservesAutocompleteContext: true,
+                requiresContextRecovery: false,
+                preservesSuggestionSurface: false
             )
         }
         if
@@ -657,6 +691,22 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
                 predictionGeneration: predictionGeneration,
                 interactionRevision: current.interactionRevision,
                 eventRevision: current.eventRevision
+            )
+        }
+        if requiresContextRecovery {
+            return .passingThrough(
+                predictionGeneration: predictionGeneration,
+                interactionRevision: current.interactionRevision,
+                eventRevision: current.eventRevision,
+                requiresContextRecovery: true
+            )
+        }
+        if preservesSuggestionSurface {
+            return .passingThrough(
+                predictionGeneration: predictionGeneration,
+                interactionRevision: current.interactionRevision,
+                eventRevision: current.eventRevision,
+                preservesSuggestionSurface: true
             )
         }
         guard
@@ -778,6 +828,7 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
 
     private func updateExactCommitPrediction(
         for snapshot: KeyboardEventSnapshot,
+        requiresContextRecovery: Bool,
         state: inout State
     ) -> UInt64? {
         switch snapshot.type {
@@ -785,6 +836,7 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
             state.eventRevision &+= 1
             state.exactCommitPrediction = nil
             state.mode = .hidden
+            state.revalidatesTextEdits = false
             clearCommitIntent(state: &state)
             state.presentationRevision &+= 1
             state.interactionRevision &+= 1
@@ -807,15 +859,26 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
             from: snapshot.flags,
             for: snapshot.keyCode
         )
+        if Self.movesCaretWithoutInterception(
+            snapshot.keyCode,
+            modifiers: modifiers
+        ), state.mode == .suggestions
+            || state.exactCommitPrediction != nil
+        {
+            let generation = state.exactCommitPrediction?.generation
+            preserveSuggestionsForCaretMovement(state: &state)
+            return generation
+        }
+
+        if requiresContextRecovery {
+            let generation = state.exactCommitPrediction?.generation
+            suspendForContextRecovery(state: &state)
+            return generation
+        }
+
         guard !modifiers.containsUnsupportedTypingModifier else {
             invalidatePassThroughContext(state: &state)
             return nil
-        }
-
-        if Self.movesCaretWithoutInterception(snapshot.keyCode) {
-            let generation = state.exactCommitPrediction?.generation
-            invalidatePassThroughContext(state: &state)
-            return generation
         }
 
         if
@@ -825,6 +888,7 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
         {
             let generation = state.exactCommitPrediction?.generation
             state.mode = .hidden
+            state.revalidatesTextEdits = false
             clearCommitIntent(state: &state)
             state.presentationRevision &+= 1
             state.interactionRevision &+= 1
@@ -960,6 +1024,19 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
             var prediction = state.exactCommitPrediction,
             !prediction.isClosed
         else {
+            // Presentation and exact-match prediction are intentionally
+            // independent. A delayed UI refresh can leave the suggestion
+            // surface visible after its prediction was disarmed; valid token
+            // typing must still reach the parser without tearing that surface
+            // down. The parser will publish the refreshed results.
+            if
+                state.mode == .suggestions,
+                EmojiAliasSyntax.isValidToken(String(character)),
+                state.queuedAcceptanceRevision
+                    != state.interactionRevision
+            {
+                return nil
+            }
             invalidatePassThroughContext(state: &state)
             return nil
         }
@@ -995,6 +1072,7 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
             clearCommitIntent(state: &state)
             state.presentationRevision &+= 1
         }
+        state.revalidatesTextEdits = false
         if invalidatedInteraction {
             state.interactionRevision &+= 1
         }
@@ -1008,6 +1086,7 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
                 || state.mode == .suggestions
                 || state.mode == .committing
         state.exactCommitPrediction = nil
+        state.revalidatesTextEdits = false
         if state.mode == .suggestions || state.mode == .committing {
             state.mode = .hidden
             clearCommitIntent(state: &state)
@@ -1018,8 +1097,90 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
         }
     }
 
+    private func suspendForContextRecovery(
+        state: inout State
+    ) {
+        let invalidatedInteraction =
+            state.exactCommitPrediction != nil
+                || state.mode == .suggestions
+        state.exactCommitPrediction = nil
+        state.revalidatesTextEdits = false
+        if state.mode == .suggestions {
+            state.mode = .hidden
+            clearCommitIntent(state: &state)
+        }
+        if invalidatedInteraction {
+            state.interactionRevision &+= 1
+        }
+    }
+
+    private func preserveSuggestionsForCaretMovement(
+        state: inout State
+    ) {
+        let invalidatedInteraction =
+            state.exactCommitPrediction != nil
+                || state.mode == .suggestions
+        state.exactCommitPrediction = nil
+        state.revalidatesTextEdits = true
+        state.acceptsTab = false
+        state.acceptsReturn = false
+        clearCommitIntent(state: &state)
+        if invalidatedInteraction {
+            state.interactionRevision &+= 1
+        }
+    }
+
+    private static func requiresContextRecovery(
+        for snapshot: KeyboardEventSnapshot,
+        state: State
+    ) -> Bool {
+        guard
+            state.captureEnabled,
+            snapshot.type == .keyDown
+        else {
+            return false
+        }
+        let modifiers = RuntimeKeyboardEventMapper.parserModifiers(
+            from: snapshot.flags,
+            for: snapshot.keyCode
+        )
+        if movesCaretWithoutInterception(
+            snapshot.keyCode,
+            modifiers: modifiers
+        ) {
+            return false
+        }
+        guard snapshot.keyCode != RuntimeKeyboardKeyCode.escape else {
+            return false
+        }
+        let isModifiedEditWhileVisible =
+            state.mode == .suggestions
+                && modifiers.containsUnsupportedTypingModifier
+                && (
+                    snapshot.keyCode == RuntimeKeyboardKeyCode.delete
+                        || snapshot.characters?.count == 1
+                )
+        guard
+            state.revalidatesTextEdits
+                || isModifiedEditWhileVisible
+        else {
+            return false
+        }
+        if snapshot.keyCode == RuntimeKeyboardKeyCode.delete {
+            return true
+        }
+        guard
+            let characters = snapshot.characters,
+            characters.count == 1
+        else {
+            return false
+        }
+        return true
+    }
+
     private static func movesCaretWithoutInterception(
-        _ keyCode: CGKeyCode
+        _ keyCode: CGKeyCode,
+        modifiers: ParserModifiers
     ) -> Bool {
         switch keyCode {
         case RuntimeKeyboardKeyCode.leftArrow,
@@ -1029,6 +1190,9 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
              RuntimeKeyboardKeyCode.pageUp,
              RuntimeKeyboardKeyCode.pageDown:
             true
+        case RuntimeKeyboardKeyCode.upArrow,
+             RuntimeKeyboardKeyCode.downArrow:
+            modifiers.containsNavigationModifier
         default:
             false
         }

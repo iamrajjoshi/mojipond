@@ -252,7 +252,7 @@ final class RuntimeKeyboardTests: XCTestCase {
             ),
             .passThrough
         )
-        XCTAssertEqual(gate.mode, .hidden)
+        XCTAssertEqual(gate.mode, .suggestions)
         XCTAssertEqual(
             gate.decision(
                 for: snapshot(keyCode: RuntimeKeyboardKeyCode.returnKey)
@@ -895,6 +895,79 @@ final class RuntimeKeyboardTests: XCTestCase {
             ).decision,
             .passThrough
         )
+    }
+
+    func testCaretNavigationPassesThroughAndKeepsSuggestionsOpen() {
+        let cases: [(CGKeyCode, CGEventFlags)] = [
+            (RuntimeKeyboardKeyCode.leftArrow, []),
+            (RuntimeKeyboardKeyCode.rightArrow, [.maskShift]),
+            (RuntimeKeyboardKeyCode.leftArrow, [.maskAlternate]),
+            (RuntimeKeyboardKeyCode.rightArrow, [.maskCommand]),
+            (RuntimeKeyboardKeyCode.upArrow, [.maskShift]),
+            (RuntimeKeyboardKeyCode.downArrow, [.maskAlternate])
+        ]
+
+        for (keyCode, flags) in cases {
+            let gate = RuntimeInterceptionGate()
+            gate.configureExactCommitPrediction(
+                trigger: ":",
+                isEnabled: true,
+                exactTokens: ["frog"]
+            )
+            gate.setCaptureEnabled(true)
+            _ = gate.outcome(
+                for: snapshot(keyCode: 41, characters: ":")
+            )
+            gate.setMode(
+                .suggestions,
+                acceptsTab: true,
+                acceptsReturn: true
+            )
+
+            let outcome = gate.outcome(
+                for: snapshot(keyCode: keyCode, flags: flags)
+            )
+
+            XCTAssertEqual(outcome.decision, .passThrough)
+            XCTAssertFalse(outcome.requiresContextRecovery)
+            XCTAssertTrue(outcome.preservesSuggestionSurface)
+            XCTAssertEqual(gate.mode, .suggestions)
+            XCTAssertEqual(
+                gate.outcome(
+                    for: snapshot(keyCode: RuntimeKeyboardKeyCode.tab)
+                ).decision,
+                .passThrough
+            )
+        }
+    }
+
+    func testEditingRecoveredInteriorTokenRequestsAnotherRevalidation() {
+        let gate = RuntimeInterceptionGate()
+        gate.setCaptureEnabled(true)
+        let interactionRevision = gate.interactionRevision
+        XCTAssertTrue(
+            gate.expectPresentation(
+                revision: 1,
+                interactionRevision: interactionRevision
+            )
+        )
+        XCTAssertTrue(
+            gate.activatePresentation(
+                revision: 1,
+                mode: .suggestions,
+                acceptsTab: false,
+                acceptsReturn: false,
+                revalidatesTextEdits: true
+            )
+        )
+
+        let outcome = gate.outcome(
+            for: snapshot(keyCode: 0, characters: "x")
+        )
+
+        XCTAssertEqual(outcome.decision, .passThrough)
+        XCTAssertTrue(outcome.requiresContextRecovery)
+        XCTAssertEqual(gate.mode, .hidden)
     }
 
     func testBackspaceRestoresPredictionAfterInvalidCharacter() throws {

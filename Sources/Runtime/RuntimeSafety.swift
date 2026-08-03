@@ -183,17 +183,21 @@ struct RuntimeTextCapture: @unchecked Sendable {
         self.bundleIdentifier = bundleIdentifier
     }
 
-    /// The exact token ending at the captured caret, if the context contains
-    /// one. Token ranges are absolute AX offsets while text fragments are
-    /// bounded local strings, so keep that conversion in one checked place.
+    /// The exact active token containing the captured caret or selection, if
+    /// the context contains one. Token ranges are absolute AX offsets while
+    /// text fragments are bounded local strings, so keep that conversion in
+    /// one checked place. Replacement remains stricter and is validated by
+    /// ``RuntimeReplacementRequestFactory`` at a collapsed token-end caret.
     var token: String? {
         guard
-            context.selection.length == 0,
             let tokenRange = context.tokenRange,
             tokenRange.length > 0,
-            tokenRange.location + tokenRange.length
-                == context.selection.location,
-            tokenRange.location >= context.textFragmentRange.location
+            tokenRange.location >= context.textFragmentRange.location,
+            context.selection.location >= tokenRange.location,
+            context.selection.location <= Int.max - context.selection.length,
+            tokenRange.location <= Int.max - tokenRange.length,
+            context.selection.location + context.selection.length
+                <= tokenRange.location + tokenRange.length
         else {
             return nil
         }
@@ -204,6 +208,49 @@ struct RuntimeTextCapture: @unchecked Sendable {
             length: tokenRange.length
         )
         guard
+            (try? AccessibilityTextAdapter.validate(
+                localRange,
+                in: context.textFragment
+            )) != nil
+        else {
+            return nil
+        }
+        return (context.textFragment as NSString).substring(
+            with: localRange
+        )
+    }
+
+    /// The active shortcode prefix from its opening trigger through the
+    /// current selection endpoint. Editors such as Slack recompute
+    /// autocomplete from this prefix after an interior edit, while the full
+    /// token remains available for boundary and replacement safety checks.
+    var tokenPrefixThroughSelection: String? {
+        guard
+            let tokenRange = context.tokenRange,
+            tokenRange.length > 0,
+            tokenRange.location >= context.textFragmentRange.location,
+            tokenRange.location <= Int.max - tokenRange.length,
+            context.selection.location <= Int.max - context.selection.length
+        else {
+            return nil
+        }
+        let selectionEnd = context.selection.location
+            + context.selection.length
+        let tokenEnd = tokenRange.location + tokenRange.length
+        guard
+            selectionEnd >= tokenRange.location,
+            selectionEnd <= tokenEnd
+        else {
+            return nil
+        }
+        let localRange = NSRange(
+            location:
+                tokenRange.location
+                    - context.textFragmentRange.location,
+            length: selectionEnd - tokenRange.location
+        )
+        guard
+            localRange.length > 0,
             (try? AccessibilityTextAdapter.validate(
                 localRange,
                 in: context.textFragment
@@ -240,6 +287,10 @@ protocol RuntimeTextContextCapturing: Sendable {
     func captureCurrentToken(
         trigger: Character
     ) throws -> RuntimeTextCapture
+    func representsSameTarget(
+        _ lhs: AccessibilityTextTarget,
+        _ rhs: AccessibilityTextTarget
+    ) -> Bool
     func updateExclusions(_ exclusions: ExclusionPreferences)
 }
 
@@ -249,6 +300,14 @@ extension RuntimeTextContextCapturing {
     ) throws -> RuntimeTextCapture {
         _ = trigger
         throw RuntimeTextCaptureError.invalidTokenContext
+    }
+
+    func representsSameTarget(
+        _ lhs: AccessibilityTextTarget,
+        _ rhs: AccessibilityTextTarget
+    ) -> Bool {
+        lhs.processIdentifier == rhs.processIdentifier
+            && lhs.element === rhs.element
     }
 
     func updateExclusions(_ exclusions: ExclusionPreferences) {
@@ -330,18 +389,28 @@ final class RuntimeAccessibilityTextContextProvider:
         )
         guard
             let token = capture.token,
-            token.first == trigger,
-            token.count == 1 || token.last != trigger
+            token.first == trigger
         else {
             throw RuntimeTextCaptureError.invalidTokenContext
         }
-        let query = String(token.dropFirst())
+        let isClosed = token.count > 1 && token.last == trigger
+        let query = String(
+            token.dropFirst().dropLast(isClosed ? 1 : 0)
+        )
         guard
+            !isClosed || !query.isEmpty,
             query.isEmpty || EmojiAliasSyntax.isValidToken(query)
         else {
             throw RuntimeTextCaptureError.invalidTokenContext
         }
         return capture
+    }
+
+    func representsSameTarget(
+        _ lhs: AccessibilityTextTarget,
+        _ rhs: AccessibilityTextTarget
+    ) -> Bool {
+        accessibility.representsSameTarget(lhs, rhs)
     }
 
     private func captureContext(
@@ -478,18 +547,39 @@ final class RuntimeAccessibilityTextContextProvider:
         containsExactly expectedToken: String
     ) -> Bool {
         guard
-            context.selection.length == 0,
             let tokenRange = context.tokenRange,
-            tokenRange.length == expectedToken.utf16.count,
-            tokenRange.location + tokenRange.length == context.selection.location,
-            tokenRange.location >= context.textFragmentRange.location
+            tokenRange.location >= context.textFragmentRange.location,
+            tokenRange.location <= Int.max - tokenRange.length,
+            context.selection.location >= tokenRange.location,
+            context.selection.location <= Int.max - context.selection.length,
+            context.selection.location + context.selection.length
+                <= tokenRange.location + tokenRange.length
         else {
+            return false
+        }
+
+        let expectedLength = expectedToken.utf16.count
+        let candidateLength: Int
+        if tokenRange.length == expectedLength {
+            candidateLength = tokenRange.length
+        } else if
+            context.selection.length == 0,
+            expectedLength <= tokenRange.length,
+            tokenRange.location <= Int.max - expectedLength,
+            tokenRange.location + expectedLength
+                == context.selection.location
+        {
+            // After an interior edit, autocomplete is driven by the shortcode
+            // prefix ending at the new caret. The remaining suffix stays in
+            // the bounded context, but is deliberately excluded from search.
+            candidateLength = expectedLength
+        } else {
             return false
         }
 
         let localRange = NSRange(
             location: tokenRange.location - context.textFragmentRange.location,
-            length: tokenRange.length
+            length: candidateLength
         )
         guard
             (try? AccessibilityTextAdapter.validate(
@@ -512,8 +602,10 @@ enum RuntimeReplacementRequestFactory {
     ) -> AccessibilityReplacementRequest? {
         guard
             sessionTarget.processIdentifier == capture.target.processIdentifier,
+            capture.context.selection.length == 0,
             let tokenRange = capture.context.tokenRange,
             tokenRange.length == expectedToken.utf16.count,
+            tokenRange.location <= Int.max - tokenRange.length,
             tokenRange.location + tokenRange.length
                 == capture.context.selection.location
         else {

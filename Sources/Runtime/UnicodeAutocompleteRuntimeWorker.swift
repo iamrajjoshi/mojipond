@@ -146,6 +146,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
     private enum CapturePurpose: Sendable {
         case establishSession
         case showSuggestions
+        case revalidateCaretMovement
         case showBrowser
         case insert(item: EmojiItem)
     }
@@ -168,8 +169,9 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         var activityRevision: UInt64
         var bundleIdentifier: String?
         var commitState: CommitState?
-        let predictionGeneration: UInt64?
+        var predictionGeneration: UInt64?
         var presentationInteractionRevision: UInt64
+        var canAcceptSelection: Bool
     }
 
     private let queue: DispatchQueue
@@ -201,6 +203,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
     private var processingEventRevision: UInt64?
     private var contextRecoveryGeneration: UInt64 = 0
     private var needsContextRecovery = false
+    private var contextRecoveryTarget: AccessibilityTextTarget?
 
     init(
         searchIndex: EmojiSearchIndex,
@@ -395,14 +398,30 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             activeTransaction != nil
                 || parser.state.session != nil
                 || needsContextRecovery
+        if interceptionOutcome.requiresContextRecovery {
+            guard hadRecoverableUnicodeContext else {
+                return
+            }
+            suspendCurrentTransactionForContextRecovery()
+            scheduleContextRecovery()
+            return
+        }
+        if
+            activeTransaction?.visibleMode == .suggestions,
+            interceptionOutcome.preservesSuggestionSurface
+        {
+            preserveSuggestionsAfterCaretMovement(snapshot)
+            return
+        }
         if needsContextRecovery {
             if isFreshTrigger(action) {
-                cancelContextRecovery()
+                abandonContextRecovery()
             } else if isContextRecoveryFollowUp(action) {
                 scheduleContextRecovery()
                 return
             } else if action != .ignore {
-                cancelContextRecovery()
+                abandonContextRecovery()
+                return
             }
         }
 
@@ -479,6 +498,42 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         }
         return character
             == configuration.preferences.shortcode.trigger.character
+    }
+
+    private func preserveSuggestionsAfterCaretMovement(
+        _ snapshot: KeyboardEventSnapshot
+    ) {
+        guard
+            var transaction = activeTransaction,
+            transaction.visibleMode == .suggestions
+        else {
+            return
+        }
+        let modifiers = RuntimeKeyboardEventMapper.parserModifiers(
+            from: snapshot.flags,
+            for: snapshot.keyCode
+        )
+        if
+            modifiers.contains(.shift)
+                || !modifiers.contains(.option)
+                    && !modifiers.contains(.command)
+        {
+            transaction.selectedIndex = -1
+        }
+        transaction.canAcceptSelection = false
+        if let processingInteractionRevision {
+            transaction.presentationInteractionRevision =
+                processingInteractionRevision
+        }
+        armShortcodeInactivityTimeout(for: &transaction)
+        activeTransaction = transaction
+        retainSurfacePresentationDuringRefresh()
+        present(transaction)
+        scheduleCapture(
+            transactionID: transaction.transactionID,
+            expectedToken: transaction.expectedToken,
+            purpose: .revalidateCaretMovement
+        )
     }
 
     private func isContextRecoveryFollowUp(
@@ -772,7 +827,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             caretBounds: nil,
             results: [],
             presentationRows: [],
-            selectedIndex: 0,
+            selectedIndex: -1,
             visibleMode: .hidden,
             browserQuery: "",
             captureGeneration: 0,
@@ -782,7 +837,8 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             predictionGeneration: processingPredictionGeneration,
             presentationInteractionRevision:
                 processingInteractionRevision
-                    ?? interceptionGate.interactionRevision
+                    ?? interceptionGate.interactionRevision,
+            canAcceptSelection: true
         )
         armShortcodeInactivityTimeout(for: &transaction)
         activeTransaction = transaction
@@ -818,7 +874,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             ),
             in: &transaction
         )
-        transaction.selectedIndex = 0
+        transaction.selectedIndex = -1
         armShortcodeInactivityTimeout(for: &transaction)
         activeTransaction = transaction
 
@@ -953,10 +1009,15 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             return
         }
         let count = transaction.results.count
-        transaction.selectedIndex = min(
-            max(transaction.selectedIndex + delta, 0),
-            count - 1
-        )
+        if transaction.results.indices.contains(
+            transaction.selectedIndex
+        ) {
+            let nextIndex = transaction.selectedIndex + delta
+            transaction.selectedIndex = transaction.results.indices
+                .contains(nextIndex) ? nextIndex : -1
+        } else {
+            transaction.selectedIndex = delta < 0 ? count - 1 : 0
+        }
         if let processingInteractionRevision {
             transaction.presentationInteractionRevision =
                 processingInteractionRevision
@@ -997,19 +1058,24 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         transactionID: ParserTransactionID,
         token: ParsedShortcodeToken? = nil
     ) {
-        guard
-            var transaction = activeTransaction,
-            transaction.transactionID == transactionID,
-            transaction.results.indices.contains(transaction.selectedIndex)
-        else {
+        guard var transaction = activeTransaction,
+              transaction.transactionID == transactionID else {
             clear(transactionID: transactionID)
             return
         }
+        let acceptedIndex = transaction.results.indices.contains(
+            transaction.selectedIndex
+        ) ? transaction.selectedIndex : 0
+        guard transaction.results.indices.contains(acceptedIndex) else {
+            clear(transactionID: transactionID)
+            return
+        }
+        transaction.selectedIndex = acceptedIndex
         if let token {
             transaction.expectedToken = token.rendered
-            activeTransaction = transaction
         }
-        let item = transaction.results[transaction.selectedIndex].item
+        activeTransaction = transaction
+        let item = transaction.results[acceptedIndex].item
         guard beginCommit(
             transactionID: transactionID,
             item: item
@@ -1174,18 +1240,56 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             return
         }
         do {
+            guard let contextRecoveryTarget else {
+                failContextRecovery(reason: .focusChanged)
+                return
+            }
             let configuredTrigger =
                 configuration.preferences.shortcode.trigger
             let capture = try contextProvider.captureCurrentToken(
                 trigger: configuredTrigger.character
             )
             guard
-                let renderedToken = capture.token,
+                contextProvider.representsSameTarget(
+                    contextRecoveryTarget,
+                    capture.target
+                )
+            else {
+                failContextRecovery(reason: .focusChanged)
+                return
+            }
+            guard
+                let completeToken = capture.token,
+                completeToken.first == configuredTrigger.character
+            else {
+                failContextRecovery(reason: .cursorMoved)
+                return
+            }
+            needsContextRecovery = false
+            self.contextRecoveryTarget = nil
+            processingInteractionRevision =
+                interceptionGate.interactionRevision
+            defer {
+                processingPredictionGeneration = nil
+                processingInteractionRevision = nil
+            }
+            if
+                recoverClosedTokenIfNeeded(
+                    completeToken,
+                    capture: capture,
+                    trigger: configuredTrigger
+                )
+            {
+                return
+            }
+            guard
+                let renderedToken = capture.tokenPrefixThroughSelection,
                 renderedToken.first == configuredTrigger.character,
                 renderedToken.count == 1
                     || renderedToken.last
                         != configuredTrigger.character
             else {
+                failContextRecovery(reason: .cursorMoved)
                 return
             }
             let query = String(renderedToken.dropFirst())
@@ -1195,24 +1299,31 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                 renderedQuery: query,
                 isClosed: false
             )
-            needsContextRecovery = false
-            let predictionGeneration = interceptionGate
-                .restoreExactCommitPrediction(
+            let canAcceptSelection = Self.canAcceptSelection(
+                in: capture.context
+            )
+            let predictionGeneration = canAcceptSelection
+                ? interceptionGate.restoreExactCommitPrediction(
                     expectedToken: renderedToken
                 )
+                : nil
             processingPredictionGeneration = predictionGeneration
-            processingInteractionRevision =
-                interceptionGate.interactionRevision
-            defer {
-                processingPredictionGeneration = nil
-                processingInteractionRevision = nil
-            }
             guard
                 let transition = parser.restoreValidatedToken(token)
             else {
+                failContextRecovery(reason: .cursorMoved)
                 return
             }
             handle(transition.actions)
+            guard var transaction = activeTransaction else {
+                failContextRecovery(reason: .cursorMoved)
+                return
+            }
+            transaction.sessionTarget = capture.target
+            transaction.caretBounds = capture.context.caretBounds
+            transaction.bundleIdentifier = capture.bundleIdentifier
+            transaction.canAcceptSelection = canAcceptSelection
+            activeTransaction = transaction
         } catch let error as RuntimeTextCaptureError {
             if
                 error.isTransient,
@@ -1229,18 +1340,114 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                         attempt: attempt + 1
                     )
                 }
-            } else if case .denied = error {
-                cancelContextRecovery()
-                emitDiagnostic(for: error)
+            } else {
+                failContextRecovery(
+                    reason: parserResetReason(for: error)
+                )
+                if case .denied = error {
+                    emitDiagnostic(for: error)
+                }
             }
         } catch {
-            cancelContextRecovery()
+            failContextRecovery(reason: .externallyCancelled)
         }
+    }
+
+    /// A closing trigger can arrive immediately after caret navigation, before
+    /// the settled AX revalidation has re-armed the constant-time prediction.
+    /// Recover that exact, closed token from AX and route it through the same
+    /// guarded commit pipeline instead of leaving the literal shortcode.
+    private func recoverClosedTokenIfNeeded(
+        _ completeToken: String,
+        capture: RuntimeTextCapture,
+        trigger: ShortcodeTrigger
+    ) -> Bool {
+        guard
+            completeToken.count > 1,
+            completeToken.last == trigger.character
+        else {
+            return false
+        }
+        guard
+            configuration.preferences.shortcode
+                .replacesOnExactClosingTrigger,
+            Self.canAcceptSelection(in: capture.context)
+        else {
+            failContextRecovery(reason: .cursorMoved)
+            return true
+        }
+        let renderedQuery = String(
+            completeToken.dropFirst().dropLast()
+        )
+        let normalizedQuery = EmojiAliasSyntax.normalizedToken(
+            renderedQuery
+        )
+        guard
+            !normalizedQuery.isEmpty,
+            EmojiAliasSyntax.isValidToken(normalizedQuery)
+        else {
+            failContextRecovery(reason: .cursorMoved)
+            return true
+        }
+        let openToken = ParsedShortcodeToken(
+            trigger: trigger,
+            query: normalizedQuery,
+            renderedQuery: renderedQuery,
+            isClosed: false
+        )
+        guard let transition = parser.restoreValidatedToken(openToken) else {
+            failContextRecovery(reason: .cursorMoved)
+            return true
+        }
+        handle(transition.actions)
+        guard var transaction = activeTransaction else {
+            failContextRecovery(reason: .cursorMoved)
+            return true
+        }
+        transaction.sessionTarget = capture.target
+        transaction.caretBounds = capture.context.caretBounds
+        transaction.bundleIdentifier = capture.bundleIdentifier
+        transaction.canAcceptSelection = true
+        activeTransaction = transaction
+        let closingTransition = parser.handle(
+            .character(trigger.character)
+        )
+        handle(closingTransition.actions)
+        return true
     }
 
     private func cancelContextRecovery() {
         needsContextRecovery = false
+        contextRecoveryTarget = nil
         contextRecoveryGeneration &+= 1
+    }
+
+    private func abandonContextRecovery() {
+        cancelContextRecovery()
+        hideSurface()
+    }
+
+    private func failContextRecovery(reason: ParserResetReason) {
+        cancelContextRecovery()
+        cancelCurrentTransaction(reason: reason)
+    }
+
+    private func suspendCurrentTransactionForContextRecovery() {
+        if contextRecoveryTarget == nil {
+            contextRecoveryTarget = activeTransaction?.sessionTarget
+        }
+        if parser.state.session != nil {
+            _ = parser.handle(.reset(.cursorMoved))
+        }
+        if let commitState = activeTransaction?.commitState {
+            _ = interceptionGate.finishCommit(
+                generation: commitState.gateGeneration,
+                retainingPendingSend: false
+            )
+        }
+        cancelPendingSend()
+        activeTransaction = nil
+        retainSurfacePresentationDuringRefresh()
     }
 
     private func performCapture(
@@ -1338,7 +1545,12 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             return
         }
         if let target = transaction.sessionTarget {
-            guard target.processIdentifier == capture.target.processIdentifier else {
+            guard
+                contextProvider.representsSameTarget(
+                    target,
+                    capture.target
+                )
+            else {
                 cancelCurrentTransaction(reason: .focusChanged)
                 return
             }
@@ -1347,16 +1559,36 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         }
         transaction.caretBounds = capture.context.caretBounds
         transaction.bundleIdentifier = capture.bundleIdentifier
+        transaction.canAcceptSelection = Self.canAcceptSelection(
+            in: capture.context
+        )
         activeTransaction = transaction
         diagnosticHandler?(.sessionAllowed)
 
         switch purpose {
         case .establishSession:
-            verifyExactCommitPrediction(for: transaction)
+            if transaction.canAcceptSelection {
+                verifyExactCommitPrediction(for: transaction)
+            }
         case .showSuggestions:
             transaction.visibleMode = .suggestions
             activeTransaction = transaction
-            verifyExactCommitPrediction(for: transaction)
+            if transaction.canAcceptSelection {
+                verifyExactCommitPrediction(for: transaction)
+            }
+            present(transaction)
+            prepareSelectedAdaptiveGlyphIfUseful(in: transaction)
+        case .revalidateCaretMovement:
+            transaction.visibleMode = .suggestions
+            if transaction.canAcceptSelection {
+                transaction.predictionGeneration = interceptionGate
+                    .restoreExactCommitPrediction(
+                        expectedToken: expectedToken
+                    )
+            } else {
+                transaction.predictionGeneration = nil
+            }
+            activeTransaction = transaction
             present(transaction)
             prepareSelectedAdaptiveGlyphIfUseful(in: transaction)
         case .showBrowser:
@@ -1982,10 +2214,13 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
     private func prepareSelectedAdaptiveGlyphIfUseful(
         in transaction: ActiveTransaction
     ) {
+        let selectedIndex = transaction.results.indices.contains(
+            transaction.selectedIndex
+        ) ? transaction.selectedIndex : 0
         guard
             transaction.bundleIdentifier == Self.messagesBundleIdentifier,
             let managedMediaRoot,
-            transaction.results.indices.contains(transaction.selectedIndex)
+            transaction.results.indices.contains(selectedIndex)
         else {
             return
         }
@@ -2005,7 +2240,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             return
         }
 
-        let item = transaction.results[transaction.selectedIndex].item
+        let item = transaction.results[selectedIndex].item
         let canInsertFirstFrameGlyph = Self.canInsertFirstFrameGlyph(
             into: transaction.bundleIdentifier
         )
@@ -2133,14 +2368,14 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         }
 
         uiRevision &+= 1
-        let hasSelection = transaction.results.indices.contains(
-            transaction.selectedIndex
-        )
+        let hasSelection = !transaction.results.isEmpty
         let isBrowser = transaction.visibleMode == .browser
         let acceptsTab = hasSelection
+            && transaction.canAcceptSelection
             && (isBrowser
                 || configuration.preferences.shortcode.acceptsTab)
         let acceptsReturn = hasSelection
+            && transaction.canAcceptSelection
             && (isBrowser
                 || configuration.preferences.shortcode.acceptsReturn)
         let snapshot = RuntimeSuggestionPanelSnapshot(
@@ -2185,7 +2420,10 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                         revision: revision,
                         mode: mode,
                         acceptsTab: acceptsTab,
-                        acceptsReturn: acceptsReturn
+                        acceptsReturn: acceptsReturn,
+                        revalidatesTextEdits:
+                            mode == .suggestions
+                                && !transaction.canAcceptSelection
                     )
                 }
             )
@@ -2315,6 +2553,20 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         cancelPendingSend()
         activeTransaction = nil
         hideSurface()
+    }
+
+    private static func canAcceptSelection(
+        in context: AccessibilityTextContext
+    ) -> Bool {
+        guard
+            context.selection.length == 0,
+            let tokenRange = context.tokenRange,
+            tokenRange.location <= Int.max - tokenRange.length
+        else {
+            return false
+        }
+        return tokenRange.location + tokenRange.length
+            == context.selection.location
     }
 
     private func cancelPendingSend() {
