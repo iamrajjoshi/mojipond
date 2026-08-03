@@ -52,8 +52,8 @@
   and the first frame of an animation become inline glyphs; the original file
   stays in the library.
 - Keeps shortcut matching and pack processing on the Mac. It skips secure
-  fields, terminals, remote desktop apps, Slack, Discord, and apps or websites
-  on your exclusion list.
+  fields, password managers, terminals, remote desktop apps, chat apps with
+  native emoji shortcuts, and apps or websites on your exclusion list.
 - Includes a small offline Noto Animated Emoji set for the Messages-only
   `/sticker` command. Downloading the larger set is optional and off by default.
 

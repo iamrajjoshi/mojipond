@@ -94,8 +94,11 @@ final class RuntimeSafetyAndCatalogTests: XCTestCase {
         )
 
         for bundleIdentifier in [
-            "com.apple.Terminal",
-            "com.tinyspeck.slackmacgap"
+            "com.apple.keychainaccess",
+            "com.mitchellh.ghostty",
+            "com.apple.ScreenContinuity",
+            "com.tinyspeck.chatlyio",
+            "com.microsoft.teams2"
         ] {
             XCTAssertEqual(
                 policy.evaluate(

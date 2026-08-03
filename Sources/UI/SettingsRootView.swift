@@ -807,7 +807,7 @@ struct SettingsRootView: View {
                 )
                 SettingsDivider()
                 Label(
-                    "Slack and Discord, which provide their own emoji shortcuts",
+                    "Chat apps that provide their own emoji shortcuts",
                     systemImage:
                         "bubble.left.and.bubble.right.fill"
                 )

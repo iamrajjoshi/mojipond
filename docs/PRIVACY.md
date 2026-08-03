@@ -194,8 +194,8 @@ do not include the typed token or document text.
 MojiPond suspends itself when Secure Event Input is active, when a focused
 field is secure, or when security status cannot be proven. It also ships with
 default exclusions for MojiPond itself, common password managers, terminals,
-virtual-machine or remote-desktop clients, Slack, and Discord. Users can add
-application and browser-domain exclusions.
+virtual-machine or remote-desktop clients, and chat apps with native emoji
+shortcuts. Users can add application and browser-domain exclusions.
 
 The parser, Accessibility capture, and insertion request carry transaction
 identities. A focus, selection, target, or token change causes the operation to

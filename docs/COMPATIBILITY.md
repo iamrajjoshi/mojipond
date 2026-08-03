@@ -59,7 +59,7 @@ Signing identities installed: none
 | Rich-editor Unicode fallback | Pending | Requires a real supported editor check |
 | Password or secure field in a real app | Pending | Automated only; no real-app check recorded |
 | Browser exclusion in live Safari and Chrome | Pending | Automated only; no real-browser check recorded |
-| Slack, Discord, and terminal exclusions | Pending | Default-exclusion policy is automated; real Slack, Discord, and Terminal/iTerm checks are not yet recorded |
+| Chat, password-manager, remote-client, and terminal exclusions | Pending | Default-exclusion policy is automated; representative checks against installed apps are not yet recorded |
 | User-added excluded app and domain | Pending | Preference and matching logic are automated; real excluded-app and excluded-domain checks are not yet recorded |
 | US and non-US keyboard layouts | Pending | Parser behavior is automated independently of layout; manual US and at least one non-US layout check are not yet recorded |
 | App, focus, target, and caret changes while open | Pending | Cancellation and stale-target paths are automated; manual cross-app and caret-movement checks with a visible panel are not yet recorded |
