@@ -59,38 +59,6 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(state.statusSummary, "Paused")
     }
 
-    func testUpdatePreferenceStartsAndCancelsAutomaticCheck() {
-        let configuration = SignedUpdateConfiguration(
-            feedURL: URL(
-                string: "https://updates.example.com/feed.json"
-            ),
-            publicKey: .ed25519(rawRepresentation: Data([1]))
-        )
-        let updates = AppUpdateController(
-            configuration: configuration,
-            checkerFactory: { _ in
-                SuspendingAppStateUpdateChecker()
-            },
-            checkHistoryStore: AppStateUpdateCheckHistoryStore(),
-            automaticCheckScheduler:
-                AppStateAutomaticUpdateCheckScheduler()
-        )
-        let state = AppState(
-            preferencesStore: PreferencesStoreSpy(initial: .defaults),
-            updates: updates
-        )
-
-        state.updatePreferences {
-            $0.network.allowsUpdateChecks = true
-        }
-        XCTAssertEqual(updates.state, .checking)
-
-        state.updatePreferences {
-            $0.network.allowsUpdateChecks = false
-        }
-        XCTAssertEqual(updates.state, .idle)
-    }
-
     func testLaunchAtLoginUsesInjectedController() {
         let controller = LaunchAtLoginControllerStub()
         let state = AppState(
@@ -131,39 +99,6 @@ final class AppStateTests: XCTestCase {
             NSStringFromSelector(try XCTUnwrap(settingsItem.action)),
             "showSettings"
         )
-    }
-}
-
-private final class AppStateUpdateCheckHistoryStore:
-    UpdateCheckHistoryStoring
-{
-    var lastAutomaticCheckDate: Date?
-    var lastSuccessfulAutomaticCheckOutcome:
-        SuccessfulUpdateCheckOutcome?
-}
-
-@MainActor
-private final class AppStateAutomaticUpdateCheckScheduler:
-    AutomaticUpdateCheckScheduling
-{
-    func schedule(
-        after delay: TimeInterval,
-        action: @escaping @MainActor @Sendable () -> Void
-    ) {
-        _ = delay
-        _ = action
-    }
-
-    func cancel() {}
-}
-
-private struct SuspendingAppStateUpdateChecker: SignedUpdateChecking {
-    func check(
-        for kind: UpdateCheckKind
-    ) async throws -> SignedUpdateCheckResult {
-        _ = kind
-        try await Task.sleep(for: .seconds(30))
-        throw CancellationError()
     }
 }
 

@@ -23,6 +23,21 @@ final class MojiPondUITests: XCTestCase {
         XCTAssertFalse(
             application.staticTexts["Send & Media Pasting"].exists
         )
+        let crashReportsToggle = application.descendants(
+            matching: .any
+        )["onboarding.crashReportsToggle"]
+        XCTAssertTrue(crashReportsToggle.waitForExistence(timeout: 2))
+        XCTAssertEqual(String(describing: crashReportsToggle.value), "1")
+        XCTAssertTrue(
+            application.staticTexts.matching(
+                NSPredicate(
+                    format: "label CONTAINS[c] %@",
+                    "On by default"
+                )
+            ).firstMatch.exists
+        )
+        crashReportsToggle.click()
+        XCTAssertEqual(String(describing: crashReportsToggle.value), "0")
         let onboardingWindow = application.windows["MojiPond"]
         XCTAssertTrue(onboardingWindow.waitForExistence(timeout: 2))
         attachScreen(

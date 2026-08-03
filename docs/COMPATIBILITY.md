@@ -15,7 +15,7 @@ only after preserving the evidence named in its notes.
 Local verification environment for this snapshot:
 
 ```text
-Date: 2026-07-29
+Date: 2026-08-02
 Hardware: Apple silicon (arm64)
 macOS: 26.3.1 (25D2128)
 Xcode: 26.5 (17F42)
@@ -28,15 +28,15 @@ Signing identities installed: none
 | Capability | State | Evidence or remaining proof |
 | --- | --- | --- |
 | macOS 14 deployment target | Automated | `project.yml` sets `MACOSX_DEPLOYMENT_TARGET=14.0`; runtime launch on macOS 14 remains pending |
-| Debug build on the environment above | Automated | Final warnings-as-errors test build completed successfully on 2026-07-30 |
-| Unit test suite on the environment above | Automated | 489 executed on 2026-07-30: 488 passed, 0 failed, and 1 intentionally gated live-network test skipped; the same Bufo test passed separately against the real repository. The adaptive-glyph group passed 24/24, including first-frame conversion, cache, priority, coalescing, supersession, and deferred-preparation coverage |
+| Debug build on the environment above | Automated | Final warnings-as-errors test build completed successfully on 2026-08-02 |
+| Unit test suite on the environment above | Automated | 494 executed on 2026-08-02: 493 passed, 0 failed, and 1 intentionally gated live-network test skipped; the same Bufo test passed separately against the real repository. The adaptive-glyph group passed 24/24, including first-frame conversion, cache, priority, coalescing, supersession, and deferred-preparation coverage |
 | Universal Release binary (`arm64` + `x86_64`) | Manually verified | The `8c5eb77` 2026-07-28 local Release archive passed strict code-signature verification; `lipo -archs` reported `x86_64 arm64`, both slices declare macOS 14.0 minimum, and the ad-hoc signature carries Hardened Runtime. The static-glyph Release build repeated those checks and weak-imports `NSAdaptiveImageGlyph` in both slices |
 | Xcode archive, ZIP, DMG, metadata, and SHA-256 output | Manually verified | `MojiPond-20260728T095411Z-local`, built from immutable snapshot `8c5eb77`, was independently checked: SHA-256 verification passed (`325e4a79…` ZIP, `103ed3f9…` DMG, `deb898ef…` metadata), metadata records the exact clean revision and branch, the metadata-free ZIP tested clean and expanded to exactly one byte-identical `MojiPond.app`, and the read-only DMG verified, mounted, and contained the same valid app plus an `/Applications` link |
 | Launch from `/Applications` with ad-hoc signing | Manually verified | The `8c5eb77` Universal Release was installed at `/Applications/MojiPond.app`, compared byte-for-byte with the verified archive, and launched successfully on the environment above. The current static-glyph Release was subsequently installed and launched at the same path; its strict signature verifies, it reports `x86_64 arm64`, and all three permission preflights remain granted |
 | Developer ID signing | Pending | No Developer ID Application identity is installed |
 | Apple notarization, stapling, and Gatekeeper distribution | Pending | No Developer ID identity or Apple notary credentials are installed. Gatekeeper is enabled and correctly rejected the personal ad-hoc build (`spctl` exit 3), so this artifact must not be described as public-distribution ready |
-| Clean-clone build | Manually verified | A new private-repository clone at exact commit `8c5eb77` passed XcodeGen, all 384 deterministic test executions (383 passed and one intentional live-network skip), `./scripts/build.sh Debug`, and all three signed-feed generator groups; the temporary checkout remained clean and was removed afterward |
-| GitHub Actions | Manually verified | CI run `30348478490` on exact commit `8c5eb77` passed the secret scan, checksum-pinned XcodeGen bootstrap, project generation, build, deterministic tests, and signed-feed generator on `macos-26` |
+| Clean-clone build | Manually verified | A new private-repository clone at exact commit `8c5eb77` passed XcodeGen, all 384 deterministic test executions (383 passed and one intentional live-network skip), and `./scripts/build.sh Debug`; the temporary checkout remained clean and was removed afterward |
+| GitHub Actions | Manually verified | CI run `30348478490` on exact commit `8c5eb77` passed the secret scan, checksum-pinned XcodeGen bootstrap, project generation, build, and deterministic tests on `macos-26` |
 
 ## Global autocomplete and safety
 
@@ -95,18 +95,19 @@ Signing identities installed: none
 | Media download validation and Noto cache | Automated | Downloader/cache tests cover HTTPS, content type, limits, cancellation, and atomic cache behavior |
 | Managed custom-media insertion validation | Automated | Resolver tests cover root containment, symlink escape, regular files, size, digest, magic bytes, and original animated bytes |
 | Static and animated custom-image adaptive glyph conversion | Automated | macOS-15 tests round-trip static images and frame 0 of animated assets through metadata-bearing HEIC and RTFD as one `NSAdaptiveImageGlyph`. The source animation remains stored unchanged; macOS 14 and rejected conversions retain the existing media fallback, including **Copy Media Instead** for failed animated WebP conversion. The successful glyph item omits raw photo representations |
-| `/sticker` grid and GIF insertion in an unsent Messages draft | Pending | Command parser, grid, resolver, and insertion engine are connected to the global runtime and covered by the 489-test suite; a manual Messages check still needs to be recorded |
-| Custom PNG insertion in an unsent Messages draft | Pending | Static glyph conversion and managed-media fallback are covered by the 489-test suite; a manual inline-glyph check with TCC permission still needs to be recorded |
+| `/sticker` grid and GIF insertion in an unsent Messages draft | Pending | Command parser, grid, resolver, and insertion engine are connected to the global runtime and covered by the 494-test suite; a manual Messages check still needs to be recorded |
+| Custom PNG insertion in an unsent Messages draft | Pending | Static glyph conversion and managed-media fallback are covered by the 494-test suite; a manual inline-glyph check with TCC permission still needs to be recorded |
 | Custom animated image inserts frame 0 as an inline glyph in Messages | Pending | First-frame conversion is automated; an unsent-draft check must confirm that the static glyph resizes with surrounding text while the stored source remains animated |
 | Clipboard unchanged after Messages media insertion | Pending | Restoration engine is automated; real-app paste race is not |
 | Messages cancellation and target switch during commit | Pending | Cancellation, transaction IDs, and stale-target revalidation are automated; an unsent-draft check that cancels and switches the focused app/target during commit is not yet recorded |
-| User-visible **Copy Media Instead** recovery | Pending | Status-menu action and notice are connected and covered by the 489-test suite; a manual clipboard check still needs to be recorded |
+| User-visible **Copy Media Instead** recovery | Pending | Status-menu action and notice are connected and covered by the 494-test suite; a manual clipboard check still needs to be recorded |
 
 ## UI and accessibility quality
 
 | Capability | State | Evidence or remaining proof |
 | --- | --- | --- |
 | Onboarding permission states and library-only path | Manually verified | The unlocked app UI suite passed 8/8 on 2026-07-30, rendering onboarding, not-requested, denied, granted, revoked, and library-only states without opening System Settings or requesting TCC access; it also exercised both onboarding-to-Library routes and the Settings-to-Library route |
+| First-run Sentry choice | Automated | The onboarding UI test requires the crash-reporting disclosure and default-on toggle, exercises opt-out, and the launch-policy tests keep Sentry stopped until setup finishes |
 | Installed Release permission preflight | Manually verified | `/Applications/MojiPond.app --print-permissions-and-quit` reported Accessibility, Input Monitoring, and Event Posting granted after the final Release install; denial, revocation, and re-grant still require an interactive System Settings audit |
 | First install, denial, grant, revocation, re-grant, and relaunch | Pending | The UI suite now proves every rendered state and the installed app currently preflights all three permissions as granted; changing real TCC state still requires explicit user action in System Settings and has not been recorded |
 | Settings persistence and legacy migration | Automated | Preferences-store tests cover schema migration plus one-time, retriable deletion of the unused legacy provider credential without reading its value |
@@ -131,17 +132,10 @@ Signing identities installed: none
 
 | Capability | State | Evidence or remaining proof |
 | --- | --- | --- |
-| HTTPS-only feed and redirect policy | Automated | Signed-update checker tests |
-| Ed25519 and P-256 signature verification before decode | Automated | CryptoKit verification tests |
-| Signed asset byte count, local size cap, and SHA-256 validation | Automated | Stager tests cover exact-size and digest mismatch, signed-count streaming cap, 512 MiB local cap, and no-download rejection |
-| Hardened single-app update ZIP | Automated | Archive tests cover traversal, symlinks, extra root payload, multiple apps, release-style ZIPs, entry/size/ratio limits, and exact extracted-tree verification |
-| Developer ID, Hardened Runtime, timestamp, Gatekeeper, and same-team policy | Automated | Stager policy tests use controlled signature identities; both the running and candidate apps must pass, so an ad-hoc current app is rejected by design |
-| Explicit one-executable installation plan | Automated | Stager/controller tests require fresh confirmation and revalidation before launching the verified candidate in installer mode |
-| Automatic checks off without feed, key, and opt-in | Automated | Disabled-path tests |
-| Manual check, opt-in daily background check, relaunch recheck, and newer-version UI state | Automated | App update-controller tests use controlled checker results, persisted scheduling hints, and a deterministic scheduler |
-| Minimum-system-version validation and gating | Automated | Checker rejects malformed versions; controller and stager tests reject a signed release requiring a newer macOS version |
-| Production feed, embedded public key, and expected Team ID | Pending | No production update configuration exists |
-| Staging a real notarized release from a Developer ID build | Pending | Requires a production-signed current app, a same-team notarized candidate, configured feed/key/Team ID, and a live Gatekeeper check |
-| Locked atomic replacement and rollback | Automated | Installer tests cover strict paths/identity, archive linkage, old-PID timeout, copy/exchange/rename/final-verify/launch/readiness failures, rollback, lock contention, staging-lease takeover, and conservative stale cleanup |
-| Real Developer ID install-and-relaunch | Pending | Requires a production-signed current app, same-team notarized candidate, configured signed feed, writable destination, final-app readiness acknowledgement, and a live Gatekeeper check |
-| Manual Finder fallback for unwritable destination | Automated | Controller/installer policy tests limit the fallback to destination-parent permission failure; a live protected destination check is not yet recorded |
+| Sparkle 2.9.5 dependency pin | Automated | `project.yml` pins the package exactly and package resolution is part of the build |
+| HTTPS appcast and Ed25519 public-key configuration | Automated | Configuration tests reject a non-HTTPS feed, missing host, and public keys that are not 32 bytes |
+| Signed feed and pre-extraction verification settings | Automated | The built Info property list enables `SURequireSignedFeed` and `SUVerifyUpdateBeforeExtraction`; Sparkle system profiling is disabled |
+| Manual and opt-in automatic checks | Automated | Controller tests cover one-time Sparkle startup, live check availability, manual checks, default-off automatic checks, and preference propagation after opt-in |
+| Signed stable appcast at `mojipond.com` | Pending | The Pages workflow and signed placeholder must deploy, then the live endpoint needs an HTTP and XML check |
+| Release appcast generated from final notarized ZIP | Pending | Requires the first protected release run with `SPARKLE_EDDSA_PRIVATE_KEY` and inspection of the draft assets |
+| Real Developer ID update and relaunch | Pending | Requires two published same-channel builds, a clean Mac, and a live update through Sparkle's standard prompt |

@@ -27,6 +27,9 @@ packages:
   Sentry:
     url: https://github.com/getsentry/sentry-cocoa.git
     exactVersion: 9.24.0
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle.git
+    exactVersion: 2.9.5
 
 targets:
   MojiPond:
@@ -42,6 +45,7 @@ targets:
         buildPhase: resources
     dependencies:
       - package: Sentry
+      - package: Sparkle
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.rajjoshi.MojiPond
@@ -52,10 +56,8 @@ targets:
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: "-"
         DEVELOPMENT_TEAM: ""
-        MOJIPOND_UPDATE_FEED_URL: ""
-        MOJIPOND_UPDATE_SIGNATURE_ALGORITHM: ""
-        MOJIPOND_UPDATE_PUBLIC_KEY_BASE64: ""
-        MOJIPOND_UPDATE_TEAM_IDENTIFIER: ""
+        SPARKLE_FEED_URL: https://mojipond.com/releases/appcast.xml
+        SPARKLE_PUBLIC_ED_KEY: YOBfWktYxbGqBH8Hd6AMyRjZeqKG8QLIeHcH4yun6Ho=
     scheme:
       gatherCoverageData: true
       testTargets:

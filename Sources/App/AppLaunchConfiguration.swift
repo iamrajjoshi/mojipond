@@ -151,21 +151,22 @@ struct AppLaunchConfiguration: Equatable {
         let updates: AppUpdateController
         switch uiTestUpdateScenario {
         case .unconfigured:
-            updates = AppUpdateController()
+            updates = AppUpdateController(
+                configuration: SparkleUpdateConfiguration(
+                    feedURL: nil,
+                    publicKey: nil
+                ),
+                driver: UITestSparkleUpdaterDriver()
+            )
         case .configured:
             updates = AppUpdateController(
-                configuration: SignedUpdateConfiguration(
+                configuration: SparkleUpdateConfiguration(
                     feedURL: URL(
-                        string: "https://updates.example.invalid/feed.json"
+                        string: "https://updates.example.invalid/appcast.xml"
                     ),
-                    publicKey: .ed25519(
-                        rawRepresentation: Data(repeating: 0, count: 32)
-                    )
+                    publicKey: Data(repeating: 0, count: 32)
                 ),
-                checkerFactory: { _ in UITestUpdateChecker() },
-                checkHistoryStore: UITestUpdateCheckHistoryStore(),
-                automaticCheckScheduler:
-                    UITestAutomaticUpdateCheckScheduler()
+                driver: UITestSparkleUpdaterDriver()
             )
         }
         return AppState(
@@ -265,34 +266,19 @@ private struct UITestPreferencesStore: PreferencesPersisting {
     func save(_ preferences: MojiPondPreferences) {}
 }
 
-private struct UITestUpdateChecker: SignedUpdateChecking {
-    func check(
-        for kind: UpdateCheckKind
-    ) async throws -> SignedUpdateCheckResult {
-        _ = kind
-        throw SignedUpdateCheckError.transportFailure
-    }
-}
-
-private final class UITestUpdateCheckHistoryStore:
-    UpdateCheckHistoryStoring
-{
-    var lastAutomaticCheckDate: Date?
-    var lastSuccessfulAutomaticCheckOutcome:
-        SuccessfulUpdateCheckOutcome?
-}
-
 @MainActor
-private final class UITestAutomaticUpdateCheckScheduler:
-    AutomaticUpdateCheckScheduling
+private final class UITestSparkleUpdaterDriver:
+    SparkleUpdaterDriving
 {
-    func schedule(
-        after delay: TimeInterval,
-        action: @escaping @MainActor @Sendable () -> Void
-    ) {
-        _ = delay
-        _ = action
-    }
+    var automaticallyChecksForUpdates = false
+    var canCheckForUpdates = true
 
-    func cancel() {}
+    func start() {}
+    func checkForUpdates() {}
+
+    func observeCanCheckForUpdates(
+        _ handler: @escaping @MainActor (Bool) -> Void
+    ) {
+        handler(canCheckForUpdates)
+    }
 }

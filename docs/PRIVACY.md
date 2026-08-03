@@ -1,10 +1,10 @@
 # Privacy
 
-MojiPond processes autocomplete locally. Crash and hang reporting is enabled
-by default and can be disabled at any time in **Settings → Privacy**.
-Online sticker search and update checks are separate opt-in features. This
-document describes the current source implementation; it does not replace
-macOS’s permission dialogs.
+MojiPond processes autocomplete locally. First-run setup shows the crash and
+hang reporting choice before Sentry starts. It defaults to on and can be
+disabled there or later in **Settings → Privacy**. Online sticker search and
+automatic update checks default to off. This document describes the current
+source implementation; it does not replace macOS’s permission dialogs.
 
 ## What MojiPond observes
 
@@ -74,7 +74,7 @@ MojiPond stores:
 | Recency and use counts | `~/Library/Application Support/MojiPond/usage.json` | Local ranking and recents |
 | Online Noto media cache | `~/Library/Caches/MojiPond/Media/` | Bounded on-demand storage for selected Noto originals |
 | Sentry diagnostic cache | `~/Library/Caches/MojiPond/Sentry/io.sentry/` | Pending crash and hang diagnostics stored by Sentry Cocoa |
-| Verified update staging | Private `0700` directory below the macOS temporary directory | Verified ZIP stored with `0400` permissions and an extracted candidate app awaiting explicit installation or discard |
+| Update files | Sparkle-managed cache and temporary locations | Signed appcast data and an update being downloaded or installed |
 | Preferences and permission-request history | macOS `UserDefaults` for `com.rajjoshi.MojiPond` | Settings and permission UI state |
 
 Usage records contain emoji identity, use count, and recency—not the surrounding
@@ -119,18 +119,19 @@ permanently so the user can paste the copied media manually.
 
 ## Network features
 
-Online sticker search and update checks each have an independent preference
-and default to off. Crash and hang reporting defaults to on and can be turned
-off in **Settings → Privacy**. Turning it off stops future collection; a report
-captured before opt-out may still be queued or finish sending, and a report
-already transmitted cannot be recalled.
+Online sticker search and automatic update checks have independent preferences
+and default to off. Manual update checks run only when requested. Crash and hang
+reporting defaults to on, but Sentry does not start on a fresh install until
+the user finishes first-run setup with that choice enabled. Turning it off
+stops future collection; a report captured before opt-out may still be queued
+or finish sending, and a report already transmitted cannot be recalled.
 
 | Feature | Data sent | Destination |
 | --- | --- | --- |
 | Crash and hang reporting | Crash or hang diagnostics, including stack traces and app/runtime context | Sentry |
 | Online sticker search | No query; MojiPond downloads a fixed Noto Animated Emoji manifest, filters it locally, and requests only the selected asset | Google’s Noto Animated Emoji manifest and asset hosts |
-| Signed update check | Standard HTTPS request metadata | The separately configured update-feed host |
-| Verified update download | Standard HTTPS request metadata, only after the user selects **Download & Verify** | The download host authenticated by the signed feed metadata, including HTTPS redirect destinations |
+| Sparkle update check | Standard HTTPS request metadata; system profiling is disabled | `mojipond.com` |
+| Sparkle update download | Standard HTTPS request metadata | The tag-specific GitHub Release URL named by the signed appcast |
 
 MojiPond does not attach typing, clipboard contents, screenshots, view
 hierarchy, or emoji files to Sentry reports. The SDK is configured not to send
@@ -147,30 +148,17 @@ a Slack-style manifest with local assets. Remote asset URLs are not fetched,
 and the retained GitHub import client has no public UI entry point.
 
 Manual update checks are user-initiated. Automatic checking runs only after
-the user enables it. Both paths are hard-disabled without a bundled HTTPS feed
-URL and trusted public key. A successful check surfaces verified version and
-release-notes metadata and does not download the app automatically.
+the user enables it. Both paths stop when the app lacks its bundled HTTPS
+appcast URL or Ed25519 public key. Sparkle 2.9.5 reads
+`https://mojipond.com/releases/appcast.xml`, requires a signed feed, and checks
+the selected release's Ed25519 enclosure signature before extraction. Sparkle
+system profiling is disabled. Automatic update download and installation
+default to off; the standard Sparkle prompt asks before installation and can
+offer its own saved preference.
 
-Downloading a newer build is a second explicit action. The response is capped
-at its signed byte count and a 512 MiB local limit, then checked against the
-signed size and SHA-256 digest. MojiPond stores the verified ZIP and one
-extracted `MojiPond.app` in a private temporary directory. Before the candidate
-can be installed, both the running and candidate apps must pass strict
-Developer ID Application, Hardened Runtime, secure-timestamp, Gatekeeper,
-bundle-ID, and same-Team-ID checks. This deliberately blocks update staging
-from a local ad-hoc build.
-
-**Install & Relaunch** requires another explicit confirmation and a fresh
-digest, bundle, and signature revalidation. The candidate's own executable
-runs a locked installer mode, replaces the exact destination with a sibling
-backup, launches the final app, and removes the backup and staging data only
-after a private readiness acknowledgement. Failed replacement rolls back to
-the verified previous build. If the destination parent is not writable, the
-candidate can instead be revealed for manual replacement. Discarding the
-download, cancelling, starting another check, or quitting before installer
-handoff removes active staging. A private advisory lease prevents live staging
-from being scavenged; expired, unlocked, exactly named crash residue is removed
-without following symlinks.
+MojiPond delegates download, extraction, installation, and rollback to Sparkle.
+The appcast points to the final notarized ZIP attached to a tagged GitHub
+Release rather than a mutable Pages asset.
 
 Imported image bytes and filenames can be stored locally as managed pack
 assets. Selected online Noto originals may use the bounded on-demand cache.
@@ -183,7 +171,8 @@ read-only staging snapshot that is removed afterward.
 
 MojiPond does not operate a first-party analytics endpoint or collect usage
 analytics. It uses Sentry Cocoa 9.24.0 for opt-out crash and hang reporting.
-The setting is available in **Settings → Privacy**.
+First-run setup discloses the data categories and offers a default-on toggle
+before the SDK starts. The same setting remains in **Settings → Privacy**.
 
 Runtime diagnostics kept inside the app are coarse states such as permission
 unavailable, unsupported target, excluded context, or event-tap timeout. They

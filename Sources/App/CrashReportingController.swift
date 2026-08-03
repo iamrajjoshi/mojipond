@@ -110,4 +110,18 @@ enum CrashReportingLaunchPolicy {
         !isUITesting
             && environment["XCTestConfigurationFilePath"] == nil
     }
+
+    static func shouldEnable(
+        isUITesting: Bool,
+        environment: [String: String],
+        hasCompletedOnboarding: Bool,
+        userAllowsCrashReports: Bool
+    ) -> Bool {
+        allowsReporting(
+            isUITesting: isUITesting,
+            environment: environment
+        )
+            && hasCompletedOnboarding
+            && userAllowsCrashReports
+    }
 }

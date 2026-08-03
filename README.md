@@ -120,10 +120,11 @@ direct Accessibility replacement. MojiPond does not request Screen Recording,
 Full Disk Access, Contacts, or access to the Messages database.
 
 Autocomplete and pack processing stay on the Mac. There are no accounts or
-usage analytics. Sentry crash and hang reporting is on by default and can be
-turned off under **Settings → Privacy**. Online Noto downloads and update checks
-are separate opt-ins. The [privacy document](docs/PRIVACY.md) lists stored data
-and network behavior.
+usage analytics. First-run setup shows the Sentry crash-reporting choice before
+the SDK starts; it defaults to on and remains available under
+**Settings → Privacy**. Online Noto downloads and automatic update checks
+default to off. The [privacy document](docs/PRIVACY.md) lists stored data and
+network behavior.
 
 ## Custom emoji packs
 
@@ -210,8 +211,8 @@ configuration, and runs the website's browser tests.
 ## License and security
 
 MojiPond is available under the [MIT License](LICENSE). Third-party code and
-artwork keep the licenses listed in `ThirdParty/` and
-`Resources/THIRD-PARTY-NOTICES.txt`.
+artwork, including Sparkle's updater framework, keep the licenses listed in
+`ThirdParty/` and `Resources/THIRD-PARTY-NOTICES.txt`.
 
 Report security problems through
 [GitHub private vulnerability reporting](https://github.com/iamrajjoshi/mojipond/security/advisories/new),

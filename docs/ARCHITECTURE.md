@@ -2,7 +2,7 @@
 
 MojiPond is a single native macOS application. Separate boundaries handle the
 global event callback, text validation, UI, persistence, imports, networking,
-and update verification. If MojiPond cannot validate the current state, it
+and updates. If MojiPond cannot validate the current state, it
 does nothing.
 
 The current direct-distribution target is not App Sandbox-enabled. Global
@@ -69,7 +69,7 @@ token range, and token content.
 | `Sources/Importing` | ZIP orchestration plus local, Slack, and public-GitHub import engines with bounded network and temporary storage |
 | `Sources/Media` | Noto client, direct HTTPS downloads, and bounded disk-cache primitives |
 | `Sources/MediaCommands` | Messages-only `/sticker` parser, state machine, result grid, offline catalog, and asset resolution |
-| `Sources/Updates` | Signed-feed verification, explicit bounded asset download, hostile ZIP inspection, Developer ID and Gatekeeper validation, private staging, and a locked one-executable installer with atomic replacement, readiness acknowledgement, and rollback |
+| `Sources/Updates` | Small adapter around Sparkle's standard updater controller and its configured appcast trust boundary |
 | `Sources/UI` | SwiftUI onboarding, settings, Library, ZIP-only import workflow, editors, previews, shared controls, and styling |
 
 ## Brand assets
@@ -244,84 +244,48 @@ Each user-facing online feature has its own preference. These features default
 to off:
 
 - online Noto sticker search;
-- signed update checks.
+- automatic update checks.
 
 Crash and hang reporting is controlled separately, defaults to on, and can be
-disabled in **Settings → Privacy**.
+disabled in **Settings → Privacy**. On a fresh install, AppDelegate waits for
+first-run setup to finish before starting Sentry, so the disclosed toggle takes
+effect before the SDK observes the process. Completed installations apply the
+saved preference at launch.
 
 The offline Noto subset and built-in Unicode catalog require no network.
 Selected online Noto originals may use the bounded on-demand disk cache. ZIP
 import preparation is local and never invokes the internal network import
 engines.
 
-Update checking requires both an HTTPS feed and a bundled trusted public key.
-Manual checks are available from the status menu and About settings;
-automatic checking runs daily after the user enables its preference. The last
-attempt and an untrusted scheduling hint from the last successful result are
-persisted. If a recent check found no actionable update, MojiPond waits for the
-remaining interval. A previously available update is checked again on launch.
-The hint never supplies metadata or authorizes a download.
-The checker limits the feed to 1 MiB by default and verifies its Ed25519 or
-P-256 signature before decoding the release metadata.
+Updates use Sparkle 2.9.5 through `SPUStandardUpdaterController`. The release
+build pins an HTTPS appcast URL and a Base64 Ed25519 public key in its Info
+property list. `SURequireSignedFeed` and `SUVerifyUpdateBeforeExtraction` are
+enabled; Sparkle system profiling is disabled. An invalid or incomplete
+configuration disables update commands.
 
-A newer verified build can be downloaded only after a separate user action.
-The staging boundary:
+The status menu and About screen can start a manual check. Automatic checks
+default to off and use Sparkle's daily schedule only after the user enables
+them. Sparkle verifies the signed appcast and enclosure signature before it
+installs a release. The app delegates download, extraction, installation, and
+rollback to Sparkle instead of maintaining a second updater security boundary.
 
-1. requires the signed byte count to fit the 512 MiB local cap;
-2. streams no more than that signed count over HTTPS, then checks the exact
-   byte count and SHA-256 digest;
-3. writes the ZIP into an app-private `0700` temporary directory;
-4. treats the authenticated archive as hostile, applying ZIP limits and
-   accepting exactly one `MojiPond.app` with no unrelated payload;
-5. verifies bundle identifier, version, and build metadata; and
-6. requires both the running and candidate apps to pass strict Developer ID
-   Application signature validation, Hardened Runtime, secure timestamp,
-   Gatekeeper assessment, and the same Team ID.
-
-These requirements deliberately block a local ad-hoc build from staging an
-update. Another explicit **Install & Relaunch** confirmation repeats the
-archive digest, bundle, signature, version, build, and identity checks. The
-verified candidate starts the installer mode of its own executable; MojiPond
-does not ship a helper, daemon, or privileged component.
-
-The installer accepts only the authenticated staging directory and exact
-installed-app destination. A private, one-time authorization record binds the
-handoff to the running app and exact staged candidate; the command-line payload
-alone is insufficient. The installer rejects symlinks and path confusion,
-acquires a non-following sibling lock, consumes that authorization, waits for
-the old PID, takes over the private staging lease, and rechecks the signed
-archive and both app identities. Expired staging directories are removed only
-when their leases are unlocked. Aged sibling artifacts with exact updater
-names are removed only after they pass the same bundle and code-identity
-validation as the running app.
-
-The installer copies the candidate to a unique sibling, verifies that copy,
-renames the candidate and current app with one atomic exchange, moves the
-displaced app to a unique backup name, and verifies the final bundle before
-launch. The new app must finish normal service and status-item startup before
-writing the expected token to a private readiness channel. Only then may the
-installer remove the backup and staging directory. Any failure after the
-exchange terminates the attempted launch, restores the backup, and re-verifies
-the restored app.
-
-Only an unwritable destination parent enables the Finder/manual
-replacement fallback. Unsafe paths, signature or identity failures, lock
-contention, timeouts, and failed rollback remain hard failures.
+The appcast lives at `https://mojipond.com/releases/appcast.xml`. Its enclosure
+points to a tag-specific GitHub Release ZIP. The release workflow signs
+the final notarized ZIP metadata with a private Ed25519 key held only in the
+protected GitHub environment; the matching public key ships in the app.
 
 ## Testing boundaries
 
 Most core and safety behavior is dependency-injected and covered without
 global permissions: fake Accessibility targets, permission providers, event
-monitors, pasteboards, HTTP transports, caches, signed feeds, update assets,
-archive extraction, and code-signature identities. Portable-format tests cover
+monitors, pasteboards, HTTP transports, and caches. Portable-format tests cover
 v1 compatibility, v2 mixed content, validation, and round trips. Library store
 tests cover custom Unicode creation and rejection; Library UI tests cover
 search and clipboard output for imported Unicode entries.
-Update tests cover bounded download, digest checks, archive layout, app
-metadata, signature policy, same-team policy, installer handoff validation,
-copy and rename failures, final verification, relaunch readiness, rollback,
-lock contention, and conservative stale cleanup. Those tests prove
-deterministic behavior at module boundaries, not compatibility with every
-third-party editor, a live TCC session, or a real notarized release.
+Updater tests cover configuration validation, lifecycle start, manual checks,
+and the automatic-check preference through a controlled Sparkle driver. The
+release workflow verifies the notarized app, signs the appcast with Sparkle's
+tooling, and publishes both as release assets. Those checks do not replace a
+real update from one published Developer ID build to the next.
 Manual evidence is tracked separately in
 [COMPATIBILITY.md](COMPATIBILITY.md).

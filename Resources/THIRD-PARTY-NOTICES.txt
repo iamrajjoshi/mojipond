@@ -95,6 +95,17 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 
+Sparkle
+-------
+
+Project source: https://github.com/sparkle-project/Sparkle
+Pinned version: 2.9.5
+License: MIT with bundled external notices
+
+Sparkle's complete license, including its bsdiff, sais-lite, Ed25519, and
+signature-verifier notices, is bundled separately in SPARKLE-LICENSE.txt.
+
+
 Noto Animated Emoji
 -------------------
 

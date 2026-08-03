@@ -24,6 +24,21 @@ const expectNoPageScroll = async (page: Page) => {
   expect(await page.evaluate(() => window.scrollY)).toBe(0);
 };
 
+test("Sparkle appcast endpoint is always published", async ({ request }) => {
+  const response = await request.get("/releases/appcast.xml");
+  expect(response.status()).toBe(200);
+  expect(response.headers()["content-type"]).toContain("xml");
+
+  const appcast = await response.text();
+  expect(appcast).toContain("<rss ");
+  expect(appcast).toContain('version="2.0"');
+  expect(appcast).toContain(
+    'xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"',
+  );
+  expect(appcast).toContain("<title>MojiPond Updates</title>");
+  expect(appcast).toContain("<!-- sparkle-signatures:");
+});
+
 test("home page is a full-screen product landing page", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");

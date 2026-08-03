@@ -164,6 +164,37 @@ struct OnboardingView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
+                PondCard {
+                    SettingsRow(
+                        icon: "stethoscope",
+                        title: "Share crash reports",
+                        detail:
+                            "On by default. Sends crash and hang diagnostics, including stack traces and app/runtime context, to Sentry. Standard request metadata, including IP, reaches Sentry. Shortcut text, clipboard contents, screenshots, and emoji files stay on this Mac."
+                    ) {
+                        Toggle(
+                            "Share crash reports",
+                            isOn: Binding(
+                                get: {
+                                    appState.preferences.network
+                                        .allowsCrashReports
+                                },
+                                set: { enabled in
+                                    appState.updatePreferences {
+                                        $0.network.allowsCrashReports = enabled
+                                    }
+                                }
+                            )
+                        )
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .tint(PondDesign.lily)
+                        .accessibilityLabel("Share crash reports")
+                        .accessibilityIdentifier(
+                            "onboarding.crashReportsToggle"
+                        )
+                    }
+                }
+
                 if !appState.isInstalledInApplications {
                     Label {
                         Text(

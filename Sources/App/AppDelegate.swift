@@ -31,39 +31,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let arguments = ProcessInfo.processInfo.arguments
-        if arguments.contains(
-            NativeUpdateInstallRequest.launchArgument
-        ) {
-            guard let request = NativeUpdateInstallRequest.parse(
-                arguments: arguments
-            ) else {
-                showInstallerFailure(
-                    NativeUpdateInstallError.unsafeInstallLayout,
-                    revealCandidate: false
-                )
-                return
-            }
-            runNativeUpdateInstaller(request)
-            return
-        }
-
-        let updateReadinessRequest:
-            NativeUpdateReadinessRequest?
-        if arguments.contains(
-            NativeUpdateReadinessRequest.launchArgument
-        ) {
-            guard let request = NativeUpdateReadinessRequest.parse(
-                arguments: arguments
-            ) else {
-                NSApp.terminate(nil)
-                return
-            }
-            updateReadinessRequest = request
-        } else {
-            updateReadinessRequest = nil
-        }
-
         if printPermissionDiagnosticIfRequested() {
             NSApp.terminate(nil)
             return
@@ -106,7 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             AdaptiveGlyphPayloadService.shared.prewarmEncoder()
         }
         appState.start()
-        let servicesStarted = configureApplicationServices()
+        configureApplicationServices()
         observeApplicationState()
         configureStatusItem()
         switch launchConfiguration.initialPresentation(
@@ -120,73 +87,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .statusItemOnly:
             break
         }
-        if let updateReadinessRequest {
-            guard servicesStarted, statusItem != nil else {
-                NSApp.terminate(nil)
-                return
-            }
-            do {
-                try SystemNativeUpdateReadinessCoordinator.signal(
-                    updateReadinessRequest,
-                    applicationURL: Bundle.main.bundleURL
-                )
-            } catch {
-                NSApp.terminate(nil)
-            }
-        }
-    }
-
-    private func runNativeUpdateInstaller(
-        _ request: NativeUpdateInstallRequest
-    ) {
-        let candidateURL = Bundle.main.bundleURL
-        let engine = NativeUpdateInstallerEngine()
-        Task.detached {
-            do {
-                _ = try await engine.install(
-                    request: request,
-                    candidateApplicationURL: candidateURL
-                )
-                await MainActor.run {
-                    NSApp.terminate(nil)
-                }
-            } catch {
-                await MainActor.run {
-                    self.showInstallerFailure(
-                        error,
-                        revealCandidate:
-                            error as? NativeUpdateInstallError
-                                == .destinationNotWritable
-                    )
-                }
-            }
-        }
-    }
-
-    private func showInstallerFailure(
-        _ error: Error,
-        revealCandidate: Bool
-    ) {
-        NSApp.activate(ignoringOtherApps: true)
-        let alert = NSAlert()
-        alert.messageText = "MojiPond could not finish the update"
-        alert.informativeText =
-            (error as? LocalizedError)?.errorDescription
-                ?? "The installed app was left unchanged."
-        alert.alertStyle = .critical
-        if revealCandidate {
-            alert.addButton(withTitle: "Show Verified App in Finder")
-            alert.addButton(withTitle: "Close")
-            if alert.runModal() == .alertFirstButtonReturn {
-                NSWorkspace.shared.activateFileViewerSelecting([
-                    Bundle.main.bundleURL
-                ])
-            }
-        } else {
-            alert.addButton(withTitle: "Close")
-            alert.runModal()
-        }
-        NSApp.terminate(nil)
     }
 
     private func configureStatusItem() {
@@ -491,199 +391,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc
     private func checkForUpdates() {
-        appState.updates.checkManually(
-            automaticChecksEnabled:
-                appState.preferences.network.allowsUpdateChecks
-        )
-    }
-
-    @objc
-    private func downloadAndVerifyUpdate() {
-        appState.updates.stageAvailableUpdate()
-    }
-
-    @objc
-    private func showVerifiedUpdateForManualInstall() {
-        let alert = NSAlert()
-        alert.messageText = "Show the update in Finder?"
-        alert.informativeText =
-            "MojiPond will check the download again, then show the app. "
-            + "Quit MojiPond, replace the installed copy, and reopen it."
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "Show in Finder")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else {
-            return
-        }
-        Task {
-            guard let plan =
-                await appState.updates.revalidateInstallation() else {
-                return
-            }
-            NSWorkspace.shared.activateFileViewerSelecting([
-                plan.stagedApplicationURL
-            ])
-        }
-    }
-
-    @objc
-    private func installVerifiedUpdateAndRelaunch() {
-        let alert = NSAlert()
-        alert.messageText = "Install the update and relaunch?"
-        alert.informativeText =
-            "MojiPond will check the download, install it, and reopen. "
-            + "If installation fails, this version is restored."
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "Install & Relaunch")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else {
-            return
-        }
-        Task {
-            if await appState.updates.installAndRelaunch() {
-                NSApp.terminate(nil)
-            }
-        }
-    }
-
-    @objc
-    private func discardVerifiedUpdate() {
-        appState.updates.discardStagedUpdate()
-    }
-
-    @objc
-    private func cancelUpdateOperation() {
-        appState.updates.cancelCurrentOperation()
-    }
-
-    @objc
-    private func openUpdateReleaseNotes() {
-        guard
-            let metadata = appState.updates.availableMetadata,
-            let releaseNotesURL = metadata.releaseNotesURL
-        else {
-            return
-        }
-        NSWorkspace.shared.open(releaseNotesURL)
+        appState.updates.checkManually()
     }
 
     private func addUpdateItems(to menu: NSMenu) {
-        guard appState.updates.canCheckForUpdates else {
+        guard appState.updates.isConfigured else {
             return
         }
-        switch appState.updates.state {
-        case let .available(metadata):
-            menu.addItem(
-                withTitle:
-                    "Update MojiPond to \(metadata.version)…",
-                action: #selector(downloadAndVerifyUpdate),
-                keyEquivalent: ""
-            )
-            if metadata.releaseNotesURL != nil {
-                menu.addItem(
-                    withTitle: "Read Update Release Notes…",
-                    action: #selector(openUpdateReleaseNotes),
-                    keyEquivalent: ""
-                )
-            }
-        case let .staging(metadata):
-            menu.addItem(
-                withTitle:
-                    "Downloading MojiPond \(metadata.version)…",
-                action: nil,
-                keyEquivalent: ""
-            ).isEnabled = false
-            menu.addItem(
-                withTitle: "Cancel Update",
-                action: #selector(cancelUpdateOperation),
-                keyEquivalent: ""
-            )
-        case let .revalidating(metadata):
-            menu.addItem(
-                withTitle:
-                    "Checking MojiPond \(metadata.version)…",
-                action: nil,
-                keyEquivalent: ""
-            ).isEnabled = false
-            menu.addItem(
-                withTitle: "Cancel Update",
-                action: #selector(cancelUpdateOperation),
-                keyEquivalent: ""
-            )
-        case let .launchingInstaller(metadata):
-            menu.addItem(
-                withTitle:
-                    "Preparing MojiPond \(metadata.version)…",
-                action: nil,
-                keyEquivalent: ""
-            ).isEnabled = false
-        case let .staged(metadata, _):
-            switch appState.updates.nativeInstallAvailability {
-            case .available:
-                menu.addItem(
-                    withTitle:
-                        "Install MojiPond \(metadata.version) & Relaunch…",
-                    action:
-                        #selector(installVerifiedUpdateAndRelaunch),
-                    keyEquivalent: ""
-                )
-            case .manualInstallRequired:
-                menu.addItem(
-                    withTitle:
-                        "Show MojiPond \(metadata.version) in Finder…",
-                    action:
-                        #selector(showVerifiedUpdateForManualInstall),
-                    keyEquivalent: ""
-                )
-            case .unavailable, .none:
-                menu.addItem(
-                    withTitle: "Update Needs Attention",
-                    action: nil,
-                    keyEquivalent: ""
-                ).isEnabled = false
-            }
-            menu.addItem(
-                withTitle: "Discard Update",
-                action: #selector(discardVerifiedUpdate),
-                keyEquivalent: ""
-            )
-            if metadata.releaseNotesURL != nil {
-                menu.addItem(
-                    withTitle: "Read Update Release Notes…",
-                    action: #selector(openUpdateReleaseNotes),
-                    keyEquivalent: ""
-                )
-            }
-        case .checking:
-            menu.addItem(
-                withTitle: "Checking for Updates…",
-                action: nil,
-                keyEquivalent: ""
-            ).isEnabled = false
-            menu.addItem(
-                withTitle: "Cancel Update Check",
-                action: #selector(cancelUpdateOperation),
-                keyEquivalent: ""
-            )
-        case .unconfigured:
-            break
-        case .idle,
-             .current,
-             .incompatible,
-             .disabled,
-             .failed:
-            menu.addItem(
-                withTitle: "Check for Updates…",
-                action: #selector(checkForUpdates),
-                keyEquivalent: ""
-            )
-        }
+        let updateItem = menu.addItem(
+            withTitle: "Check for Updates…",
+            action: #selector(checkForUpdates),
+            keyEquivalent: ""
+        )
+        updateItem.isEnabled = appState.updates.canCheckForUpdates
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         runtimeController?.stop()
         appState.permissions.stopLiveUpdates()
-        appState.updates.prepareForTermination()
         if let rootURL = launchConfiguration.ephemeralRootURL {
             try? FileManager.default.removeItem(at: rootURL)
         }
@@ -831,8 +556,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             isUITesting: launchConfiguration.isUITesting,
             environment: ProcessInfo.processInfo.environment
         ) {
-            appState.$preferences
-                .map { $0.network.allowsCrashReports }
+            Publishers.CombineLatest(
+                appState.$preferences
+                    .map { $0.network.allowsCrashReports },
+                appState.$hasCompletedOnboarding
+            )
+                .map { allowsCrashReports, hasCompletedOnboarding in
+                    allowsCrashReports && hasCompletedOnboarding
+                }
                 .removeDuplicates()
                 .sink { [weak self] enabled in
                     self?.crashReporting.setEnabled(enabled)
@@ -858,14 +589,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .removeDuplicates()
             .sink { [weak self] state in
                 self?.appState.setRuntimeState(state)
-            }
-            .store(in: &cancellables)
-
-        appState.updates.$state
-            .removeDuplicates()
-            .dropFirst()
-            .sink { [weak self] _ in
-                self?.rebuildStatusMenu()
             }
             .store(in: &cancellables)
 
@@ -911,14 +634,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configureCrashReportingIfAllowed() {
-        guard CrashReportingLaunchPolicy.allowsReporting(
-            isUITesting: launchConfiguration.isUITesting,
-            environment: ProcessInfo.processInfo.environment
-        ) else {
-            return
-        }
         crashReporting.setEnabled(
-            appState.preferences.network.allowsCrashReports
+            CrashReportingLaunchPolicy.shouldEnable(
+                isUITesting: launchConfiguration.isUITesting,
+                environment: ProcessInfo.processInfo.environment,
+                hasCompletedOnboarding: appState.hasCompletedOnboarding,
+                userAllowsCrashReports:
+                    appState.preferences.network.allowsCrashReports
+            )
         )
     }
 

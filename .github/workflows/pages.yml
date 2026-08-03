@@ -60,51 +60,45 @@ jobs:
           release_tag="$(
             gh release list \
               --exclude-drafts \
+              --exclude-pre-releases \
               --limit 1 \
               --json tagName \
               --jq '.[0].tagName // empty'
           )"
           if [[ -z "${release_tag}" ]]; then
-            echo "No published release exists yet; the site will show preview status."
+            echo "No stable release exists yet; keeping the committed empty appcast."
             exit 0
           fi
           release_json="$(
             gh release view "${release_tag}" --json tagName,assets
           )"
 
-          dmg_size="$(
-            jq -r '.assets[] | select(.name == "MojiPond.dmg") | .size' \
+          has_appcast="$(
+            jq -r 'any(.assets[]; .name == "appcast.xml")' \
               <<<"${release_json}"
           )"
-          if [[ -z "${dmg_size}" || "${dmg_size}" == "null" ]]; then
-            echo "The latest release does not contain MojiPond.dmg." >&2
+          if [[ "${has_appcast}" != "true" ]]; then
+            echo "Stable release ${release_tag} does not contain appcast.xml." >&2
             exit 1
           fi
 
           gh release download \
             "${release_tag}" \
-            --pattern 'MojiPond.dmg' \
-            --pattern 'MojiPond.zip' \
-            --pattern 'SHA256SUMS.txt' \
-            --dir website/public/releases
-          has_update_feed="$(
-            jq -r 'any(.assets[]; .name == "update-feed.json")' \
-              <<<"${release_json}"
-          )"
-          if [[ "${has_update_feed}" == "true" ]]; then
-            gh release download \
-              "${release_tag}" \
-              --pattern 'update-feed.json' \
-              --dir website/public/releases
-          else
-            echo "No signed updater feed is attached to this release yet."
-          fi
+            --pattern 'appcast.xml' \
+            --dir website/public/releases \
+            --clobber
 
-          version="$(jq -r '.tagName | ltrimstr("v")' <<<"${release_json}")"
-          pnpm --filter @mojipond/site release-manifest \
-            "${version}" \
-            "${dmg_size}" \
-            public/releases/release.json
+          appcast_path=website/public/releases/appcast.xml
+          expected_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${release_tag}/MojiPond.zip"
+          if ! grep -Fq "url=\"${expected_url}\"" "${appcast_path}"; then
+            echo "The appcast does not reference the immutable ${release_tag} ZIP." >&2
+            exit 1
+          fi
+          if ! grep -Fq 'sparkle:edSignature=' "${appcast_path}" \
+              || ! grep -Fq '<!-- sparkle-signatures:' "${appcast_path}"; then
+            echo "The appcast is missing an update or feed signature." >&2
+            exit 1
+          fi
 
       - name: Build website
         run: pnpm site:build

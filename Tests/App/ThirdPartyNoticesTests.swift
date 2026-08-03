@@ -32,9 +32,32 @@ final class ThirdPartyNoticesTests: XCTestCase {
             notice.contains("Copyright (c) 2026 Josh LaCalamito")
         )
         XCTAssertTrue(notice.contains("Copyright (c) 2015 Sentry"))
+        XCTAssertTrue(notice.contains("Pinned version: 2.9.5"))
         XCTAssertTrue(
             notice.contains("Creative Commons Attribution 4.0")
         )
+    }
+
+    func testDistributableBundleContainsSparkleNotices() throws {
+        let noticeURL = try XCTUnwrap(
+            Bundle.main.url(
+                forResource: "SPARKLE-LICENSE",
+                withExtension: "txt"
+            )
+        )
+        let notice = try String(contentsOf: noticeURL, encoding: .utf8)
+
+        for marker in [
+            "Copyright (c) 2006-2013 Andy Matuschak",
+            "Copyright 2003-2005 Colin Percival",
+            "Copyright (c) 2008-2010 Yuta Mori",
+            "Copyright (c) 2015 Orson Peters",
+        ] {
+            XCTAssertTrue(
+                notice.contains(marker),
+                "Missing Sparkle notice marker: \(marker)"
+            )
+        }
     }
 
     func testDistributableBundleContainsSentryTransitiveNotices() throws {
