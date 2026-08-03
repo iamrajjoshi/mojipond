@@ -339,8 +339,7 @@ jobs:
           public_directory="${PWD}/Artifacts/public-release"
           public_zip="${public_directory}/MojiPond.zip"
           public_dmg="${public_directory}/MojiPond.dmg"
-          staging_directory="${RUNNER_TEMP}/mojipond-dmg"
-          mkdir -m 0700 "${public_directory}" "${staging_directory}"
+          mkdir -m 0700 "${public_directory}"
 
           /usr/bin/xcrun notarytool submit "${source_zip}" \
             --key "${NOTARY_KEY_PATH}" \
@@ -364,13 +363,7 @@ jobs:
             "${app_path}" \
             "${public_zip}"
 
-          /usr/bin/ditto "${app_path}" "${staging_directory}/MojiPond.app"
-          /bin/ln -s /Applications "${staging_directory}/Applications"
-          /usr/bin/hdiutil create \
-            -volname MojiPond \
-            -srcfolder "${staging_directory}" \
-            -format UDZO \
-            "${public_dmg}"
+          ./scripts/create-dmg.sh "${app_path}" "${public_dmg}"
           /usr/bin/codesign \
             --force \
             --sign "${MOJIPOND_SIGNING_IDENTITY}" \
@@ -421,6 +414,8 @@ jobs:
           ./scripts/verify-app-compatibility.sh "${extracted_app}"
 
           /usr/bin/hdiutil verify "${public_directory}/MojiPond.dmg"
+          ./scripts/verify-dmg-layout.sh \
+            "${public_directory}/MojiPond.dmg"
           /usr/sbin/spctl \
             --assess \
             --type open \

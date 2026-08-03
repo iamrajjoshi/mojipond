@@ -26,6 +26,8 @@ Artifacts/
 LocalPacks/
 Screenshots/Local/
 node_modules/
+__pycache__/
+*.py[cod]
 website/.astro/
 website/dist/
 website/test-results/

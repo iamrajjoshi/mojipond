@@ -84,10 +84,6 @@ final class AppState: ObservableObject {
         preferences.activationMode == .enabled
     }
 
-    var isInstalledInApplications: Bool {
-        Bundle.main.bundleURL.path.hasPrefix("/Applications/")
-    }
-
     var canMonitorTyping: Bool {
         permissions.snapshot.inputMonitoring == .granted
             && permissions.snapshot.accessibility == .granted

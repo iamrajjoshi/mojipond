@@ -127,7 +127,7 @@ fi
 /usr/bin/codesign --verify --deep --strict --verbose=2 "${APPLICATION_PATH}"
 "${0:A:h}/verify-app-compatibility.sh" "${APPLICATION_PATH}"
 /usr/bin/unzip -tq "${ZIP_PATH}"
-/usr/bin/hdiutil verify "${DMG_PATH}"
+"${0:A:h}/verify-dmg-layout.sh" "${DMG_PATH}"
 
 if [[ "${SIGNING_CLASS}" == "developer-id" ]]; then
   SIGNATURE_DETAILS=$(

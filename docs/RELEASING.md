@@ -167,6 +167,9 @@ Before creating the draft it:
 - uploads dSYMs to Sentry using `--no-sources`;
 - notarizes the ZIP, staples the app, rebuilds the public ZIP, then notarizes
   and staples the DMG;
+- builds the DMG with a Retina background, fixed Finder layout, and an
+  `/Applications` drag target, then verifies those presentation records
+  headlessly;
 - proves the Sparkle private secret derives the public key embedded in the
   packaged app;
 - runs strict code-signature, Gatekeeper, stapler, architecture, DMG, checksum,
@@ -186,7 +189,8 @@ xmllint --noout appcast.xml
 ```
 
 Install from the DMG on a Mac that does not have the development build or its
-TCC grants. Check Gatekeeper launch, first-run setup, the default-on Sentry
+TCC grants. Drag MojiPond to Applications, eject the image, then launch the
+installed copy. Check Gatekeeper launch, first-run setup, the default-on Sentry
 choice, permission requests, Unicode insertion, ZIP import, and one update from
 the prior public version. Do not use a conversation you cannot safely alter for
 the Messages check.

@@ -179,10 +179,8 @@ cleanup() {
 trap cleanup EXIT
 
 SOURCE_SNAPSHOT_DIRECTORY="${TEMPORARY_DIRECTORY}/source"
-DMG_STAGING_DIRECTORY="${TEMPORARY_DIRECTORY}/dmg"
 /bin/mkdir -m 0700 \
-  "${SOURCE_SNAPSHOT_DIRECTORY}" \
-  "${DMG_STAGING_DIRECTORY}"
+  "${SOURCE_SNAPSHOT_DIRECTORY}"
 /usr/bin/git \
   -C "${REPOSITORY_ROOT}" \
   archive \
@@ -256,10 +254,6 @@ if ! /usr/bin/grep -q "Karl Stenerud" "${SENTRY_NOTICE_PATH}" \
 fi
 
 /usr/bin/ditto \
-  "${APPLICATION_PATH}" \
-  "${DMG_STAGING_DIRECTORY}/MojiPond.app"
-/bin/ln -s /Applications "${DMG_STAGING_DIRECTORY}/Applications"
-/usr/bin/ditto \
   -c \
   -k \
   --norsrc \
@@ -268,10 +262,8 @@ fi
   --keepParent \
   "${APPLICATION_PATH}" \
   "${ZIP_PATH}"
-/usr/bin/hdiutil create \
-  -volname "MojiPond" \
-  -srcfolder "${DMG_STAGING_DIRECTORY}" \
-  -format UDZO \
+"${SCRIPT_DIRECTORY}/create-dmg.sh" \
+  "${APPLICATION_PATH}" \
   "${DMG_PATH}"
 
 if [[ "${SIGNING_IDENTITY}" != "-" ]]; then

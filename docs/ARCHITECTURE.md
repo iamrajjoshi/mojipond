@@ -78,6 +78,11 @@ a third-party logo or emoji. The production sizes in
 `Resources/Assets.xcassets/AppIcon.appiconset/` are derivatives of that source;
 regenerate and review the complete icon set whenever the source changes.
 
+`packaging/dmg/MojiPond-DMG-Background.png` and its `@2x` counterpart were
+generated specifically for MojiPond using the application icon as a style
+reference. They contain no third-party logo or emoji. `dmgbuild` combines the
+pair into the Retina Finder background used by the release disk image.
+
 ## Text access and fail-closed behavior
 
 The Accessibility adapter normally requests only the 66 UTF-16 code units

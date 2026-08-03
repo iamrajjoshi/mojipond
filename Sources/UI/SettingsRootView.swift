@@ -1093,17 +1093,20 @@ struct SettingsRow<Accessory: View>: View {
     let icon: String
     let title: String
     let detail: String
+    let detailAccessibilityIdentifier: String?
     private let accessory: Accessory
 
     init(
         icon: String,
         title: String,
         detail: String,
+        detailAccessibilityIdentifier: String? = nil,
         @ViewBuilder accessory: () -> Accessory
     ) {
         self.icon = icon
         self.title = title
         self.detail = detail
+        self.detailAccessibilityIdentifier = detailAccessibilityIdentifier
         self.accessory = accessory()
     }
 
@@ -1118,16 +1121,27 @@ struct SettingsRow<Accessory: View>: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.callout.weight(.medium))
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                detailText
             }
             .layoutPriority(1)
 
             Spacer(minLength: 10)
             accessory
                 .fixedSize(horizontal: true, vertical: false)
+        }
+    }
+
+    @ViewBuilder
+    private var detailText: some View {
+        let text = Text(detail)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+        if let detailAccessibilityIdentifier {
+            text.accessibilityIdentifier(detailAccessibilityIdentifier)
+        } else {
+            text
         }
     }
 }
