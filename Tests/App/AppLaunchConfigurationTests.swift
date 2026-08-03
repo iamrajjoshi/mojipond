@@ -140,7 +140,8 @@ final class AppLaunchConfigurationTests: XCTestCase {
         )
         let appState = configuration.makeAppState()
         XCTAssertFalse(appState.launchAtLoginEnabled)
-        XCTAssertTrue(appState.updates.canCheckForUpdates)
+        XCTAssertTrue(appState.updates.isConfigured)
+        XCTAssertFalse(appState.updates.canCheckForUpdates)
     }
 
     func testUITestLaunchFallsBackForUnknownScreenAndPermissionState() {

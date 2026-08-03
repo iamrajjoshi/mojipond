@@ -16,7 +16,6 @@ final class MojiPondPreferencesTests: XCTestCase {
         XCTAssertEqual(preferences.shortcode.parserTimeout, 0)
         XCTAssertNil(preferences.defaultSkinTone)
         XCTAssertFalse(preferences.network.allowsStickerSearch)
-        XCTAssertFalse(preferences.network.allowsUpdateChecks)
         XCTAssertTrue(preferences.network.allowsCrashReports)
     }
 
@@ -169,7 +168,6 @@ final class MojiPondPreferencesTests: XCTestCase {
         )
 
         XCTAssertTrue(preferences.allowsStickerSearch)
-        XCTAssertFalse(preferences.allowsUpdateChecks)
         XCTAssertTrue(preferences.allowsCrashReports)
     }
 

@@ -25,22 +25,16 @@ The browser tests start an Astro preview server and cover desktop and mobile
 viewports, the interactive shortcode demo, links, metadata, and automated
 accessibility checks.
 
-## Release assets
+## Sparkle appcast
 
-The site does not hard-code a download version. The Pages workflow stages the
-latest published GitHub release under `public/releases/` before building:
+`public/releases/appcast.xml` keeps the update endpoint live before the first
+public release. When a stable GitHub Release is published, the Pages workflow
+replaces that placeholder with the signed `appcast.xml` attached to the latest
+stable release. The appcast points to the tag-specific release ZIP; Pages
+does not copy or rename the update archive.
 
-```text
-MojiPond.dmg
-MojiPond.zip
-SHA256SUMS.txt
-update-feed.json
-release.json
-```
-
-`update-feed.json` is optional until the offline signing step is complete. The
-landing page does not advertise a development build. Add a public download only
-after the signed release and its support policy are ready.
+The landing page does not advertise a development build. Add a public download
+only after the Developer ID release is notarized and the appcast is signed.
 
 Do not add generated `dist/`, `.astro/`, Playwright output, signing material,
 or private release assets to Git.

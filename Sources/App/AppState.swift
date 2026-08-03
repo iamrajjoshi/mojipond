@@ -38,15 +38,6 @@ final class AppState: ObservableObject {
     @Published var preferences: MojiPondPreferences {
         didSet {
             preferencesStore.save(preferences)
-            let oldAutomaticChecks =
-                oldValue.network.allowsUpdateChecks
-            let newAutomaticChecks =
-                preferences.network.allowsUpdateChecks
-            if oldAutomaticChecks != newAutomaticChecks {
-                updates.automaticChecksPreferenceDidChange(
-                    enabled: newAutomaticChecks
-                )
-            }
         }
     }
 
@@ -143,9 +134,7 @@ final class AppState: ObservableObject {
 
     func start() {
         permissions.startLiveUpdates()
-        updates.start(
-            automaticChecksEnabled: preferences.network.allowsUpdateChecks
-        )
+        updates.start()
     }
 
     func setEnabled(_ enabled: Bool) {

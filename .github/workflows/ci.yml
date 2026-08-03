@@ -135,9 +135,6 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             test
 
-      - name: Test signed update feed generator
-        run: /usr/bin/xcrun swift scripts/test-update-feed-generator.swift
-
       - name: Check shell scripts
         run: /bin/zsh -n scripts/*.sh
 

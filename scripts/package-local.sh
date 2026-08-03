@@ -219,6 +219,7 @@ fi
 
 NOTICE_PATH="${APPLICATION_PATH}/Contents/Resources/THIRD-PARTY-NOTICES.txt"
 SENTRY_NOTICE_PATH="${APPLICATION_PATH}/Contents/Resources/SENTRY-THIRD-PARTY-NOTICES.txt"
+SPARKLE_NOTICE_PATH="${APPLICATION_PATH}/Contents/Resources/SPARKLE-LICENSE.txt"
 LICENSE_PATH="${APPLICATION_PATH}/Contents/Resources/MOJIPOND-LICENSE.txt"
 if [[ ! -s "${LICENSE_PATH}" ]] \
     || ! /usr/bin/grep -q "MIT License" "${LICENSE_PATH}" \
@@ -238,6 +239,12 @@ if ! /usr/bin/grep -q "Copyright (c) 2019 GitHub, Inc." "${NOTICE_PATH}" \
 fi
 if [[ ! -s "${SENTRY_NOTICE_PATH}" ]]; then
   echo "Archive is missing the bundled Sentry transitive notices." >&2
+  exit 65
+fi
+if [[ ! -s "${SPARKLE_NOTICE_PATH}" ]] \
+    || ! /usr/bin/grep -q "Copyright (c) 2006-2013 Andy Matuschak" "${SPARKLE_NOTICE_PATH}" \
+    || ! /usr/bin/grep -q "Copyright 2003-2005 Colin Percival" "${SPARKLE_NOTICE_PATH}"; then
+  echo "Archive is missing Sparkle's bundled license notices." >&2
   exit 65
 fi
 if ! /usr/bin/grep -q "Karl Stenerud" "${SENTRY_NOTICE_PATH}" \

@@ -52,8 +52,6 @@ struct SettingsRootView: View {
     @State private var applicationExclusionError: String?
     @State private var exclusionError: String?
     @State private var permissionNavigationError: String?
-    @State private var showsManualUpdateConfirmation = false
-    @State private var showsNativeUpdateConfirmation = false
     @State private var showsUsageResetConfirmation = false
     @State private var destination: SettingsDestination
     @FocusState private var focusedDestination: SettingsDestination?
@@ -322,7 +320,7 @@ struct SettingsRootView: View {
                 }
             }
 
-            if updates.canCheckForUpdates {
+            if updates.isConfigured {
                 SettingsCard(title: "Updates") {
                     SettingsRow(
                         icon: "arrow.triangle.2.circlepath",
@@ -331,8 +329,13 @@ struct SettingsRootView: View {
                     ) {
                         Toggle(
                             "Keep MojiPond up to date",
-                            isOn: preference(
-                                \.network.allowsUpdateChecks
+                            isOn: Binding(
+                                get: {
+                                    updates.automaticChecksEnabled
+                                },
+                                set: {
+                                    updates.setAutomaticChecksEnabled($0)
+                                }
                             )
                         )
                         .labelsHidden()
@@ -606,7 +609,7 @@ struct SettingsRootView: View {
                     icon: "stethoscope",
                     title: "Share crash reports",
                     detail:
-                        "Sends crash and hang stack traces, app version, and macOS version. MojiPond does not attach typing, clipboard contents, screenshots, or emoji files."
+                        "Sends crash and hang diagnostics, including stack traces and app/runtime context, to Sentry. Standard request metadata, including IP, reaches Sentry. MojiPond does not attach typing, clipboard contents, screenshots, or emoji files."
                 ) {
                     Toggle(
                         "Share crash reports",
@@ -834,119 +837,15 @@ struct SettingsRootView: View {
                     forInfoDictionaryKey: "CFBundleShortVersionString"
                 ) as? String ?? "Development"
             )
-            if updates.canCheckForUpdates {
+            if updates.isConfigured {
                 LabeledContent("Updates", value: updates.statusSummary)
-                if case let .failed(message) = updates.state {
-                    Text(message)
-                        .font(.caption)
-                        .foregroundStyle(PondDesign.errorForeground)
+                Button("Check for Updates…") {
+                    updates.checkManually()
                 }
-                if let metadata = updates.availableMetadata,
-                   let releaseNotesURL = metadata.releaseNotesURL {
-                    Link(
-                        "Read release notes for \(metadata.version)",
-                        destination: releaseNotesURL
-                    )
-                }
-                if case let .available(metadata) = updates.state {
-                    Button("Download MojiPond \(metadata.version)…") {
-                        updates.stageAvailableUpdate()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .accessibilityHint(
-                        "Downloads and checks the update before installation."
-                    )
-                }
-                if case let .staging(metadata) = updates.state {
-                    HStack {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text(
-                            "Downloading MojiPond \(metadata.version)…"
-                        )
-                        Spacer()
-                        Button("Cancel") {
-                            updates.cancelCurrentOperation()
-                        }
-                    }
-                }
-                if case let .revalidating(metadata) = updates.state {
-                    HStack {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text(
-                            "Checking MojiPond \(metadata.version)…"
-                        )
-                        Spacer()
-                        Button("Cancel") {
-                            updates.cancelCurrentOperation()
-                        }
-                    }
-                }
-                if case let .launchingInstaller(metadata) = updates.state {
-                    HStack {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text(
-                            "Starting the MojiPond \(metadata.version) installer…"
-                        )
-                    }
-                }
-                if case let .staged(metadata, _) = updates.state {
-                    Label(
-                        "MojiPond \(metadata.version) is ready to install.",
-                        systemImage: "checkmark.shield.fill"
-                    )
-                    .foregroundStyle(PondDesign.lily)
-                    if let installationStatusMessage =
-                        updates.installationStatusMessage {
-                        Text(installationStatusMessage)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        switch updates.nativeInstallAvailability {
-                        case .available:
-                            Button("Install & Relaunch…") {
-                                showsNativeUpdateConfirmation = true
-                            }
-                            .buttonStyle(.borderedProminent)
-                        case let .manualInstallRequired(reason):
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(reason)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Button("Show in Finder…") {
-                                    showsManualUpdateConfirmation = true
-                                }
-                                .buttonStyle(.borderedProminent)
-                            }
-                        case let .unavailable(reason):
-                            Text(reason)
-                                .font(.caption)
-                                .foregroundStyle(PondDesign.errorForeground)
-                        case .none:
-                            EmptyView()
-                        }
-                        Button("Discard Download", role: .destructive) {
-                            updates.discardStagedUpdate()
-                        }
-                    }
-                }
-                Button(
-                    updates.isChecking ? "Checking…" : "Check for Updates…"
-                ) {
-                    updates.checkManually(
-                        automaticChecksEnabled:
-                        appState.preferences.network.allowsUpdateChecks
-                    )
-                }
-                .disabled(updates.isBusy)
-                if updates.isChecking {
-                    Button("Cancel Update Check") {
-                        updates.cancelCurrentOperation()
-                    }
-                }
+                .disabled(!updates.canCheckForUpdates)
+                .accessibilityHint(
+                    "Uses Sparkle to securely check for a newer version."
+                )
             }
             Text(
                 "Shortcodes are processed on this Mac. MojiPond does not "
@@ -955,47 +854,6 @@ struct SettingsRootView: View {
             .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .confirmationDialog(
-            "Install the update and relaunch?",
-            isPresented: $showsNativeUpdateConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Install & Relaunch") {
-                Task {
-                    if await updates.installAndRelaunch() {
-                        NSApp.terminate(nil)
-                    }
-                }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(
-                "MojiPond will install the update and relaunch. If installation "
-                    + "fails, the current version is restored."
-            )
-        }
-        .confirmationDialog(
-            "Show the update in Finder?",
-            isPresented: $showsManualUpdateConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Show in Finder") {
-                Task {
-                    guard let plan =
-                        await updates.revalidateInstallation() else {
-                        return
-                    }
-                    NSWorkspace.shared.activateFileViewerSelecting([
-                        plan.stagedApplicationURL
-                    ])
-                }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(
-                "MojiPond will check the update again, then show it in Finder."
-            )
-        }
     }
 
     private var triggerText: String {
@@ -1252,7 +1110,7 @@ private struct SettingsCard<Content: View>: View {
     }
 }
 
-private struct SettingsRow<Accessory: View>: View {
+struct SettingsRow<Accessory: View>: View {
     let icon: String
     let title: String
     let detail: String

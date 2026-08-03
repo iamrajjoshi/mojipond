@@ -1,629 +1,229 @@
 # Releasing MojiPond
 
-MojiPond defines two artifact classes:
+MojiPond ships outside the Mac App Store as a Developer ID application. GitHub
+Actions builds the release on `main`, uploads dSYMs to Sentry, notarizes the
+artifacts, signs a Sparkle appcast, and creates one draft GitHub Release. A
+person reviews and publishes that draft.
 
-1. **Local development artifacts** — Apple Development signed when one valid
-   identity is available, otherwise ad-hoc signed; suitable for this Mac and
-   not public distribution.
-2. **Direct-distribution artifacts** — signed with a Developer ID Application
-   certificate, hardened, timestamped, notarized by Apple, stapled, and tested
-   after download.
+The release workflow never publishes a draft on its own.
 
-Do not present a local artifact as notarized or Gatekeeper-ready.
+## Release trust
 
-Apple’s current requirements are described in
-[Notarizing macOS software before distribution](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution),
-[Customizing the notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow),
-and
-[Developer ID certificates](https://developer.apple.com/help/account/certificates/create-developer-id-certificates).
+Three unrelated credentials protect a release:
 
-## Automated release path
+- Apple Developer ID signs the app and DMG; App Store Connect notarizes them.
+- Sparkle's Ed25519 key signs the appcast and update enclosure metadata. The
+  private key is not an Apple credential.
+- A Sentry organization token uploads release dSYMs without source files.
 
-The repository has three release-related workflows:
+Keep the Apple and Sparkle private keys in the protected GitHub environment
+named `production-release`. Do not put them in `.env`, repository variables,
+workflow output, artifacts, or release notes.
 
-- **CI** runs the deterministic app suite, builds Debug and Universal Release
-  configurations, checks shell syntax, and verifies the website.
-- **Release rehearsal** runs every Monday and on demand. It builds and checks
-  an ad-hoc Universal package without Apple credentials. Its seven-day
-  artifact is test evidence, not a public release.
-- **Release** runs only on `main` and only when started manually. It checks the
-  requested version against `project.yml`, imports temporary signing material,
-  builds with the public update feed, verification key, and Team ID, notarizes
-  both public formats, staples the app and DMG, checks their signatures and
-  architecture, then creates one draft GitHub release.
+## GitHub configuration
 
-The production job uses the protected `production-release` environment. Add
-these environment secrets after joining the paid Apple Developer Program:
+Set this repository variable:
 
-| Name | Value |
-| --- | --- |
-| `DEVELOPER_ID_P12_BASE64` | Base64 of the Developer ID Application certificate and private key exported as PKCS #12 |
-| `DEVELOPER_ID_P12_PASSWORD` | Password used for that PKCS #12 export |
-| `APPLE_NOTARY_KEY_P8_BASE64` | Base64 of a team App Store Connect API private key |
-| `APPLE_NOTARY_KEY_ID` | App Store Connect API key ID |
-| `APPLE_NOTARY_ISSUER_ID` | App Store Connect API issuer ID |
-| `SENTRY_AUTH_TOKEN` | Sentry organization token with `org:ci` access for `flash-corp/mojipond` |
+| Variable        | Value                                                                |
+| --------------- | -------------------------------------------------------------------- |
+| `APPLE_TEAM_ID` | The 10-character Team ID on the Developer ID Application certificate |
 
-The Release workflow uses that token to upload the archive's dSYMs. It does
-not upload source files. A local `.sentryclirc` may be used by the Sentry
-wizard, but it is ignored and must never be committed. The DSN embedded in the
-app is a public client identifier, not an auth token.
+Set these secrets on the `production-release` environment:
 
-Add these repository variables:
+| Secret                       | Value                                                                    |
+| ---------------------------- | ------------------------------------------------------------------------ |
+| `DEVELOPER_ID_P12_BASE64`    | Base64 of the exported Developer ID Application `.p12`                   |
+| `DEVELOPER_ID_P12_PASSWORD`  | Password used when exporting the `.p12`                                  |
+| `APPLE_NOTARY_KEY_P8_BASE64` | Base64 of the App Store Connect Team API `.p8`                           |
+| `APPLE_NOTARY_KEY_ID`        | The API key's 10-character Key ID                                        |
+| `APPLE_NOTARY_ISSUER_ID`     | The App Store Connect Issuer ID UUID                                     |
+| `SPARKLE_EDDSA_PRIVATE_KEY`  | Sparkle's exported Ed25519 private key                                   |
+| `SENTRY_AUTH_TOKEN`          | Sentry organization token with `org:ci` access for `flash-corp/mojipond` |
 
-| Name | Value |
-| --- | --- |
-| `APPLE_TEAM_ID` | The ten-character Team ID shown by the release signature |
-| `MOJIPOND_UPDATE_PUBLIC_KEY_BASE64` | Base64 raw Ed25519 public key generated from the offline updater key |
+Require approval for the environment and limit deployment to `main`. The
+workflow imports the `.p12` into a temporary keychain, writes the notary key to
+the runner's temporary directory, and removes both in its final cleanup step.
 
-Keep the matching updater private key offline. It does not belong in GitHub
-Actions. After the workflow creates its draft release:
+## Create the Apple credentials
 
-1. Download the final `MojiPond.zip` from the draft.
-2. Generate `update-feed.json` offline with the command in
-   [Generate a signed feed](#generate-a-signed-feed). Use
-   `https://mojipond.com/releases/MojiPond.zip` as the download URL and the
-   final GitHub release URL as the notes URL.
-3. Compare the reported public-key fingerprint, SHA-256, byte count, version,
-   and build with the reviewed release record.
-4. Upload `update-feed.json` to that same draft.
-5. Test the downloaded DMG and updater path on a clean macOS account or second
-   Mac, then publish the draft.
+Create a **Developer ID Application** certificate in the Apple Developer
+portal. Export the certificate and private key together from Keychain Access as
+a password-protected `.p12`; a `.cer` by itself cannot sign a build.
 
-Publishing triggers the Pages workflow. It copies the release assets into the
-public site so anonymous app downloads and update checks use stable release
-URLs rather than raw repository files. If any check fails, leave the release
-as a draft and fix the source with a higher build number.
+Create a Team API key under App Store Connect's **Users and Access →
+Integrations** page. Give it the Developer role, download the `.p8` once, and
+record its Key ID and Issuer ID. Use a Team Key rather than an Individual Key.
 
-## 1. Prepare the source
-
-Update `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in `project.yml`.
-Confirm third-party provenance and licenses. Confirm that
-`Resources/Branding/MojiPond-AppIcon-Source.png` is the reviewed first-party
-source and that every file in `Resources/Assets.xcassets/AppIcon.appiconset/`
-was regenerated from it. Do not bundle `knobiknows/all-the-bufo`; its repository
-is a retained importer-engine compatibility target, not a source exposed by the
-current public UI. The public repository audit on 2026-07-28 recorded 1,715
-tree entries (1,403 PNG, 295 GIF, and 10 JPG), found only `README` among
-license-like paths, and detected no `LICENSE`, repository license metadata, or
-other redistribution grant. Do not redistribute that artwork without suitable
-permission from the rights holder. Then start from a clean checkout:
+Encode the two files without line wrapping:
 
 ```sh
-git status --short
-./scripts/test.sh
+base64 < DeveloperIDApplication.p12 | tr -d '\n' | pbcopy
+base64 < AuthKey_KEYID.p8 | tr -d '\n' | pbcopy
 ```
 
-Generate and inspect the project if build settings changed:
+## Create the Sparkle key
+
+MojiPond pins Sparkle 2.9.5. Use that version's `generate_keys` tool so the
+private key is stored in your login Keychain under a named account:
+
+```sh
+generate_keys --account mojipond
+generate_keys --account mojipond -p
+```
+
+The second command prints the public key. It must match
+`SPARKLE_PUBLIC_ED_KEY` in `project.yml` and `SUPublicEDKey` in the built app's
+Info property list.
+
+Export the private key to a protected temporary file, set the environment
+secret through standard input, then remove the file:
+
+```sh
+(
+  set -e
+  umask 077
+  private_key_directory="$(mktemp -d)"
+  private_key_file="$private_key_directory/sparkle-private-key"
+  trap 'rm -f "$private_key_file"; rmdir "$private_key_directory"' EXIT
+  generate_keys --account mojipond -x "$private_key_file"
+  gh secret set SPARKLE_EDDSA_PRIVATE_KEY \
+    --env production-release \
+    < "$private_key_file"
+)
+```
+
+Back up the private key in an encrypted password manager. Changing the public
+key in a later build does not repair clients that still trust the old one;
+follow [Sparkle's key-rotation process](https://sparkle-project.org/documentation/)
+instead of replacing it in place.
+
+## Update delivery
+
+The app reads a signed appcast from:
+
+```text
+https://mojipond.com/releases/appcast.xml
+```
+
+`SURequireSignedFeed` and `SUVerifyUpdateBeforeExtraction` are enabled. Sparkle
+system profiling is disabled, automatic checks default to off, and the app does
+not enable automatic download or installation by default.
+
+The repository contains a signed empty appcast so the endpoint returns valid
+XML before the first release. For each release, Sparkle's `generate_appcast`
+tool reads the final notarized `MojiPond.zip`, signs its enclosure metadata with
+`SPARKLE_EDDSA_PRIVATE_KEY`, and writes `appcast.xml`. The enclosure URL names
+the versioned tag:
+
+```text
+https://github.com/iamrajjoshi/mojipond/releases/download/vVERSION/MojiPond.zip
+```
+
+The release workflow attaches `appcast.xml` beside the ZIP and DMG. After a
+stable release is published, the Pages workflow copies only that appcast to the
+site. It ignores drafts and prereleases, so publishing a beta cannot replace
+the stable feed.
+
+## Prepare a release
+
+1. Update `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in `project.yml`.
+   Keep the marketing version in `major.minor.patch` form and increment the
+   integer build number for every submitted build.
+2. Regenerate the project, run native and website tests, and merge the version
+   change to `main`.
+3. Confirm `main` is clean and CI is green.
+4. Dispatch the **Release** workflow with the exact version and build from
+   `project.yml`. Mark it as a prerelease only when it must stay off the stable
+   appcast.
 
 ```sh
 xcodegen generate
-xcodebuild \
-  -project MojiPond.xcodeproj \
-  -scheme MojiPond \
-  -configuration Release \
-  -showBuildSettings
+./scripts/test.sh
+pnpm install --frozen-lockfile
+pnpm site:format:check
+pnpm site:check
+pnpm site:build
+pnpm site:test
 ```
 
-Never place signing certificates, private update keys, notarization
-credentials, or API keys in the repository.
+The workflow rejects a version/build mismatch and an invocation from any branch
+other than `main`.
 
-## 2. Make a local ad-hoc package
+## What the workflow produces
 
-No Apple Developer identity is required:
-
-```sh
-./scripts/package-local.sh
-```
-
-The command creates a new timestamped folder under `Artifacts/releases/`
-containing:
+The protected job creates these draft-release assets:
 
 ```text
-MojiPond-<UTC timestamp>-local.xcarchive/
-MojiPond-<UTC timestamp>-local.zip
-MojiPond-<UTC timestamp>-local.dmg
+MojiPond.dmg
+MojiPond.zip
+appcast.xml
 BUILD-METADATA.json
 SHA256SUMS.txt
 ```
 
-Packaging refuses to start when any tracked file differs from `HEAD`, any
-non-ignored untracked file is present, or an ignored file exists below
-`Sources/` or `Resources/` where XcodeGen could include it in the app. It
-also rejects Git `assume-unchanged` and `skip-worktree` index flags, which can
-hide modified tracked bytes from an ordinary status check. It checks the
-source identity before and after checksumming the finished artifacts. Ignored
-local build output outside those input directories does not affect that
-check. The archive itself is built from a temporary `git archive` snapshot of
-the recorded revision with fresh Derived Data, rather than from the mutable
-working directory.
-`BUILD-METADATA.json` is a deterministic, fixed-schema record containing:
+Before creating the draft it:
 
-- schema version `1`;
-- the full Git revision and branch (`(detached)` when no branch is checked
-  out);
-- `clean: true`;
-- one UTC build timestamp shared with the artifact directory name;
-- the app's bundle identifier, marketing version, and build number; and
-- signing class: `ad-hoc`, `developer-id`, or `other`.
+- builds a Universal `arm64` and `x86_64` Release archive with Hardened Runtime;
+- uploads dSYMs to Sentry using `--no-sources`;
+- notarizes the ZIP, staples the app, rebuilds the public ZIP, then notarizes
+  and staples the DMG;
+- proves the Sparkle private secret derives the public key embedded in the
+  packaged app;
+- runs strict code-signature, Gatekeeper, stapler, architecture, DMG, checksum,
+  and Sparkle appcast checks.
 
-It intentionally excludes the remote URL, signing-identity name, credentials,
-user or machine names, and absolute local paths. `SHA256SUMS.txt` covers the
-ZIP, DMG, and `BUILD-METADATA.json`.
+The appcast must be generated from the rebuilt ZIP after the notarization ticket
+has been stapled. Repacking or modifying `MojiPond.zip` afterward invalidates
+its Sparkle signature and byte length.
 
-The Release app is built as a Universal binary by default. Verify it:
+## Review and publish
+
+Download the draft assets to a clean directory and verify the checksums:
 
 ```sh
-export RELEASE_DIR="/absolute/path/to/Artifacts/releases/MojiPond-<timestamp>-local"
-export APP_PATH="$RELEASE_DIR/MojiPond-<timestamp>-local.xcarchive/Products/Applications/MojiPond.app"
-export METADATA_PATH="$RELEASE_DIR/BUILD-METADATA.json"
-export EXPECTED_REVISION="<reviewed 40-character Git revision>"
-
-(
-  cd "$RELEASE_DIR"
-  shasum -a 256 -c SHA256SUMS.txt
-)
-plutil -p "$METADATA_PATH"
-test "$(plutil -extract schemaVersion raw -o - "$METADATA_PATH")" = "1"
-test "$(plutil -extract clean raw -o - "$METADATA_PATH")" = "true"
-test "$(plutil -extract revision raw -o - "$METADATA_PATH")" = "$EXPECTED_REVISION"
-codesign --verify --deep --strict --verbose=2 "$APP_PATH"
-lipo -archs "$APP_PATH/Contents/MacOS/MojiPond"
+shasum -a 256 -c SHA256SUMS.txt
+xmllint --noout appcast.xml
 ```
 
-Expected architectures are `arm64` and `x86_64`, in either order. An ad-hoc
-signature can retain the Hardened Runtime flag, but it has no Developer ID
-identity or Team ID, is not notarized, and is not suitable for
-public-distribution Gatekeeper assessment. The updater validates the running
-app as well as the candidate, so this local artifact is also deliberately
-unable to stage a production update.
+Install from the DMG on a Mac that does not have the development build or its
+TCC grants. Check Gatekeeper launch, first-run setup, the default-on Sentry
+choice, permission requests, Unicode insertion, ZIP import, and one update from
+the prior public version. Do not use a conversation you cannot safely alter for
+the Messages check.
 
-## 3. Install a Developer ID Application identity
-
-Public direct distribution requires membership in the Apple Developer Program
-and a **Developer ID Application** certificate with its private key available
-in the build user’s Keychain. A Developer ID Installer certificate is for flat
-installer packages and is not a substitute for signing the app.
-
-List available identities:
+Publish the draft only after that pass. GitHub's release event redeploys Pages;
+once it completes, verify:
 
 ```sh
-security find-identity -v -p codesigning
+curl --fail --silent --show-error \
+  https://mojipond.com/releases/appcast.xml \
+  | xmllint --noout -
 ```
 
-An Apple Development identity used for local Debug builds is not a substitute
-for Developer ID Application signing. Developer ID release steps cannot be
-verified until that separate identity is installed.
-
-## 4. Build a Developer ID archive and packages
-
-Use the identity name exactly as shown by `security find-identity`:
-
-```sh
-export MOJIPOND_SIGNING_IDENTITY="Developer ID Application: YOUR NAME (TEAMID)"
-export MOJIPOND_DEVELOPMENT_TEAM="TEAMID"
-export MOJIPOND_REQUIRE_DEVELOPER_ID=1
-./scripts/test.sh
-./scripts/package-local.sh
-```
-
-`MOJIPOND_REQUIRE_DEVELOPER_ID=1` prevents the packaging command from silently
-falling back to ad-hoc signing. The build keeps Hardened Runtime enabled.
-Xcode’s Developer ID signing path should add a secure timestamp; verify rather
-than assuming:
-
-```sh
-export RELEASE_DIR="/absolute/path/to/Artifacts/releases/MojiPond-<timestamp>-local"
-export ARCHIVE_PATH="$RELEASE_DIR/MojiPond-<timestamp>-local.xcarchive"
-export APP_PATH="$ARCHIVE_PATH/Products/Applications/MojiPond.app"
-export DMG_PATH="$RELEASE_DIR/MojiPond-<timestamp>-local.dmg"
-
-codesign --verify --deep --strict --verbose=2 "$APP_PATH"
-codesign --display --verbose=4 "$APP_PATH"
-spctl --assess --type execute --verbose=4 "$APP_PATH"
-lipo -archs "$APP_PATH/Contents/MacOS/MojiPond"
-```
-
-Before notarization, `spctl` may report that no notarization ticket is present.
-Inspect the designated requirement, Team ID, Hardened Runtime flags,
-entitlements, and timestamp in the `codesign` output.
-
-## 5. Store notarization credentials
-
-Use an App Store Connect API key or an Apple ID with an app-specific password.
-This example asks `notarytool` interactively rather than putting a password on
-the command line:
-
-```sh
-xcrun notarytool store-credentials "mojipond-notary" \
-  --apple-id "YOUR_APPLE_ID" \
-  --team-id "TEAMID"
-```
-
-Do not use the retired `altool` workflow. Apple’s notary service accepts
-`notarytool` submissions from current Xcode versions.
-
-## 6. Notarize and staple the DMG
-
-Submit the Developer ID-signed DMG and wait for the result:
-
-```sh
-xcrun notarytool submit "$DMG_PATH" \
-  --keychain-profile "mojipond-notary" \
-  --wait
-```
-
-The result must be `Accepted`. If it is not, retrieve the submission log using
-the ID printed by the submit command:
-
-```sh
-xcrun notarytool log "SUBMISSION_ID" \
-  --keychain-profile "mojipond-notary" \
-  "notary-log.json"
-```
-
-After acceptance:
-
-```sh
-xcrun stapler staple "$DMG_PATH"
-xcrun stapler validate "$DMG_PATH"
-spctl --assess \
-  --type open \
-  --context context:primary-signature \
-  --verbose=4 \
-  "$DMG_PATH"
-```
-
-Recompute the checksum after stapling because the DMG bytes changed:
-
-```sh
-(
-  cd "$RELEASE_DIR"
-  shasum -a 256 ./*.zip ./*.dmg BUILD-METADATA.json > SHA256SUMS.txt
-)
-```
-
-Mount the DMG, drag the app to `/Applications`, launch that installed copy on a
-clean test account or separate Mac, and repeat the TCC and Messages checks in
-[COMPATIBILITY.md](COMPATIBILITY.md). Verify behavior with the network
-disconnected as well as connected.
-
-## 7. If distributing a ZIP
-
-A ZIP cannot carry a stapled ticket itself. Submit the ZIP, staple the ticket
-to the app, and then create the final ZIP from that stapled app:
-
-```sh
-export ZIP_PATH="$RELEASE_DIR/MojiPond-<timestamp>-local.zip"
-export FINAL_ZIP_PATH="$RELEASE_DIR/MojiPond-notarized.zip"
-
-xcrun notarytool submit "$ZIP_PATH" \
-  --keychain-profile "mojipond-notary" \
-  --wait
-xcrun stapler staple "$APP_PATH"
-xcrun stapler validate "$APP_PATH"
-
-/usr/bin/ditto \
-  -c \
-  -k \
-  --norsrc \
-  --noextattr \
-  --noqtn \
-  --keepParent \
-  "$APP_PATH" \
-  "$FINAL_ZIP_PATH"
-
-(
-  cd "$RELEASE_DIR"
-  shasum -a 256 ./*.zip ./*.dmg BUILD-METADATA.json > SHA256SUMS.txt
-  shasum -a 256 -c SHA256SUMS.txt
-)
-```
-
-Assess an extracted, quarantined copy—not only the build-tree app—before
-publishing it. The checksum regeneration must happen after the final ZIP is
-created because stapling and recompression both change release bytes.
-
-## 8. Signed update metadata
-
-`AppUpdateController` wires manual checks from the status menu and About
-settings, plus a quiet daily background check when the user enables automatic
-checks. It persists the last attempt and only a scheduling hint about the last
-verified outcome. A known update is freshly authenticated on relaunch; no
-download metadata is restored from mutable preferences.
-`SignedUpdateChecker` authenticates the result before metadata reaches the UI.
-A verified newer build produces a quiet availability status and an optional
-release-notes link.
-
-Downloading remains a separate explicit action. `VerifiedUpdateStager` accepts
-only signed metadata from the configured feed/key boundary, downloads no more
-than the signed byte count, verifies the exact byte count and SHA-256 digest,
-and stages the ZIP in a private `0700` temporary directory. The checked-in
-defaults contain no production feed or trusted public key, so unconfigured
-builds report that update checks and staging are disabled.
-
-The verifier accepts an HTTPS JSON envelope:
-
-```json
-{
-  "schemaVersion": 1,
-  "algorithm": "ed25519",
-  "payload": "<base64 of the exact payload bytes>",
-  "signature": "<base64 signature over those exact payload bytes>"
-}
-```
-
-The decoded payload is:
-
-```json
-{
-  "schemaVersion": 1,
-  "version": "0.1.0",
-  "build": 1,
-  "publishedAt": "2026-07-27T00:00:00Z",
-  "minimumSystemVersion": "14.0",
-  "downloadURL": "https://updates.example.com/MojiPond-notarized.zip",
-  "releaseNotesURL": "https://updates.example.com/releases/0.1.0",
-  "assetSHA256": "<64 lowercase hexadecimal characters>",
-  "assetByteCount": 123456
-}
-```
-
-Supported signature algorithms are Ed25519 (`ed25519`) and P-256 ECDSA with
-SHA-256 (`p256-sha256`). Sign the exact payload bytes before Base64 encoding.
-Keep the private signing key offline or in a dedicated secrets service; embed
-only the public key in the app. The asset digest and size must describe the
-final published ZIP bytes. When present, `minimumSystemVersion` must contain
-one to three numeric components, such as `14`, `14.5`, or `14.5.1`; incompatible
-releases are not offered for download and are rejected again by the stager.
-
-### Generate a signed feed
-
-Use `scripts/generate-update-feed.swift` rather than assembling or signing JSON
-by hand. It uses CryptoKit, hashes the archive as a stream, serializes the
-payload and envelope as compact sorted-key JSON, signs the exact payload bytes,
-and verifies the new signature before writing anything. It refuses
-symbolic-link file inputs, archives above the default 512 MiB updater limit,
-private keys accessible by group or other users, changing inputs, insecure
-URLs, invalid metadata, missing output parents, and existing output files.
-
-The generator accepts a Base64-encoded CryptoKit raw private key in a file. It
-never prints or copies the private key into the feed. Generate and retain that
-file on an offline key-management machine or materialize it temporarily from a
-dedicated secrets service. Never place it in this repository, pass it as a
-command-line value or environment variable, include it in CI artifacts, or
-attach it to a release.
-
-Ed25519 is the recommended default. This native command creates a new key file
-without overwriting an existing one:
-
-```zsh
-KEY_PATH="/Volumes/SECURE/mojipond-update-ed25519-private-key.txt"
-(
-  umask 077
-  set -o noclobber
-  /usr/bin/xcrun swift -e \
-    'import CryptoKit; print(Curve25519.Signing.PrivateKey().rawRepresentation.base64EncodedString())' \
-    > "${KEY_PATH}"
-)
-/bin/chmod 600 "${KEY_PATH}"
-```
-
-For P-256, replace `Curve25519.Signing.PrivateKey()` with
-`P256.Signing.PrivateKey()`. Back up the private key in encrypted offline
-storage and record who can access it. The matching public key is not secret;
-the generator prints its Base64 raw representation and the same
-domain-separated SHA-256 fingerprint recorded by MojiPond after verification.
-
-Run the generator only after notarization, stapling, and creation of the final
-ZIP. Every input that affects signed metadata is explicit:
-
-```zsh
-RELEASE_DIRECTORY="${PWD}/Artifacts/releases/MojiPond-0.2.0"
-ARCHIVE_PATH="${RELEASE_DIRECTORY}/MojiPond-notarized.zip"
-FEED_PATH="${RELEASE_DIRECTORY}/update-feed.json"
-
-/usr/bin/xcrun swift scripts/generate-update-feed.swift \
-  --algorithm ed25519 \
-  --private-key "${KEY_PATH}" \
-  --archive "${ARCHIVE_PATH}" \
-  --version 0.2.0 \
-  --build 2 \
-  --published-at 2026-07-28T00:00:00Z \
-  --minimum-system-version 14.0 \
-  --download-url https://updates.example.com/MojiPond-notarized.zip \
-  --release-notes-url https://updates.example.com/releases/0.2.0 \
-  --output "${FEED_PATH}"
-```
-
-`--published-at` must be an exact UTC timestamp with whole seconds. The minimum
-system version and release-notes URL are optional; omit their complete flag and
-value when they do not apply. Paths must be absolute, the output directory must
-already exist, and the output is created with mode `0644`. The tool never
-overwrites an existing feed.
-
-Identical inputs produce identical signed payload bytes. CryptoKit does not
-guarantee identical signature bytes across runs, so separately generated valid
-envelope files need not be byte-for-byte identical. Compare the printed payload
-SHA-256, archive SHA-256 and byte count, verification-key fingerprint, and
-decoded metadata during review instead.
-
-Before publishing the feed:
-
-1. Run the focused native tooling checks:
-
-   ```zsh
-   /usr/bin/xcrun swift scripts/test-update-feed-generator.swift
-   ```
-
-2. Confirm the printed public key and fingerprint match the public key pinned
-   in the release build.
-3. Upload the final ZIP without transforming it, download it from the signed
-   HTTPS URL, and confirm its SHA-256 and byte count still match the generator
-   summary.
-4. Publish the reviewed feed last and retain the non-secret command arguments,
-   feed, hashes, fingerprint, and notarization evidence with the release
-   record.
-
-Treat key rotation as a release migration. First publish, on the old feed and
-with the old key, a transition build that pins a new public key and feed URL.
-Keep the old feed available during the migration window; do not silently swap
-the key behind a URL already pinned by older builds. For a bad but uncompromised
-release, publish a fixed, notarized archive with a higher build number. If the
-private key is suspected compromised, stop publishing through that trust
-boundary, preserve evidence, retire the endpoint, and distribute a newly
-keyed build through a separately authenticated channel.
-
-### Release ZIP contract
-
-The signed payload must point to a ZIP containing exactly one
-`MojiPond.app`. Ancestor directories are allowed, but sibling files, a second
-application, symlinks, special files, traversal, and unexpected extracted
-paths are rejected. The default updater limits are:
-
-| Limit | Default |
-| --- | ---: |
-| Signed/downloaded ZIP bytes | 512 MiB |
-| ZIP entries | 20,000 |
-| Bytes in one expanded entry | 256 MiB |
-| Total expanded bytes | 1 GiB |
-| Compression ratio | 200:1 |
-
-Build the candidate with Developer ID Application signing, Hardened Runtime,
-and a secure timestamp; notarize it and make sure the extracted app passes
-Gatekeeper. The candidate bundle identifier must be
-`com.rajjoshi.MojiPond`, and its version and integer build must exactly match
-the signed metadata. Both the running app and candidate are strictly
-code-signature checked and must have the same Team ID. An optional configured
-Team ID pins both identities further.
-
-Installer mode also consumes a private, one-time authorization record created
-by the currently running app for the exact destination and staged candidate.
-The command-line request is not sufficient by itself and cannot be replayed
-after the record is consumed.
-
-Create the final ZIP only after all signing, notarization, stapling, and
-packaging steps that change bytes. Compute `assetByteCount` and `assetSHA256`
-from that exact ZIP, then sign the exact payload bytes. Do not reuse the
-checksum of an earlier archive or the DMG.
-
-Configure the public verification boundary with four string keys in the app
-Info.plist:
-
-```text
-MojiPondUpdateFeedURL                 HTTPS feed URL
-MojiPondUpdateSignatureAlgorithm      ed25519 or p256-sha256
-MojiPondUpdatePublicKeyBase64         Base64 raw public-key representation
-MojiPondUpdateTeamIdentifier          10-character Apple Team ID
-```
-
-The project maps those keys to four user-defined build settings. Supply their
-public values to `scripts/build.sh` through the matching environment variables:
-
-```zsh
-export MOJIPOND_UPDATE_FEED_URL="https://updates.example.com/update-feed.json"
-export MOJIPOND_UPDATE_SIGNATURE_ALGORITHM="ed25519"
-export MOJIPOND_UPDATE_PUBLIC_KEY_BASE64="<Base64 raw public key>"
-export MOJIPOND_UPDATE_TEAM_IDENTIFIER="TEAMID1234"
-```
-
-Set all four or none. The build script rejects incomplete configuration,
-non-HTTPS or credential-bearing feed URLs, unsupported algorithms, malformed
-Base64 or wrong-length raw public keys, malformed Team IDs, and a Team ID that
-does not match the finished app's code signature. These four values are public
-trust configuration and may be retained with release records. The private
-update-signing key is separate and must never be passed to `scripts/build.sh`,
-added to `.env`, embedded in the app, or committed.
-
-Use the `TeamIdentifier=` value from `codesign --display --verbose=4` on the
-signed app. A parenthesized suffix in a certificate's display name is not an
-authoritative substitute.
-
-After archiving, confirm the resolved values in the exact release app before
-notarizing it:
-
-```zsh
-/usr/libexec/PlistBuddy \
-  -c "Print :MojiPondUpdateFeedURL" \
-  -c "Print :MojiPondUpdateSignatureAlgorithm" \
-  -c "Print :MojiPondUpdatePublicKeyBase64" \
-  -c "Print :MojiPondUpdateTeamIdentifier" \
-  "$APP_PATH/Contents/Info.plist"
-```
-
-Before enabling production checks:
-
-1. Run and review the signed-feed generator and its focused tooling checks for
-   the final ZIP.
-2. Configure the HTTPS feed and pin the public verification key and Team ID in
-   the app.
-3. Keep automatic checks opt-in.
-4. Publish only the final single-app notarized ZIP described above.
-5. Review and follow the rollback and signing-key rotation procedure above.
-6. Test invalid signatures, wrong sizes and digests, stale builds, hostile
-   archives, identity or Team-ID changes, offline behavior, cancellation,
-   redirects, and a real Gatekeeper-accepted release.
-
-### Explicit installation boundary
-
-After **Download & Verify** succeeds, the app offers **Install & Relaunch**.
-That action requires another explicit confirmation and repeats the ZIP digest,
-bundle metadata, both signatures, Gatekeeper state, version/build, and
-same-team checks before the running app starts the staged candidate executable
-in installer mode and quits.
-
-MojiPond ships no privileged helper, daemon, second executable, or silent
-installation path. Its one-executable installer:
-
-1. validates the exact staging/current/destination layout and rejects
-   symlinks;
-2. acquires a non-following lock beside the destination and consumes the
-   private, one-time authorization for the exact running app and staged
-   candidate;
-3. waits for the old PID, then takes over the private staging lease;
-4. rechecks the signed archive and both Developer ID identities;
-5. copies and verifies a unique sibling candidate;
-6. atomically exchanges the sibling candidate with the exact destination, then
-   moves the displaced app to a backup name;
-7. verifies and launches the final app; and
-8. removes the backup and staging directory only after normal services and the
-   status item start and the app writes a private readiness acknowledgement.
-
-Failures after replacement begins terminate the attempted launch, restore the
-backup, and verify the previous build. If the destination parent is not
-writable, the UI instead offers the verified candidate in Finder for manual
-replacement. Every other safety failure remains a hard failure.
-
-## Release checklist
-
-- [ ] Version and build number updated.
-- [ ] Clean-clone build and complete test suite pass.
-- [ ] Universal `arm64` and `x86_64` slices confirmed.
-- [ ] Developer ID signature, Team ID, Hardened Runtime, timestamp, and
-      entitlements inspected.
-- [ ] Notary submission accepted; ticket stapled and validated.
-- [ ] SHA-256 checksums regenerated after all byte-changing steps.
-- [ ] DMG or ZIP tested after download and extraction on a clean environment.
-- [ ] Permissions, secure-field suspension, exclusions, Unicode, PNG, GIF, and
-      clipboard behavior manually verified without sending a Message.
-- [ ] ZIP picker, ZIP drag and drop, preview, install, and ZIP replacement
-      manually verified; no direct file, folder, Slack-manifest, or GitHub
-      import entry point is exposed.
-- [ ] Light, dark, reduced-motion, keyboard, and VoiceOver UI audits complete.
-- [ ] Compatibility ledger updated with exact evidence.
-- [ ] Release notes and third-party attributions reviewed.
-- [ ] Sentry's **Prevent Storing of IP Addresses** project setting is enabled,
-      the dSYM upload succeeds, and a reviewed test crash is symbolicated.
-- [ ] AppIcon renditions reviewed against the first-party source artwork at
-      `Resources/Branding/MojiPond-AppIcon-Source.png`.
-- [ ] Signed update metadata published only if the feed-generation and trusted
-      public-key and Team-ID configuration are fully verified.
-- [ ] Update ZIP contains exactly one notarized `MojiPond.app`, and its final
-      signed byte count and SHA-256 are recorded in the signed metadata.
-- [ ] A real Developer ID build downloads, stages, revalidates, installs,
-      relaunches, acknowledges readiness, and removes its backup; an ad-hoc
-      build is confirmed unable to stage it.
-- [ ] A forced post-swap failure restores and re-verifies the previous build,
-      and an unwritable destination shows only the manual Finder fallback.
-- [ ] The packaged app contains one application executable and no updater
-      helper, daemon, or privileged component.
+Also open **Check for Updates…** from the prior installed version. A stable
+release must appear there. A prerelease must not alter the stable result.
+
+## Local packages
+
+`./scripts/package-local.sh` creates ZIP and DMG artifacts for inspection, but
+an ad-hoc or Apple Development build is not a public release. It lacks the
+Developer ID, notarization, stapled ticket, and Sparkle release signature used
+by the protected workflow.
+
+The appcast URL and Sparkle public key live in `project.yml`; local builds need
+no update-related environment variables. `.env.example` covers only local code
+signing and build-cache overrides.
+
+## Recovery rules
+
+- Revoke and replace a leaked Sentry token. It does not sign the app.
+- Revoke a leaked App Store Connect key in App Store Connect, then replace the
+  three notary secrets.
+- Revoke a leaked Developer ID certificate through Apple and replace the `.p12`
+  secrets. Existing notarized releases remain separate artifacts.
+- Do not rotate a leaked Sparkle key by swapping `SUPublicEDKey`. Stop release
+  publication and follow Sparkle's documented rotation or recovery procedure
+  so installed clients can move to the new key.
+
+Never edit a published ZIP or appcast in place. Publish a new version and build
+number, then let the stable Pages deployment select it.

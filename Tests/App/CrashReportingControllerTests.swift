@@ -44,6 +44,33 @@ final class CrashReportingControllerTests: XCTestCase {
         )
     }
 
+    func testLaunchPolicyWaitsForFirstRunChoice() {
+        XCTAssertFalse(
+            CrashReportingLaunchPolicy.shouldEnable(
+                isUITesting: false,
+                environment: [:],
+                hasCompletedOnboarding: false,
+                userAllowsCrashReports: true
+            )
+        )
+        XCTAssertFalse(
+            CrashReportingLaunchPolicy.shouldEnable(
+                isUITesting: false,
+                environment: [:],
+                hasCompletedOnboarding: true,
+                userAllowsCrashReports: false
+            )
+        )
+        XCTAssertTrue(
+            CrashReportingLaunchPolicy.shouldEnable(
+                isUITesting: false,
+                environment: [:],
+                hasCompletedOnboarding: true,
+                userAllowsCrashReports: true
+            )
+        )
+    }
+
     func testSentryOptionsAreLimitedToCrashAndHangReporting() {
         let options = Options()
 

@@ -69,22 +69,18 @@ enum GlobalActivationMode: String, Codable, Equatable, Sendable {
 
 struct NetworkPreferences: Codable, Equatable, Sendable {
     var allowsStickerSearch: Bool
-    var allowsUpdateChecks: Bool
     var allowsCrashReports: Bool
 
     init(
         allowsStickerSearch: Bool = false,
-        allowsUpdateChecks: Bool = false,
         allowsCrashReports: Bool = true
     ) {
         self.allowsStickerSearch = allowsStickerSearch
-        self.allowsUpdateChecks = allowsUpdateChecks
         self.allowsCrashReports = allowsCrashReports
     }
 
     private enum CodingKeys: String, CodingKey {
         case allowsStickerSearch
-        case allowsUpdateChecks
         case allowsCrashReports
     }
 
@@ -93,10 +89,6 @@ struct NetworkPreferences: Codable, Equatable, Sendable {
         allowsStickerSearch = try container.decodeIfPresent(
             Bool.self,
             forKey: .allowsStickerSearch
-        ) ?? false
-        allowsUpdateChecks = try container.decodeIfPresent(
-            Bool.self,
-            forKey: .allowsUpdateChecks
         ) ?? false
         allowsCrashReports = try container.decodeIfPresent(
             Bool.self,

@@ -1683,8 +1683,7 @@ final class RuntimeMediaAutocompleteIntegrationTests: XCTestCase {
         )
         var preferences = MojiPondPreferences.defaults
         preferences.network = NetworkPreferences(
-            allowsStickerSearch: networkOptions.allowsNotoNetwork,
-            allowsUpdateChecks: false
+            allowsStickerSearch: networkOptions.allowsNotoNetwork
         )
         let diagnostics = RuntimeMediaDiagnosticRecorder()
         let worker = UnicodeAutocompleteRuntimeWorker(

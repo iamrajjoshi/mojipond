@@ -86,9 +86,6 @@ jobs:
       - name: Run deterministic tests
         run: ./scripts/test.sh
 
-      - name: Test update feed tooling
-        run: /usr/bin/xcrun swift scripts/test-update-feed-generator.swift
-
   release:
     name: Sign, notarize, and draft release
     needs: verify
@@ -123,6 +120,44 @@ jobs:
             | shasum -a 256 -c -
           ditto -x -k .derived/tools/xcodegen.zip .derived/tools
           echo "${GITHUB_WORKSPACE}/.derived/tools/xcodegen/bin" >> "${GITHUB_PATH}"
+
+      - name: Resolve pinned Sparkle release tools
+        id: sparkle
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodegen generate
+          xcodebuild \
+            -resolvePackageDependencies \
+            -project MojiPond.xcodeproj \
+            -scheme MojiPond \
+            -derivedDataPath .derived/SparkleTools
+
+          resolved_version="$(
+            jq -er \
+              '.object.dependencies[]
+                | select(.packageRef.identity == "sparkle")
+                | .state.checkoutState.version' \
+              .derived/SparkleTools/SourcePackages/workspace-state.json
+          )"
+          if [[ "${resolved_version}" != "2.9.5" ]]; then
+            echo "Expected Sparkle 2.9.5, resolved ${resolved_version:-nothing}." >&2
+            exit 1
+          fi
+
+          sparkle_bin="${GITHUB_WORKSPACE}/.derived/SparkleTools/SourcePackages/artifacts/sparkle/Sparkle/bin"
+          generate_appcast="${sparkle_bin}/generate_appcast"
+          sign_update="${sparkle_bin}/sign_update"
+          for tool in "${generate_appcast}" "${sign_update}"; do
+            if [[ ! -x "${tool}" ]]; then
+              echo "Missing Sparkle release tool: ${tool}" >&2
+              exit 1
+            fi
+            codesign --verify --deep --strict --verbose=2 "${tool}"
+          done
+
+          echo "generate-appcast=${generate_appcast}" >> "${GITHUB_OUTPUT}"
+          echo "sign-update=${sign_update}" >> "${GITHUB_OUTPUT}"
 
       - name: Install pinned Sentry CLI
         env:
@@ -229,18 +264,10 @@ jobs:
           MOJIPOND_SIGNING_IDENTITY: ${{ steps.signing.outputs.identity }}
           MOJIPOND_DEVELOPMENT_TEAM: ${{ vars.APPLE_TEAM_ID }}
           MOJIPOND_REQUIRE_DEVELOPER_ID: "1"
-          MOJIPOND_UPDATE_FEED_URL: https://mojipond.com/releases/update-feed.json
-          MOJIPOND_UPDATE_SIGNATURE_ALGORITHM: ed25519
-          MOJIPOND_UPDATE_PUBLIC_KEY_BASE64: ${{ vars.MOJIPOND_UPDATE_PUBLIC_KEY_BASE64 }}
-          MOJIPOND_UPDATE_TEAM_IDENTIFIER: ${{ vars.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
           if [[ ! "${MOJIPOND_DEVELOPMENT_TEAM}" =~ ^[A-Z0-9]{10}$ ]]; then
             echo "APPLE_TEAM_ID must be a 10-character Apple team ID." >&2
-            exit 1
-          fi
-          if [[ -z "${MOJIPOND_UPDATE_PUBLIC_KEY_BASE64}" ]]; then
-            echo "MOJIPOND_UPDATE_PUBLIC_KEY_BASE64 is required." >&2
             exit 1
           fi
           ./scripts/package-local.sh
@@ -420,6 +447,138 @@ jobs:
             --verbose=4 \
             "${mount_directory}/MojiPond.app"
 
+      - name: Generate signed Sparkle appcast
+        env:
+          GENERATE_APPCAST: ${{ steps.sparkle.outputs.generate-appcast }}
+          RELEASE_BUILD: ${{ inputs.build }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          SIGN_UPDATE: ${{ steps.sparkle.outputs.sign-update }}
+          SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${SPARKLE_EDDSA_PRIVATE_KEY}" ]]; then
+            echo "The production-release environment is missing SPARKLE_EDDSA_PRIVATE_KEY." >&2
+            exit 1
+          fi
+          derived_public_key="$(
+            /usr/bin/xcrun swift -e '
+              import CryptoKit
+              import Foundation
+
+              enum SparkleKeyError: Error {
+                  case invalidPrivateKey
+              }
+
+              guard
+                  let encoded = ProcessInfo.processInfo.environment[
+                      "SPARKLE_EDDSA_PRIVATE_KEY"
+                  ],
+                  let seed = Data(
+                      base64Encoded: encoded,
+                      options: .ignoreUnknownCharacters
+                  ),
+                  seed.count == 32
+              else {
+                  throw SparkleKeyError.invalidPrivateKey
+              }
+              let privateKey = try Curve25519.Signing.PrivateKey(
+                  rawRepresentation: seed
+              )
+              print(
+                  privateKey.publicKey.rawRepresentation
+                      .base64EncodedString()
+              )
+            '
+          )"
+          shopt -s nullglob
+          release_apps=(
+            Artifacts/releases/MojiPond-*/*.xcarchive/Products/Applications/MojiPond.app
+          )
+          if (( ${#release_apps[@]} != 1 )); then
+            echo "Expected exactly one packaged app for Sparkle key verification." >&2
+            exit 1
+          fi
+          embedded_public_key="$(
+            /usr/libexec/PlistBuddy \
+              -c 'Print :SUPublicEDKey' \
+              "${release_apps[0]}/Contents/Info.plist"
+          )"
+          if [[ "${derived_public_key}" != "${embedded_public_key}" ]]; then
+            echo "SPARKLE_EDDSA_PRIVATE_KEY does not match the public key embedded in MojiPond." >&2
+            exit 1
+          fi
+
+          sparkle_private_key="${SPARKLE_EDDSA_PRIVATE_KEY}"
+          unset SPARKLE_EDDSA_PRIVATE_KEY
+
+          appcast_source="${RUNNER_TEMP}/mojipond-appcast-source"
+          appcast_path="${GITHUB_WORKSPACE}/Artifacts/public-release/appcast.xml"
+          mkdir -m 0700 "${appcast_source}"
+          cp Artifacts/public-release/MojiPond.zip "${appcast_source}/MojiPond.zip"
+
+          printf '%s' "${sparkle_private_key}" \
+            | "${GENERATE_APPCAST}" \
+                --ed-key-file - \
+                --download-url-prefix \
+                  "https://github.com/${GITHUB_REPOSITORY}/releases/download/v${RELEASE_VERSION}/" \
+                --link https://mojipond.com/ \
+                --maximum-deltas 0 \
+                --maximum-versions 1 \
+                -o "${appcast_path}" \
+                "${appcast_source}"
+
+          printf '%s' "${sparkle_private_key}" \
+            | "${SIGN_UPDATE}" \
+                --ed-key-file - \
+                "${appcast_path}"
+          printf '%s' "${sparkle_private_key}" \
+            | "${SIGN_UPDATE}" \
+                --verify \
+                --ed-key-file - \
+                "${appcast_path}"
+
+          expected_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${RELEASE_VERSION}/MojiPond.zip"
+          actual_url="$(
+            xmllint --xpath \
+              'string(/*[local-name()="rss"]/*[local-name()="channel"]/*[local-name()="item"][1]/*[local-name()="enclosure"]/@url)' \
+              "${appcast_path}"
+          )"
+          actual_build="$(
+            xmllint --xpath \
+              'string(/*[local-name()="rss"]/*[local-name()="channel"]/*[local-name()="item"][1]/*[local-name()="version"])' \
+              "${appcast_path}"
+          )"
+          actual_version="$(
+            xmllint --xpath \
+              'string(/*[local-name()="rss"]/*[local-name()="channel"]/*[local-name()="item"][1]/*[local-name()="shortVersionString"])' \
+              "${appcast_path}"
+          )"
+          actual_length="$(
+            xmllint --xpath \
+              'string(/*[local-name()="rss"]/*[local-name()="channel"]/*[local-name()="item"][1]/*[local-name()="enclosure"]/@length)' \
+              "${appcast_path}"
+          )"
+          actual_signature="$(
+            xmllint --xpath \
+              'string(/*[local-name()="rss"]/*[local-name()="channel"]/*[local-name()="item"][1]/*[local-name()="enclosure"]/@*[local-name()="edSignature"])' \
+              "${appcast_path}"
+          )"
+          zip_length="$(stat -f '%z' Artifacts/public-release/MojiPond.zip)"
+
+          if [[ "${actual_url}" != "${expected_url}" \
+                || "${actual_build}" != "${RELEASE_BUILD}" \
+                || "${actual_version}" != "${RELEASE_VERSION}" \
+                || "${actual_length}" != "${zip_length}" \
+                || -z "${actual_signature}" ]]; then
+            echo "The generated appcast does not match the final release artifact." >&2
+            exit 1
+          fi
+          if ! grep -Fq '<!-- sparkle-signatures:' "${appcast_path}"; then
+            echo "The generated appcast is not signed as a feed." >&2
+            exit 1
+          fi
+
       - name: Create one draft GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -444,6 +603,7 @@ jobs:
             "${release_arguments[@]}" \
             Artifacts/public-release/MojiPond.dmg \
             Artifacts/public-release/MojiPond.zip \
+            Artifacts/public-release/appcast.xml \
             Artifacts/public-release/BUILD-METADATA.json \
             Artifacts/public-release/SHA256SUMS.txt
 
