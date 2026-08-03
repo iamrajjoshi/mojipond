@@ -286,8 +286,7 @@ final class RuntimeKeyboardTests: XCTestCase {
         gate.setCaptureEnabled(true)
         for mode in [
             RuntimeInterceptionMode.suggestions,
-            .browser,
-            .media
+            .browser
         ] {
             gate.setMode(mode, acceptsTab: true, acceptsReturn: true)
             XCTAssertEqual(
@@ -393,118 +392,6 @@ final class RuntimeKeyboardTests: XCTestCase {
                 .passThrough
             )
         }
-    }
-
-    func testMediaGridOwnsHorizontalAndVerticalNavigationOnlyWhileVisible() {
-        let gate = RuntimeInterceptionGate()
-        gate.setCaptureEnabled(true)
-
-        XCTAssertEqual(
-            gate.decision(
-                for: snapshot(keyCode: RuntimeKeyboardKeyCode.leftArrow)
-            ),
-            .passThrough
-        )
-
-        gate.setMode(
-            .media,
-            acceptsTab: true,
-            acceptsReturn: true
-        )
-        for keyCode in [
-            RuntimeKeyboardKeyCode.leftArrow,
-            RuntimeKeyboardKeyCode.rightArrow,
-            RuntimeKeyboardKeyCode.upArrow,
-            RuntimeKeyboardKeyCode.downArrow,
-            RuntimeKeyboardKeyCode.tab,
-            RuntimeKeyboardKeyCode.returnKey,
-            RuntimeKeyboardKeyCode.escape
-        ] {
-            XCTAssertEqual(
-                gate.decision(for: snapshot(keyCode: keyCode)),
-                .intercept
-            )
-        }
-        XCTAssertEqual(
-            gate.decision(
-                for: snapshot(
-                    keyCode: RuntimeKeyboardKeyCode.rightArrow,
-                    flags: [.maskCommand]
-                )
-            ),
-            .passThrough
-        )
-
-        gate.setMode(
-            .hidden,
-            acceptsTab: true,
-            acceptsReturn: true
-        )
-        XCTAssertEqual(
-            gate.decision(
-                for: snapshot(keyCode: RuntimeKeyboardKeyCode.rightArrow)
-            ),
-            .passThrough
-        )
-    }
-
-    func testMediaPanelPassesSelectionKeysWhenThereIsNoSelection() {
-        let gate = RuntimeInterceptionGate()
-        gate.setCaptureEnabled(true)
-        gate.setMode(
-            .media,
-            acceptsTab: false,
-            acceptsReturn: false
-        )
-
-        for keyCode in [
-            RuntimeKeyboardKeyCode.leftArrow,
-            RuntimeKeyboardKeyCode.rightArrow,
-            RuntimeKeyboardKeyCode.upArrow,
-            RuntimeKeyboardKeyCode.downArrow,
-            RuntimeKeyboardKeyCode.tab,
-            RuntimeKeyboardKeyCode.returnKey
-        ] {
-            XCTAssertEqual(
-                gate.decision(for: snapshot(keyCode: keyCode)),
-                .passThrough
-            )
-        }
-        XCTAssertEqual(
-            gate.decision(
-                for: snapshot(keyCode: RuntimeKeyboardKeyCode.escape)
-            ),
-            .intercept
-        )
-    }
-
-    func testMediaGridOwnsShiftTabButOtherShiftedNavigationPassesThrough() {
-        let gate = RuntimeInterceptionGate()
-        gate.setCaptureEnabled(true)
-        gate.setMode(
-            .media,
-            acceptsTab: true,
-            acceptsReturn: true
-        )
-
-        XCTAssertEqual(
-            gate.outcome(
-                for: snapshot(
-                    keyCode: RuntimeKeyboardKeyCode.tab,
-                    flags: [.maskShift]
-                )
-            ),
-            .intercepting(.media)
-        )
-        XCTAssertEqual(
-            gate.decision(
-                for: snapshot(
-                    keyCode: RuntimeKeyboardKeyCode.downArrow,
-                    flags: [.maskShift]
-                )
-            ),
-            .passThrough
-        )
     }
 
     func testVerifiedExactTokenArmsCommitBeforeWorkerHandlesClosingTrigger()
@@ -1440,32 +1327,6 @@ final class RuntimeKeyboardTests: XCTestCase {
         )
         XCTAssertFalse(
             gate.hasPendingCommitSend(generation: generation)
-        )
-    }
-
-    func testEscapeSynchronouslyClosesMediaBeforeFollowingReturn() {
-        let gate = RuntimeInterceptionGate()
-        gate.setCaptureEnabled(true)
-        gate.setMode(
-            .media,
-            acceptsTab: true,
-            acceptsReturn: true
-        )
-
-        XCTAssertEqual(
-            gate.outcome(
-                for: snapshot(keyCode: RuntimeKeyboardKeyCode.escape)
-            ),
-            .intercepting(.media)
-        )
-        XCTAssertEqual(gate.mode, .hidden)
-        XCTAssertEqual(
-            gate.outcome(
-                for: snapshot(
-                    keyCode: RuntimeKeyboardKeyCode.returnKey
-                )
-            ).decision,
-            .passThrough
         )
     }
 

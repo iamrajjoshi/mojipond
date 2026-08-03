@@ -221,7 +221,7 @@ struct LibraryShellView: View {
         }
         .buttonStyle(.plain)
         .focusable()
-        .focusEffectDisabled()
+        .pondFocusEffectDisabled()
         .focused($focusedSidebarScope, equals: scope)
         .onMoveCommand(perform: moveSidebarSelection)
         .accessibilityLabel("\(title), \(accessibilityCount)")
@@ -249,7 +249,7 @@ struct LibraryShellView: View {
         }
         .buttonStyle(.plain)
         .focusable()
-        .focusEffectDisabled()
+        .pondFocusEffectDisabled()
         .focused($focusedSidebarScope, equals: scope)
         .onMoveCommand(perform: moveSidebarSelection)
         .accessibilityLabel(
@@ -546,11 +546,11 @@ struct LibraryShellView: View {
         case .idle, .loading:
             LibraryLoadingView()
         case let .failed(message):
-            ContentUnavailableView {
-                Label("Library unavailable", systemImage: "exclamationmark.triangle")
-            } description: {
-                Text(message)
-            } actions: {
+            PondEmptyState(
+                "Library unavailable",
+                systemImage: "exclamationmark.triangle",
+                description: message
+            ) {
                 Button("Try Again") {
                     Task {
                         await viewModel.reload()
@@ -560,11 +560,11 @@ struct LibraryShellView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .loaded, .partial:
             if viewModel.visibleItems.isEmpty {
-                ContentUnavailableView {
-                    Label(emptyTitle, systemImage: emptyIcon)
-                } description: {
-                    Text(emptyDescription)
-                } actions: {
+                PondEmptyState(
+                    emptyTitle,
+                    systemImage: emptyIcon,
+                    description: emptyDescription
+                ) {
                     if hasActiveFilters {
                         Button("Clear Filters") {
                             clearFilters()

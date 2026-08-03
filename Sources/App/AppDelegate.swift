@@ -434,8 +434,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let runtime = try MojiPondRuntimeController(
                 preferences: appState.preferences,
                 usageStore: usage,
-                managedMediaRoot: paths.libraryRoot,
-                mediaCacheRoot: paths.mediaCacheRoot
+                managedMediaRoot: paths.libraryRoot
             )
             let libraryViewModel = LibraryViewModel(
                 store: library,
@@ -774,10 +773,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "This media item failed its safety or integrity check."
         case .animatedWebPExperimental:
             "Animated WebP paste is experimental, so MojiPond left the token intact."
-        case .downloadFailed:
-            "The selected media could not be downloaded."
-        case .unsupportedDownloadedMedia:
-            "The downloaded media was empty, unsafe, or unsupported."
         case let .insertionFailed(reason):
             insertionFallbackMessage(for: reason)
         }

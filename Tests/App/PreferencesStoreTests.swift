@@ -25,7 +25,6 @@ final class PreferencesStoreTests: XCTestCase {
         expected.shortcode.trigger = .semicolon
         expected.shortcode.showsSuggestionsOnBareTrigger = true
         expected.shortcode.parserTimeout = 12
-        expected.network.allowsStickerSearch = true
         expected.network.allowsCrashReports = false
         expected.exclusions.domains = [
             DomainExclusion(domain: "example.com")!
@@ -40,14 +39,12 @@ final class PreferencesStoreTests: XCTestCase {
         defaults.set(false, forKey: "app.isEnabled")
         defaults.set("#", forKey: "shortcuts.trigger")
         defaults.set(false, forKey: "shortcuts.acceptTab")
-        defaults.set(true, forKey: "media.stickersEnabled")
 
         let migrated = makeStore().load()
 
         XCTAssertEqual(migrated.activationMode, .paused)
         XCTAssertEqual(migrated.shortcode.trigger, .hash)
         XCTAssertFalse(migrated.shortcode.acceptsTab)
-        XCTAssertTrue(migrated.network.allowsStickerSearch)
         XCTAssertTrue(migrated.network.allowsCrashReports)
         XCTAssertEqual(
             migrated.exclusions,

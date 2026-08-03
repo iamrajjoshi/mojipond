@@ -33,9 +33,6 @@ final class ThirdPartyNoticesTests: XCTestCase {
         )
         XCTAssertTrue(notice.contains("Copyright (c) 2015 Sentry"))
         XCTAssertTrue(notice.contains("Pinned version: 2.9.5"))
-        XCTAssertTrue(
-            notice.contains("Creative Commons Attribution 4.0")
-        )
     }
 
     func testDistributableBundleContainsSparkleNotices() throws {

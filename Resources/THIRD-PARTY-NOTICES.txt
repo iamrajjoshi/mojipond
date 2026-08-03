@@ -104,27 +104,3 @@ License: MIT with bundled external notices
 
 Sparkle's complete license, including its bsdiff, sais-lite, Ed25519, and
 signature-verifier notices, is bundled separately in SPARKLE-LICENSE.txt.
-
-
-Noto Animated Emoji
--------------------
-
-The animated emoji GIFs bundled with MojiPond are unmodified works from
-Noto Animated Emoji by Google.
-
-Project and attribution source:
-https://googlefonts.github.io/noto-emoji-animation/
-
-Original asset pattern:
-https://fonts.gstatic.com/s/e/notoemoji/latest/{codepoint}/512.gif
-
-License: Creative Commons Attribution 4.0 International (CC BY 4.0)
-License summary: https://creativecommons.org/licenses/by/4.0/
-Canonical legal code: https://creativecommons.org/licenses/by/4.0/legalcode
-Retrieved: 2026-07-27
-Modifications: None
-
-The license permits sharing and adaptation subject to its attribution
-requirements and other terms. The canonical legal code governs. The exact
-source codepoint, byte count, and SHA-256 digest for every bundled asset are
-recorded in noto-offline-manifest.json.

@@ -206,67 +206,6 @@ final class RuntimeSafetyAndCatalogTests: XCTestCase {
         )
     }
 
-    func testRuntimeCaptureLocatesBoundedMediaCommandSuffix() throws {
-        let system = FakeAccessibilityTextSystem()
-        system.text = "draft /sticker pond"
-        system.selection = NSRange(
-            location: system.text.utf16.count,
-            length: 0
-        )
-        let provider = RuntimeAccessibilityTextContextProvider(
-            accessibility: AccessibilityTextAdapter(system: system),
-            permissionChecker: GrantedRuntimePermissionChecker(),
-            secureInputChecker: InactiveRuntimeSecureInputChecker(),
-            applicationIdentity: MessagesRuntimeIdentityProvider()
-        )
-
-        let capture = try provider.capture(
-            expectedToken: "/sticker pond",
-            trigger: "/"
-        )
-
-        XCTAssertEqual(
-            capture.context.tokenRange,
-            NSRange(location: 6, length: 13)
-        )
-        XCTAssertEqual(
-            capture.bundleIdentifier,
-            MediaCommandParser.messagesBundleIdentifier
-        )
-    }
-
-    func testRuntimeCaptureRejectsEmbeddedMediaCommandPaths() throws {
-        for text in [
-            "https://host.example/sticker private words",
-            "draft/foo/sticker private words"
-        ] {
-            let system = FakeAccessibilityTextSystem()
-            system.text = text
-            system.selection = NSRange(
-                location: text.utf16.count,
-                length: 0
-            )
-            let provider = RuntimeAccessibilityTextContextProvider(
-                accessibility: AccessibilityTextAdapter(system: system),
-                permissionChecker: GrantedRuntimePermissionChecker(),
-                secureInputChecker: InactiveRuntimeSecureInputChecker(),
-                applicationIdentity: MessagesRuntimeIdentityProvider()
-            )
-
-            XCTAssertThrowsError(
-                try provider.capture(
-                    expectedToken: "/sticker private words",
-                    trigger: "/"
-                )
-            ) { error in
-                XCTAssertEqual(
-                    error as? RuntimeTextCaptureError,
-                    .invalidTokenContext
-                )
-            }
-        }
-    }
-
     func testRuntimeCaptureCanSafelyAnchorAnEmptyCaretReplacement() throws {
         let system = FakeAccessibilityTextSystem()
         system.text = "draft"
@@ -474,6 +413,6 @@ private struct MessagesRuntimeIdentityProvider:
 {
     func bundleIdentifier(for processIdentifier: pid_t) -> String? {
         _ = processIdentifier
-        return MediaCommandParser.messagesBundleIdentifier
+        return "com.apple.MobileSMS"
     }
 }

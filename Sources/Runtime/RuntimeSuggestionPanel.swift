@@ -184,60 +184,6 @@ enum RuntimeVoiceOverAnnouncement {
             .joined(separator: " ")
     }
 
-    static func media(
-        _ snapshot: RuntimeMediaPanelSnapshot
-    ) -> String {
-        let state: String
-        switch snapshot.state {
-        case .idle:
-            state = "Media search ready."
-        case .loading:
-            state = "Searching for media."
-        case .results:
-            state = resultCountDescription(
-                snapshot.items.count,
-                qualifier: "media"
-            )
-        case .offline:
-            state = "Offline. Showing "
-                + resultCountDescription(
-                    snapshot.items.count,
-                    qualifier: "bundled",
-                    capitalized: false
-                )
-        case .empty:
-            state = "No matching media."
-        case .cancelled:
-            state = "Media search cancelled."
-        case .rateLimited:
-            state = "Media provider is busy."
-        case let .failed(failure):
-            state = "Media search failed. "
-                + failure.runtimePresentationMessage
-        case .resolving:
-            state = "Preparing selected media."
-        }
-        let selection = mediaSelectionDescription(snapshot)
-        return [state, selection]
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
-    }
-
-    static func mediaUpdate(
-        _ snapshot: RuntimeMediaPanelSnapshot,
-        after previous: RuntimeMediaPanelSnapshot?
-    ) -> String {
-        guard
-            let previous,
-            previous.state == snapshot.state,
-            previous.items == snapshot.items,
-            previous.selectedIndex != snapshot.selectedIndex
-        else {
-            return media(snapshot)
-        }
-        return mediaSelectionDescription(snapshot)
-    }
-
     private static func selectedDescription(
         row: RuntimeSuggestionRow?,
         trigger: ShortcodeTrigger
@@ -249,31 +195,6 @@ enum RuntimeVoiceOverAnnouncement {
             + "\(row.shortcode) \(trigger.accessibilityName)."
     }
 
-    private static func mediaSelectionDescription(
-        _ snapshot: RuntimeMediaPanelSnapshot
-    ) -> String {
-        guard
-            let selectedIndex = snapshot.selectedIndex,
-            snapshot.items.indices.contains(selectedIndex)
-        else {
-            return ""
-        }
-        return "Selected \(snapshot.items[selectedIndex].title), "
-            + "\(selectedIndex + 1) of \(snapshot.items.count)."
-    }
-
-    private static func resultCountDescription(
-        _ count: Int,
-        qualifier: String,
-        capitalized: Bool = true
-    ) -> String {
-        let result = count == 1 ? "result" : "results"
-        let description = "\(count) \(qualifier) \(result)."
-        guard capitalized, let first = description.first else {
-            return description
-        }
-        return first.uppercased() + description.dropFirst()
-    }
 }
 
 enum RuntimeSuggestionPanelUpdate: Equatable, Sendable {
@@ -299,20 +220,12 @@ enum RuntimeSuggestionPanelUpdate: Equatable, Sendable {
 @MainActor
 protocol RuntimeSuggestionPresenting: AnyObject {
     func apply(_ update: RuntimeSuggestionPanelUpdate)
-    func applyMedia(_ update: RuntimeMediaPanelUpdate)
     func applyReportingVisibility(
         _ update: RuntimeSuggestionPanelUpdate
-    ) -> Bool
-    func applyMediaReportingVisibility(
-        _ update: RuntimeMediaPanelUpdate
     ) -> Bool
 }
 
 extension RuntimeSuggestionPresenting {
-    func applyMedia(_ update: RuntimeMediaPanelUpdate) {
-        _ = update
-    }
-
     func applyReportingVisibility(
         _ update: RuntimeSuggestionPanelUpdate
     ) -> Bool {
@@ -320,12 +233,6 @@ extension RuntimeSuggestionPresenting {
         return true
     }
 
-    func applyMediaReportingVisibility(
-        _ update: RuntimeMediaPanelUpdate
-    ) -> Bool {
-        applyMedia(update)
-        return true
-    }
 }
 
 /// A keyboard-only, nonactivating surface. Ignoring mouse events is deliberate:
@@ -345,17 +252,10 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
     private let panel: NonactivatingCaretPanel
     private let suggestionModel: RuntimeSuggestionPanelModel
     private let hostingController: NSHostingController<RuntimeSuggestionPanelView>
-    private let mediaPanel: NonactivatingCaretPanel
-    private let mediaModel: RuntimeMediaPanelModel
-    private let mediaHostingController:
-        NSHostingController<RuntimeMediaPanelView>
     private var latestRevision: UInt64 = 0
-    private var latestMediaRevision: UInt64 = 0
     private var lastSuggestionAnnouncement: String?
     private var lastAnnouncedSuggestionSnapshot:
         RuntimeSuggestionPanelSnapshot?
-    private var lastMediaAnnouncement: String?
-    private var lastAnnouncedMediaSnapshot: RuntimeMediaPanelSnapshot?
 
     init() {
         let initialSnapshot = RuntimeSuggestionPanelSnapshot(
@@ -373,16 +273,8 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
         hostingController = NSHostingController(
             rootView: RuntimeSuggestionPanelView(model: suggestionModel)
         )
-        let mediaModel = RuntimeMediaPanelModel(snapshot: .empty)
-        self.mediaModel = mediaModel
-        mediaHostingController = NSHostingController(
-            rootView: RuntimeMediaPanelView(model: mediaModel)
-        )
         panel = NonactivatingCaretPanel(
             contentRect: CGRect(x: 0, y: 0, width: 380, height: 48)
-        )
-        mediaPanel = NonactivatingCaretPanel(
-            contentRect: CGRect(x: 0, y: 0, width: 500, height: 210)
         )
         panel.contentViewController = hostingController
         panel.backgroundColor = .clear
@@ -392,52 +284,6 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
         panel.setAccessibilityLabel("MojiPond emoji suggestions")
         panel.setAccessibilityIdentifier("runtime.suggestionPanel")
 
-        mediaPanel.contentViewController = mediaHostingController
-        mediaPanel.backgroundColor = .clear
-        mediaPanel.isOpaque = false
-        mediaPanel.hasShadow = true
-        mediaPanel.ignoresMouseEvents = true
-        mediaPanel.setAccessibilityLabel("MojiPond media search")
-        mediaPanel.setAccessibilityIdentifier("runtime.mediaPanel")
-    }
-
-    func applyMedia(_ update: RuntimeMediaPanelUpdate) {
-        _ = applyMediaReportingVisibility(update)
-    }
-
-    func applyMediaReportingVisibility(
-        _ update: RuntimeMediaPanelUpdate
-    ) -> Bool {
-        guard update.revision >= latestMediaRevision else {
-            return false
-        }
-        latestMediaRevision = update.revision
-
-        switch update {
-        case .hide:
-            mediaPanel.orderOut(nil)
-            lastMediaAnnouncement = nil
-            lastAnnouncedMediaSnapshot = nil
-            return false
-        case let .show(snapshot, caretBounds):
-            panel.orderOut(nil)
-            mediaModel.snapshot = snapshot
-            mediaPanel.setContentSize(
-                RuntimeMediaPanelView.preferredSize(for: snapshot)
-            )
-            guard CaretPanelPositioner.position(
-                mediaPanel,
-                nearQuartzCaret: caretBounds
-            ) != nil else {
-                mediaPanel.orderOut(nil)
-                return false
-            }
-            if !mediaPanel.isVisible {
-                mediaPanel.orderFrontRegardless()
-            }
-            announceMedia(snapshot)
-            return true
-        }
     }
 
     func apply(_ update: RuntimeSuggestionPanelUpdate) {
@@ -505,21 +351,6 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
         postAnnouncement(announcement, from: panel)
     }
 
-    private func announceMedia(
-        _ snapshot: RuntimeMediaPanelSnapshot
-    ) {
-        let announcement = RuntimeVoiceOverAnnouncement.mediaUpdate(
-            snapshot,
-            after: lastAnnouncedMediaSnapshot
-        )
-        lastAnnouncedMediaSnapshot = snapshot
-        guard announcement != lastMediaAnnouncement else {
-            return
-        }
-        lastMediaAnnouncement = announcement
-        postAnnouncement(announcement, from: mediaPanel)
-    }
-
     private func postAnnouncement(
         _ announcement: String,
         from element: NSPanel
@@ -571,8 +402,6 @@ final class RuntimeSuggestionPanelController: RuntimeSuggestionPresenting {
                     + RuntimeSuggestionPresentationMetrics
                         .suggestionFooterHeight
             )
-        case .media:
-            return CGSize(width: 440, height: 1)
         }
     }
 }
@@ -672,7 +501,7 @@ struct RuntimeSuggestionPanelView: View {
                                 scrollToSelection(selected, with: proxy)
                             }
                         }
-                        .onChange(of: snapshot.revision) {
+                        .onChange(of: snapshot.revision) { _ in
                             if let selected = snapshot.selectedRow {
                                 scrollToSelection(selected, with: proxy)
                             }

@@ -27,10 +27,10 @@ Signing identities installed: none
 
 | Capability | State | Evidence or remaining proof |
 | --- | --- | --- |
-| macOS 14 deployment target | Automated | `project.yml` sets `MACOSX_DEPLOYMENT_TARGET=14.0`; runtime launch on macOS 14 remains pending |
+| macOS 13 deployment target | Automated | `project.yml` sets `MACOSX_DEPLOYMENT_TARGET=13.0`; CI and release verification reject an app whose Info.plist or either executable slice declares a different minimum. A runtime launch on macOS 13 still needs to be recorded |
 | Debug build on the environment above | Automated | Final warnings-as-errors test build completed successfully on 2026-08-02 |
-| Unit test suite on the environment above | Automated | 494 executed on 2026-08-02: 493 passed, 0 failed, and 1 intentionally gated live-network test skipped; the same Bufo test passed separately against the real repository. The adaptive-glyph group passed 24/24, including first-frame conversion, cache, priority, coalescing, supersession, and deferred-preparation coverage |
-| Universal Release binary (`arm64` + `x86_64`) | Manually verified | The `8c5eb77` 2026-07-28 local Release archive passed strict code-signature verification; `lipo -archs` reported `x86_64 arm64`, both slices declare macOS 14.0 minimum, and the ad-hoc signature carries Hardened Runtime. The static-glyph Release build repeated those checks and weak-imports `NSAdaptiveImageGlyph` in both slices |
+| Unit test suite on the environment above | Automated | 443 executed on 2026-08-02: 442 passed, 0 failed, and 1 intentionally gated live-network test skipped; the same Bufo test passed separately against the real repository. The adaptive-glyph group remains covered, including first-frame conversion, cache, priority, coalescing, supersession, and deferred preparation |
+| Universal Release binary (`arm64` + `x86_64`) | Automated | A fresh 2026-08-02 Release build passed strict code-signature verification and `verify-app-compatibility.sh`: the main executable and every bundled framework/helper contain both architectures, Info.plist declares macOS 13.0, and no slice requires a newer system. Runtime testing on a physical Intel Mac remains pending |
 | Xcode archive, ZIP, DMG, metadata, and SHA-256 output | Manually verified | `MojiPond-20260728T095411Z-local`, built from immutable snapshot `8c5eb77`, was independently checked: SHA-256 verification passed (`325e4a79…` ZIP, `103ed3f9…` DMG, `deb898ef…` metadata), metadata records the exact clean revision and branch, the metadata-free ZIP tested clean and expanded to exactly one byte-identical `MojiPond.app`, and the read-only DMG verified, mounted, and contained the same valid app plus an `/Applications` link |
 | Launch from `/Applications` with ad-hoc signing | Manually verified | The `8c5eb77` Universal Release was installed at `/Applications/MojiPond.app`, compared byte-for-byte with the verified archive, and launched successfully on the environment above. The current static-glyph Release was subsequently installed and launched at the same path; its strict signature verifies, it reports `x86_64 arm64`, and all three permission preflights remain granted |
 | Developer ID signing | Pending | No Developer ID Application identity is installed |
@@ -85,22 +85,17 @@ Signing identities installed: none
 | Manual failed and cancelled ZIP imports | Pending | Failure, cancellation, and cleanup behavior are automated; interactive running-app checks are not yet recorded |
 | Real `knobiknows/all-the-bufo` engine import | Manually verified | This verifies the retained importer engine, not a public import entry point. A gated live XCTest on 2026-07-28 fetched the repository, resolved its revision, validated 1,000+ assets including `bufo-fußball.png`, exposed normalized-name conflicts, installed with explicit keep-first/drop-alias decisions, and removed its workspace in 17.5 seconds. The repository audit found no detected license or redistribution grant, so its artwork is neither bundled nor redistributed |
 
-## Messages media commands
+## Messages custom-image insertion
 
 | Capability | State | Evidence or remaining proof |
 | --- | --- | --- |
-| Messages-only `/sticker` parsing | Automated | Parser tests cover app gating, query limits, timeout, cancellation, and modifiers |
-| Offline Noto manifest and bundled GIF integrity | Automated | Manifest, hash, attribution, and lookup tests |
-| Opt-in online Noto state machine | Automated | Coordinator tests use controlled provider doubles |
-| Media download validation and Noto cache | Automated | Downloader/cache tests cover HTTPS, content type, limits, cancellation, and atomic cache behavior |
 | Managed custom-media insertion validation | Automated | Resolver tests cover root containment, symlink escape, regular files, size, digest, magic bytes, and original animated bytes |
-| Static and animated custom-image adaptive glyph conversion | Automated | macOS-15 tests round-trip static images and frame 0 of animated assets through metadata-bearing HEIC and RTFD as one `NSAdaptiveImageGlyph`. The source animation remains stored unchanged; macOS 14 and rejected conversions retain the existing media fallback, including **Copy Media Instead** for failed animated WebP conversion. The successful glyph item omits raw photo representations |
-| `/sticker` grid and GIF insertion in an unsent Messages draft | Pending | Command parser, grid, resolver, and insertion engine are connected to the global runtime and covered by the 494-test suite; a manual Messages check still needs to be recorded |
-| Custom PNG insertion in an unsent Messages draft | Pending | Static glyph conversion and managed-media fallback are covered by the 494-test suite; a manual inline-glyph check with TCC permission still needs to be recorded |
+| Static and animated custom-image adaptive glyph conversion | Automated | macOS-15 tests round-trip static images and frame 0 of animated assets through metadata-bearing HEIC and RTFD as one `NSAdaptiveImageGlyph`. The source animation remains stored unchanged; macOS 13 and 14, plus rejected conversions on newer systems, retain the media fallback, including **Copy Media Instead** for failed animated WebP conversion. The successful glyph item omits raw photo representations |
+| Custom PNG insertion in an unsent Messages draft | Pending | Static glyph conversion and managed-media fallback have automated coverage; a manual inline-glyph check with TCC permission still needs to be recorded |
 | Custom animated image inserts frame 0 as an inline glyph in Messages | Pending | First-frame conversion is automated; an unsent-draft check must confirm that the static glyph resizes with surrounding text while the stored source remains animated |
 | Clipboard unchanged after Messages media insertion | Pending | Restoration engine is automated; real-app paste race is not |
 | Messages cancellation and target switch during commit | Pending | Cancellation, transaction IDs, and stale-target revalidation are automated; an unsent-draft check that cancels and switches the focused app/target during commit is not yet recorded |
-| User-visible **Copy Media Instead** recovery | Pending | Status-menu action and notice are connected and covered by the 494-test suite; a manual clipboard check still needs to be recorded |
+| User-visible **Copy Media Instead** recovery | Pending | Status-menu action and notice have automated coverage; a manual clipboard check still needs to be recorded |
 
 ## UI and accessibility quality
 

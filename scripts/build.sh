@@ -142,8 +142,7 @@ fi
 if [[ "${BUILD_CONFIGURATION}" == "Release" \
       && "${BUILD_ARCHITECTURES}" == *arm64* \
       && "${BUILD_ARCHITECTURES}" == *x86_64* ]]; then
-  EXECUTABLE_PATH="${APPLICATION_PATH}/Contents/MacOS/MojiPond"
-  /usr/bin/lipo "${EXECUTABLE_PATH}" -verify_arch arm64 x86_64
+  "${SCRIPT_DIRECTORY}/verify-app-compatibility.sh" "${APPLICATION_PATH}"
 fi
 
 echo "${APPLICATION_PATH}"

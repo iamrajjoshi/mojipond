@@ -10,12 +10,12 @@ final class AppStateTests: XCTestCase {
         state.setEnabled(false)
         state.updatePreferences {
             $0.shortcode.trigger = .pipe
-            $0.network.allowsStickerSearch = true
+            $0.network.allowsCrashReports = false
         }
 
         XCTAssertFalse(state.isEnabled)
         XCTAssertEqual(state.preferences.shortcode.trigger, .pipe)
-        XCTAssertTrue(state.preferences.network.allowsStickerSearch)
+        XCTAssertFalse(state.preferences.network.allowsCrashReports)
         XCTAssertEqual(store.saved.last, state.preferences)
     }
 

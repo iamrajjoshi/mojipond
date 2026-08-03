@@ -104,19 +104,12 @@ enum RuntimeKeyboardEventMapper {
     }
 
     static func hasUnsupportedInterceptionModifiers(
-        _ snapshot: KeyboardEventSnapshot,
-        allowsShiftedTab: Bool = false
+        _ snapshot: KeyboardEventSnapshot
     ) -> Bool {
         let modifiers = parserModifiers(
             from: snapshot.flags,
             for: snapshot.keyCode
         )
-        if
-            allowsShiftedTab,
-            snapshot.keyCode == RuntimeKeyboardKeyCode.tab
-        {
-            return !modifiers.subtracting([.shift, .capsLock]).isEmpty
-        }
         switch snapshot.keyCode {
         case RuntimeKeyboardKeyCode.leftArrow,
              RuntimeKeyboardKeyCode.rightArrow,
@@ -262,7 +255,7 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
                 clearCommitIntent(state: &state)
                 state.interactionRevision &+= 1
             }
-            if mode == .browser || mode == .media {
+            if mode == .browser {
                 state.exactCommitPrediction = nil
                 clearCommitIntent(state: &state)
             }
@@ -671,10 +664,7 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
             current.mode != .hidden,
             snapshot.type == .keyDown,
             !RuntimeKeyboardEventMapper
-                .hasUnsupportedInterceptionModifiers(
-                    snapshot,
-                    allowsShiftedTab: current.mode == .media
-                )
+                .hasUnsupportedInterceptionModifiers(snapshot)
         else {
             return .passingThrough(
                 predictionGeneration: predictionGeneration,
@@ -711,14 +701,10 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
             .intercept
         case RuntimeKeyboardKeyCode.leftArrow,
              RuntimeKeyboardKeyCode.rightArrow:
-            current.mode == .media && current.acceptsTab
-                ? .intercept
-                : .passThrough
+            .passThrough
         case RuntimeKeyboardKeyCode.upArrow,
              RuntimeKeyboardKeyCode.downArrow:
-            current.mode != .media || current.acceptsTab
-                ? .intercept
-                : .passThrough
+            .intercept
         case RuntimeKeyboardKeyCode.tab:
             current.acceptsTab || current.mode == .browser
                 ? .intercept
@@ -836,7 +822,6 @@ final class RuntimeInterceptionGate: @unchecked Sendable {
             snapshot.keyCode == RuntimeKeyboardKeyCode.escape,
             state.mode == .suggestions
                 || state.mode == .browser
-                || state.mode == .media
         {
             let generation = state.exactCommitPrediction?.generation
             state.mode = .hidden

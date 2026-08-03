@@ -232,8 +232,8 @@ if [[ ! -s "${NOTICE_PATH}" ]]; then
   exit 65
 fi
 if ! /usr/bin/grep -q "Copyright (c) 2019 GitHub, Inc." "${NOTICE_PATH}" \
-    || ! /usr/bin/grep -q "Copyright (c) 2015 Sentry" "${NOTICE_PATH}" \
-    || ! /usr/bin/grep -q "Creative Commons Attribution 4.0" "${NOTICE_PATH}"; then
+    || ! /usr/bin/grep -q "Copyright (c) 2026 Josh LaCalamito" "${NOTICE_PATH}" \
+    || ! /usr/bin/grep -q "Copyright (c) 2015 Sentry" "${NOTICE_PATH}"; then
   echo "Archive contains incomplete third-party notices." >&2
   exit 65
 fi

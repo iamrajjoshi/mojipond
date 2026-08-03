@@ -1,6 +1,17 @@
 import AppKit
 import SwiftUI
 
+extension View {
+    @ViewBuilder
+    func pondFocusEffectDisabled() -> some View {
+        if #available(macOS 14.0, *) {
+            focusEffectDisabled()
+        } else {
+            self
+        }
+    }
+}
+
 enum PondDesign {
     static let cornerRadius: CGFloat = 14
     static let compactCornerRadius: CGFloat = 9
@@ -523,6 +534,68 @@ struct PondPageHeader: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct PondEmptyState<Actions: View>: View {
+    let title: String
+    let systemImage: String
+    let description: String
+    private let actions: Actions
+
+    init(
+        _ title: String,
+        systemImage: String,
+        description: String,
+        @ViewBuilder actions: () -> Actions
+    ) {
+        self.title = title
+        self.systemImage = systemImage
+        self.description = description
+        self.actions = actions()
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 32, weight: .medium))
+                .foregroundStyle(PondDesign.pond)
+                .accessibilityHidden(true)
+
+            VStack(spacing: 5) {
+                Text(title)
+                    .font(.headline)
+                    .fontDesign(.rounded)
+
+                Text(description)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            actions
+                .padding(.top, 2)
+        }
+        .multilineTextAlignment(.center)
+        .padding(28)
+        .frame(maxWidth: 420)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+extension PondEmptyState where Actions == EmptyView {
+    init(
+        _ title: String,
+        systemImage: String,
+        description: String
+    ) {
+        self.init(
+            title,
+            systemImage: systemImage,
+            description: description
+        ) {
+            EmptyView()
+        }
     }
 }
 

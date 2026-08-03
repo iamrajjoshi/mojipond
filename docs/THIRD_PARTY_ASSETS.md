@@ -1,10 +1,10 @@
 # Third-party assets and implementation references
 
-The distributable application includes the complete gemoji MIT notice, Noto
-Animated Emoji attribution and CC BY 4.0 links, and the AdaptiveGlyphKit MIT
-notice in
-`Contents/Resources/THIRD-PARTY-NOTICES.txt`. Packaging fails closed if that
-resource or its required notices are missing.
+The distributable application includes the complete gemoji, AdaptiveGlyphKit,
+and Sentry Cocoa MIT notices in
+`Contents/Resources/THIRD-PARTY-NOTICES.txt`. Sentry's transitive notices and
+Sparkle's license ship as separate resources. Packaging fails closed if a
+required notice is missing.
 
 ## AdaptiveGlyphKit
 

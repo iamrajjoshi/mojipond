@@ -17,6 +17,5 @@ final class ApplicationPathsTests: XCTestCase {
             "/data/MojiPond/Import Staging"
         )
         XCTAssertEqual(paths.cachesRoot.path, "/cache/MojiPond")
-        XCTAssertEqual(paths.mediaCacheRoot.path, "/cache/MojiPond/Media")
     }
 }
