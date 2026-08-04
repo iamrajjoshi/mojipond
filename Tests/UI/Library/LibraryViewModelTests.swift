@@ -699,6 +699,24 @@ final class LibraryViewModelTests: XCTestCase {
         )
     }
 
+    func testRemovalTargetsDescribeTheirSpecificAction() {
+        let packTarget = LibraryRemovalTarget(
+            kind: .pack(UUID()),
+            title: "Remove pack?",
+            message: "Pack message"
+        )
+        let itemTarget = LibraryRemovalTarget(
+            kind: .item(packID: UUID(), itemID: UUID()),
+            title: "Remove emoji?",
+            message: "Emoji message"
+        )
+
+        XCTAssertEqual(packTarget.confirmationButtonTitle, "Remove Pack")
+        XCTAssertEqual(packTarget.failureTitle, "Couldn’t remove pack")
+        XCTAssertEqual(itemTarget.confirmationButtonTitle, "Remove Emoji")
+        XCTAssertEqual(itemTarget.failureTitle, "Couldn’t remove emoji")
+    }
+
     func testEditsAndRemovesThroughViewModel() async throws {
         let fixture = try await makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.workspace) }

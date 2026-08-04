@@ -167,6 +167,24 @@ struct LibraryRemovalTarget: Identifiable, Equatable {
     let kind: Kind
     let title: String
     let message: String
+
+    var confirmationButtonTitle: String {
+        switch kind {
+        case .pack:
+            "Remove Pack"
+        case .item:
+            "Remove Emoji"
+        }
+    }
+
+    var failureTitle: String {
+        switch kind {
+        case .pack:
+            "Couldn’t remove pack"
+        case .item:
+            "Couldn’t remove emoji"
+        }
+    }
 }
 
 struct LibraryItemDraft: Equatable {

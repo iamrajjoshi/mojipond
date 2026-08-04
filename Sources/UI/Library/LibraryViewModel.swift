@@ -447,7 +447,7 @@ final class LibraryViewModel: ObservableObject {
             }
             try await finishMutation(message: "Removed from the library.", undo: nil)
         } catch {
-            presentError("Couldn’t remove item", error)
+            presentError(target.failureTitle, error)
         }
     }
 

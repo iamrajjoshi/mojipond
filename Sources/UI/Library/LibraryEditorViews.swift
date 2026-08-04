@@ -188,9 +188,8 @@ struct LibraryItemDetailView: View {
                         await viewModel.copyToClipboard(item)
                     }
                 }
-                .keyboardShortcut("c", modifiers: .command)
                 Spacer()
-                Button("Done") {
+                Button("Close") {
                     finishAliasEditing()
                 }
                 .keyboardShortcut(.cancelAction)
@@ -282,7 +281,6 @@ struct LibraryItemDetailView: View {
                         await viewModel.copyToClipboard(item)
                     }
                 }
-                .keyboardShortcut("c", modifiers: .command)
                 Spacer()
                 Button("Cancel") {
                     finishCustomEditing()
@@ -389,12 +387,11 @@ struct LibraryItemDetailView: View {
                         await viewModel.copyToClipboard(item)
                     }
                 }
-                .keyboardShortcut("c", modifiers: .command)
                 Spacer()
-                Button("Done") {
+                Button("Close") {
                     finishAliasEditing()
                 }
-                .keyboardShortcut(.defaultAction)
+                .keyboardShortcut(.cancelAction)
             }
             .padding(18)
             .background(.bar)
@@ -546,23 +543,6 @@ struct LibraryPackDetailView: View {
         if let pack = viewModel.library.packs.first(where: { $0.id == packID }) {
             VStack(spacing: 0) {
                 HStack(alignment: .top, spacing: 14) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 11, weight: .semibold))
-                            .frame(width: 28, height: 28)
-                            .background(
-                                PondDesign.surface,
-                                in: Circle()
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .keyboardShortcut(.cancelAction)
-                    .accessibilityLabel("Close")
-                    .accessibilityIdentifier("library.packDetails.close")
-                    .help("Close")
-
                     ZStack {
                         Circle()
                             .fill(PondDesign.pond.opacity(0.12))
@@ -621,7 +601,7 @@ struct LibraryPackDetailView: View {
                         .help(
                             "Review one ZIP archive before replacing this pack."
                         )
-                        Button("Show Pack Files") {
+                        Button("Show Pack Files…") {
                             reveal(pack)
                         }
                         Button("Export Pack…") {
@@ -649,6 +629,19 @@ struct LibraryPackDetailView: View {
                     }
                 }
                 .formStyle(.grouped)
+
+                Divider()
+
+                HStack {
+                    Spacer()
+                    Button("Close") {
+                        dismiss()
+                    }
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityIdentifier("library.packDetails.close")
+                }
+                .padding(18)
+                .background(.bar)
             }
             .frame(
                 width: 540,
@@ -766,10 +759,10 @@ struct LibraryBuiltInPackDetailView: View {
         .safeAreaInset(edge: .bottom) {
             HStack {
                 Spacer()
-                Button("Done") {
+                Button("Close") {
                     dismiss()
                 }
-                .keyboardShortcut(.defaultAction)
+                .keyboardShortcut(.cancelAction)
             }
             .padding(18)
             .background(.bar)

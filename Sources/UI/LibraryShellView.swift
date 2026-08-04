@@ -104,7 +104,10 @@ struct LibraryShellView: View {
             isPresented: removalPresented,
             titleVisibility: .visible
         ) {
-            Button("Remove", role: .destructive) {
+            Button(
+                viewModel.pendingRemoval?.confirmationButtonTitle ?? "Remove",
+                role: .destructive
+            ) {
                 Task {
                     await viewModel.confirmRemoval()
                 }
@@ -239,12 +242,10 @@ struct LibraryShellView: View {
         } label: {
             sidebarRowLabel(
                 title: pack.name,
-                icon: pack.isEnabled
-                    ? "checkmark.circle.fill"
-                    : "circle",
+                icon: "shippingbox",
                 count: pack.items.count,
                 isSelected: isSelected,
-                iconColor: pack.isEnabled ? PondDesign.lily : .secondary
+                status: pack.isEnabled ? nil : "Disabled"
             )
         }
         .buttonStyle(.plain)
@@ -309,7 +310,7 @@ struct LibraryShellView: View {
                     )
                 }
             }
-            Button("Pack Details…") {
+            Button("Pack Details") {
                 packDetails = PackDetailSelection(id: pack.id)
             }
             Divider()
@@ -383,21 +384,24 @@ struct LibraryShellView: View {
         icon: String,
         count: Int,
         isSelected: Bool,
-        iconColor: Color? = nil
+        status: String? = nil
     ) -> some View {
         HStack(spacing: 9) {
             Image(systemName: icon)
                 .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(
-                    iconColor
-                        ?? (isSelected ? PondDesign.pond : .primary)
-                )
+                .foregroundStyle(isSelected ? PondDesign.pond : .primary)
                 .frame(width: 19)
                 .accessibilityHidden(true)
             Text(title)
                 .font(.callout.weight(.medium))
                 .lineLimit(1)
             Spacer(minLength: 4)
+            if let status {
+                Text(status)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
             Text(count.formatted())
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(isSelected ? PondDesign.pond : .secondary)
@@ -472,18 +476,17 @@ struct LibraryShellView: View {
                     chooseZIP()
                 } label: {
                     Label(
-                        "Import ZIP",
+                        "Import ZIP…",
                         systemImage: "square.and.arrow.down"
                     )
                 }
                 .buttonStyle(.borderedProminent)
-                .keyboardShortcut("i", modifiers: .command)
                 .accessibilityHint(
                     "Choose one local ZIP archive, or drop a ZIP anywhere in the Library"
                 )
 
                 if case .builtIn = viewModel.scope {
-                    Button("Source & License", systemImage: "info.circle") {
+                    Button("Source & License…", systemImage: "info.circle") {
                         showsBuiltInDetails = true
                     }
                 } else if let pack = viewModel.selectedPack {
@@ -491,7 +494,7 @@ struct LibraryShellView: View {
                         viewModel: viewModel,
                         pack: pack
                     )
-                    Button("Pack Details", systemImage: "info.circle") {
+                    Button("Pack Details…", systemImage: "info.circle") {
                         packDetails = PackDetailSelection(id: pack.id)
                     }
                 }
@@ -647,7 +650,7 @@ struct LibraryShellView: View {
                 await viewModel.copyToClipboard(item)
             }
         }
-        Button("Show Details") {
+        Button("Show Details…") {
             selectedItem = item
         }
     }

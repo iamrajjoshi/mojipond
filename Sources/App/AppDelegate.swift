@@ -110,32 +110,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func makeStatusMenu() -> NSMenu {
         let menu = NSMenu()
-        let enabledItem = NSMenuItem(
-            title: "Enabled",
+        let activationItem = NSMenuItem(
+            title: appState.isEnabled
+                ? "Disable MojiPond"
+                : "Enable MojiPond",
             action: #selector(toggleEnabled),
             keyEquivalent: ""
         )
-        enabledItem.state = appState.isEnabled ? .on : .off
-        menu.addItem(enabledItem)
+        activationItem.target = self
+        menu.addItem(activationItem)
         if pendingMediaCopyFallback?.payload != nil {
-            menu.addItem(
+            let copyMediaItem = menu.addItem(
                 withTitle: "Copy Media Instead",
                 action: #selector(copyPendingMedia),
                 keyEquivalent: ""
             )
+            copyMediaItem.target = self
         }
         menu.addItem(.separator())
-        menu.addItem(
-            withTitle: "Emoji Library…",
+        let libraryItem = menu.addItem(
+            withTitle: "Emoji Library",
             action: #selector(showLibrary),
-            keyEquivalent: "o"
+            keyEquivalent: ""
         )
+        libraryItem.target = self
         if !appState.hasCompletedOnboarding {
-            menu.addItem(
+            let onboardingItem = menu.addItem(
                 withTitle: "Finish Setup…",
                 action: #selector(showOnboarding),
                 keyEquivalent: ""
             )
+            onboardingItem.target = self
         }
         let settingsItem = menu.addItem(
             withTitle: "Settings…",
@@ -153,15 +158,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc
-    private func toggleEnabled(_ sender: NSMenuItem) {
+    private func toggleEnabled(_: NSMenuItem) {
         appState.setEnabled(!appState.isEnabled)
-        sender.state = appState.isEnabled ? .on : .off
         rebuildStatusMenu()
     }
 
     @objc
     private func showOnboarding() {
         if let onboardingWindow {
+            onboardingWindow.deminiaturize(nil)
             onboardingWindow.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
@@ -184,6 +189,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.setContentSize(NSSize(width: 720, height: 620))
         window.minSize = NSSize(width: 660, height: 560)
         window.center()
+        configureFrameAutosave(
+            for: window,
+            name: "MojiPond.Onboarding"
+        )
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -193,6 +202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc
     private func showLibrary() {
         if let libraryWindow {
+            libraryWindow.deminiaturize(nil)
             libraryWindow.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
@@ -214,6 +224,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.setContentSize(NSSize(width: 920, height: 620))
         window.minSize = NSSize(width: 780, height: 520)
         window.center()
+        configureFrameAutosave(for: window, name: "MojiPond.Library")
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -223,6 +234,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc
     private func showSettings() {
         if let settingsWindow {
+            settingsWindow.deminiaturize(nil)
             settingsWindow.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
@@ -239,10 +251,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ]
         window.setContentSize(NSSize(width: 740, height: 520))
         window.center()
+        configureFrameAutosave(for: window, name: "MojiPond.Settings")
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         settingsWindow = window
+    }
+
+    private func configureFrameAutosave(
+        for window: NSWindow,
+        name: String
+    ) {
+        guard !launchConfiguration.isUITesting else { return }
+        window.setFrameAutosaveName(name)
     }
 
     private func showUITestImportPreview() {

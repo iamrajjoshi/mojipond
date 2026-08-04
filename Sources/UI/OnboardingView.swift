@@ -102,6 +102,8 @@ struct OnboardingView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             Divider()
+            crashReportingChoice
+            Divider()
             footer
         }
         .frame(
@@ -234,43 +236,67 @@ struct OnboardingView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
-                PondCard {
-                    SettingsRow(
-                        icon: "stethoscope",
-                        title: "Share crash reports",
-                        detail:
-                            "On by default. Sends crash and hang diagnostics, including stack traces and app/runtime context, to Sentry. Standard request metadata, including IP, reaches Sentry. Shortcut text, clipboard contents, screenshots, and emoji files stay on this Mac.",
-                        detailAccessibilityIdentifier:
-                            "onboarding.crashReportsDisclosure"
-                    ) {
-                        Toggle(
-                            "Share crash reports",
-                            isOn: Binding(
-                                get: {
-                                    appState.preferences.network
-                                        .allowsCrashReports
-                                },
-                                set: { enabled in
-                                    appState.updatePreferences {
-                                        $0.network.allowsCrashReports = enabled
-                                    }
-                                }
-                            )
-                        )
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .tint(PondDesign.lily)
-                        .accessibilityLabel("Share crash reports")
-                        .accessibilityIdentifier(
-                            "onboarding.crashReportsToggle"
-                        )
-                    }
-                }
             }
             .frame(maxWidth: 640)
             .padding(24)
             .frame(maxWidth: .infinity)
         }
+    }
+
+    private var crashReportingChoice: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "stethoscope")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(PondDesign.pond)
+                .frame(width: 28, height: 28)
+                .background(
+                    PondDesign.pond.opacity(0.1),
+                    in: RoundedRectangle(
+                        cornerRadius: PondDesign.compactCornerRadius
+                    )
+                )
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Share crash reports")
+                    .font(.callout.weight(.medium))
+                Text(
+                    "On by default. Sends crash and hang diagnostics, including stack traces and app context, to Sentry. Reports may include an IP address, never typing, clipboard data, screenshots, or emoji files."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier(
+                    "onboarding.crashReportsDisclosure"
+                )
+            }
+            .layoutPriority(1)
+
+            Spacer(minLength: 10)
+
+            Toggle(
+                "Share crash reports",
+                isOn: Binding(
+                    get: {
+                        appState.preferences.network.allowsCrashReports
+                    },
+                    set: { enabled in
+                        appState.updatePreferences {
+                            $0.network.allowsCrashReports = enabled
+                        }
+                    }
+                )
+            )
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            .tint(PondDesign.lily)
+            .accessibilityLabel("Share crash reports")
+            .accessibilityIdentifier("onboarding.crashReportsToggle")
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+        .background(PondDesign.surface.opacity(0.94))
     }
 
     private var practiceEditor: some View {
@@ -387,7 +413,6 @@ struct OnboardingView: View {
                     .buttonStyle(.borderedProminent)
             } else {
                 Button("Continue Without Shortcuts", action: finish)
-                .keyboardShortcut(.defaultAction)
             }
         }
         .padding(.horizontal, 20)
