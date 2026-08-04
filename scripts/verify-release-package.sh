@@ -130,15 +130,7 @@ fi
 "${0:A:h}/verify-dmg-layout.sh" "${DMG_PATH}"
 
 if [[ "${SIGNING_CLASS}" == "developer-id" ]]; then
-  SIGNATURE_DETAILS=$(
-    /usr/bin/codesign --display --verbose=4 "${APPLICATION_PATH}" 2>&1
-  )
-  if [[ "${SIGNATURE_DETAILS}" != *"Authority=Developer ID Application:"* \
-        || "${SIGNATURE_DETAILS}" != *"flags=0x10000(runtime)"* \
-        || "${SIGNATURE_DETAILS}" != *"Timestamp="* ]]; then
-    echo "The app is missing a Developer ID authority, Hardened Runtime, or timestamp." >&2
-    exit 65
-  fi
+  "${0:A:h}/verify-app-distribution-signature.sh" "${APPLICATION_PATH}"
 fi
 
 echo "Verified release package: ${ARTIFACT_DIRECTORY}"

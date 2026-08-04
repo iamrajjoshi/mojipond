@@ -164,6 +164,8 @@ SHA256SUMS.txt
 Before creating the draft it:
 
 - builds a Universal `arm64` and `x86_64` Release archive with Hardened Runtime;
+- signs Sparkle's nested helpers inside-out, then verifies every Mach-O slice has
+  the expected Developer ID, team, Hardened Runtime, and secure timestamp;
 - uploads dSYMs to Sentry using `--no-sources`;
 - notarizes the ZIP, staples the app, rebuilds the public ZIP, then notarizes
   and staples the DMG;
@@ -212,10 +214,10 @@ alter the stable result.
 
 ## Local packages
 
-`./scripts/package-local.sh` creates ZIP and DMG artifacts for inspection, but
-an ad-hoc or Apple Development build is not a public release. It lacks the
-Developer ID, notarization, stapled ticket, and Sparkle release signature used
-by the protected workflow.
+`./scripts/package-local.sh` creates ZIP and DMG artifacts for inspection. Its
+default ad-hoc build is not a public release; even a locally configured
+Developer ID build still lacks the notarization, stapled ticket, and Sparkle
+release signature produced by the protected workflow.
 
 The appcast URL and Sparkle public key live in `project.yml`; local builds need
 no update-related environment variables. `.env.example` covers only local code
