@@ -44,6 +44,12 @@ if [[ ! -L "${MOUNT_DIRECTORY}/Applications" ]] \
   echo "The DMG does not contain the Applications drag target." >&2
   exit 65
 fi
+if /usr/bin/xattr -p \
+    com.apple.FinderInfo \
+    "${MOUNT_DIRECTORY}/MojiPond.app" >/dev/null 2>&1; then
+  echo "The DMG adds Finder metadata to the signed application bundle." >&2
+  exit 65
+fi
 for metadata_path in \
   "${MOUNT_DIRECTORY}/.DS_Store" \
   "${MOUNT_DIRECTORY}/.background.tiff"; do
