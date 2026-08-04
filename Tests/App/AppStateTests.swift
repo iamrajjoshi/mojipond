@@ -56,7 +56,7 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(state.statusSummary, "Locked")
 
         state.setEnabled(false)
-        XCTAssertEqual(state.statusSummary, "Paused")
+        XCTAssertEqual(state.statusSummary, "Disabled")
     }
 
     func testLaunchAtLoginUsesInjectedController() {
@@ -90,20 +90,42 @@ final class AppStateTests: XCTestCase {
     func testStatusMenuRoutesSettingsDirectlyToAppDelegate() throws {
         let delegate = AppDelegate()
         let menu = delegate.makeStatusMenu()
+        let activationItem = try XCTUnwrap(menu.items.first)
+        let libraryItem = try XCTUnwrap(
+            menu.items.first(where: { $0.title == "Emoji Library" })
+        )
+        let onboardingItem = menu.items.first(
+            where: { $0.title == "Finish Setup…" }
+        )
         let settingsItem = try XCTUnwrap(
             menu.items.first(where: { $0.title == "Settings…" })
         )
+        let quitItem = try XCTUnwrap(
+            menu.items.first(where: { $0.title == "Quit MojiPond" })
+        )
 
+        XCTAssertEqual(
+            activationItem.title,
+            delegate.appState.isEnabled
+                ? "Disable MojiPond"
+                : "Enable MojiPond"
+        )
+        XCTAssertEqual(activationItem.state, .off)
+        XCTAssertTrue(activationItem.target === delegate)
+        XCTAssertTrue(libraryItem.target === delegate)
+        XCTAssertEqual(libraryItem.keyEquivalent, "")
+        if let onboardingItem {
+            XCTAssertTrue(onboardingItem.target === delegate)
+        }
         XCTAssertTrue(settingsItem.target === delegate)
+        XCTAssertEqual(settingsItem.keyEquivalent, ",")
         XCTAssertEqual(
             NSStringFromSelector(try XCTUnwrap(settingsItem.action)),
             "showSettings"
         )
-        XCTAssertNotNil(
+        XCTAssertEqual(quitItem.keyEquivalent, "q")
+        XCTAssertNil(
             menu.items.first(where: { $0.title == "Emoji Library…" })
-        )
-        XCTAssertNotNil(
-            menu.items.first(where: { $0.title == "Quit MojiPond" })
         )
         XCTAssertNil(
             menu.items.first {

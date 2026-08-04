@@ -374,6 +374,7 @@ struct LibraryImportPreviewView: View {
                                     .foregroundStyle(
                                         PondDesign.errorForeground
                                     )
+                                    .accessibilityHidden(true)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(rejection.source)
                                         .font(.callout.weight(.medium))
@@ -414,7 +415,7 @@ struct LibraryImportPreviewView: View {
 
     private func footer(_ session: LibraryImportSession) -> some View {
         HStack {
-            Button("Discard") {
+            Button("Cancel") {
                 Task {
                     await viewModel.discardImport()
                     dismiss()
@@ -597,7 +598,7 @@ private struct LibraryCollisionRow: View {
     let existing: LibraryConflictItemPresentation
     let choice: LibraryConflictChoice?
     let renameValue: String
-    let setChoice: (LibraryConflictChoice) -> Void
+    let setChoice: (LibraryConflictChoice?) -> Void
     let setRename: (String) -> Void
 
     var body: some View {
@@ -611,17 +612,23 @@ private struct LibraryCollisionRow: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Menu {
+                Picker(
+                    "Resolution for :\(collision.shortcode.rawValue):",
+                    selection: Binding(
+                        get: { choice },
+                        set: { setChoice($0) }
+                    )
+                ) {
+                    Text("Choose Action")
+                        .tag(LibraryConflictChoice?.none)
                     ForEach(availableChoices) { option in
-                        Button(option.title) {
-                            setChoice(option)
-                        }
+                        Text(option.title)
+                            .tag(Optional(option))
                     }
-                } label: {
-                    Text(choice?.title ?? "Choose action")
                 }
+                .pickerStyle(.menu)
+                .labelsHidden()
                 .fixedSize()
-                .accessibilityLabel("Resolution for \(collision.shortcode.rawValue)")
             }
 
             HStack(alignment: .top, spacing: 10) {
@@ -635,26 +642,51 @@ private struct LibraryCollisionRow: View {
             }
 
             if choice == .renameIncoming {
-                HStack {
-                    Text(":")
-                        .foregroundStyle(.secondary)
-                    TextField(
-                        "new_shortcode",
-                        text: Binding(
-                            get: { renameValue },
-                            set: { setRename($0) }
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(":")
+                            .foregroundStyle(.secondary)
+                        TextField(
+                            "new_shortcode",
+                            text: Binding(
+                                get: { renameValue },
+                                set: { setRename($0) }
+                            )
                         )
-                    )
-                    .textFieldStyle(.roundedBorder)
-                    .font(.body.monospaced())
-                    Text(":")
-                        .foregroundStyle(.secondary)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.body.monospaced())
+                        Text(":")
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("New shortcode")
+
+                    Text(renameGuidance)
+                        .font(.caption)
+                        .foregroundStyle(
+                            normalizedRename == nil
+                                ? PondDesign.errorForeground
+                                : .secondary
+                        )
                 }
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel("New shortcode")
             }
         }
         .accessibilityElement(children: .contain)
+    }
+
+    private var normalizedRename: String? {
+        let normalized = Shortcode.normalizedString(from: renameValue)
+        return Shortcode(rawValue: normalized)?.rawValue
+    }
+
+    private var renameGuidance: String {
+        guard let normalizedRename else {
+            return "Enter a name beginning with a letter or number."
+        }
+        if normalizedRename != renameValue {
+            return "This will be saved as :\(normalizedRename):."
+        }
+        return "Use letters, numbers, underscores, plus signs, or hyphens."
     }
 
     private func conflictIdentity(

@@ -42,6 +42,51 @@ private enum SettingsDestination: String, CaseIterable, Identifiable {
     }
 }
 
+private enum SettingsNoticeDocument: String, Identifiable {
+    case license
+    case thirdPartyNotices
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .license:
+            "MojiPond License"
+        case .thirdPartyNotices:
+            "Third-Party Notices"
+        }
+    }
+
+    var resourceNames: [String] {
+        switch self {
+        case .license:
+            ["MOJIPOND-LICENSE"]
+        case .thirdPartyNotices:
+            [
+                "THIRD-PARTY-NOTICES",
+                "SPARKLE-LICENSE",
+                "SENTRY-THIRD-PARTY-NOTICES",
+            ]
+        }
+    }
+
+    var contents: String {
+        let documents = resourceNames.compactMap { resourceName -> String? in
+            guard let url = Bundle.main.url(
+                forResource: resourceName,
+                withExtension: "txt"
+            ) else {
+                return nil
+            }
+            return try? String(contentsOf: url, encoding: .utf8)
+        }
+        guard documents.count == resourceNames.count else {
+            return "The bundled \(title.lowercased()) could not be loaded."
+        }
+        return documents.joined(separator: "\n\n")
+    }
+}
+
 struct SettingsRootView: View {
     @ObservedObject var appState: AppState
     @ObservedObject private var permissions: SystemPermissionCenter
@@ -53,9 +98,8 @@ struct SettingsRootView: View {
     @State private var exclusionError: String?
     @State private var permissionNavigationError: String?
     @State private var showsUsageResetConfirmation = false
+    @State private var presentedNotice: SettingsNoticeDocument?
     @State private var destination: SettingsDestination
-    @FocusState private var focusedDestination: SettingsDestination?
-    @Environment(\.colorSchemeContrast) private var contrast
     private let permissionSettingsOpener:
         any SystemPermissionSettingsOpening
 
@@ -80,35 +124,21 @@ struct SettingsRootView: View {
     }
 
     var body: some View {
-        ZStack {
-            PondWindowBackdrop()
-
-            HStack(spacing: 0) {
-                sidebar
-
-                Rectangle()
-                    .fill(PondDesign.ripple.opacity(0.22))
-                    .frame(width: 1)
-
-                ScrollView {
-                    VStack(
-                        alignment: .leading,
-                        spacing: PondDesign.sectionSpacing
-                    ) {
-                        PondPageHeader(
-                            icon: destination.icon,
-                            title: destination.rawValue,
-                            detail: destination.detail
-                        )
-
-                        selectedPage
-                    }
-                    .frame(maxWidth: 600, alignment: .leading)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 22)
-                }
-                .scrollContentBackground(.hidden)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        TabView(selection: $destination) {
+            settingsPane(.general) {
+                general
+            }
+            settingsPane(.shortcuts) {
+                shortcuts
+            }
+            settingsPane(.library) {
+                library
+            }
+            settingsPane(.privacy) {
+                privacy
+            }
+            settingsPane(.about) {
+                about
             }
         }
         .tint(PondDesign.pond)
@@ -130,6 +160,9 @@ struct SettingsRootView: View {
                 "MojiPond will clear recent emoji and usage ranking. This can’t be undone."
             )
         }
+        .sheet(item: $presentedNotice) { document in
+            SettingsNoticeDocumentView(document: document)
+        }
         .onChange(of: destination) { newDestination in
             UserDefaults.standard.set(
                 newDestination.rawValue,
@@ -144,107 +177,46 @@ struct SettingsRootView: View {
         )
     }
 
-    private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(spacing: 4) {
-                ForEach(SettingsDestination.allCases) { item in
-                    Button {
-                        destination = item
-                        focusedDestination = item
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: item.icon)
-                                .font(.system(size: 15, weight: .medium))
-                                .frame(width: 21)
-                            Text(item.rawValue)
-                                .font(.callout.weight(.medium))
-                            Spacer()
-                        }
-                        .foregroundStyle(
-                            destination == item
-                                ? AnyShapeStyle(Color.primary)
-                                : AnyShapeStyle(.primary)
-                        )
-                        .padding(.horizontal, 10)
-                        .frame(height: 34)
-                        .background(
-                            destination == item
-                                ? PondDesign.pond.opacity(
-                                    contrast == .increased ? 0.24 : 0.11
-                                )
-                                : Color.clear,
-                            in: RoundedRectangle(
-                                cornerRadius: PondDesign.compactCornerRadius
-                            )
-                        )
-                        .overlay {
-                            if destination == item
-                                && contrast == .increased {
-                                RoundedRectangle(
-                                    cornerRadius:
-                                        PondDesign.compactCornerRadius
-                                )
-                                .stroke(PondDesign.pond, lineWidth: 2)
-                            }
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .pondFocusEffectDisabled()
-                    .focused($focusedDestination, equals: item)
-                    .onMoveCommand(perform: moveSettingsDestination)
-                    .accessibilityAddTraits(
-                        destination == item ? .isSelected : []
+    private func settingsPane<Content: View>(
+        _ item: SettingsDestination,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        ZStack {
+            PondWindowBackdrop()
+
+            ScrollView {
+                VStack(
+                    alignment: .leading,
+                    spacing: PondDesign.sectionSpacing
+                ) {
+                    PondPageHeader(
+                        icon: item.icon,
+                        title: item.rawValue,
+                        detail: item.detail
                     )
+
+                    content()
                 }
+                .frame(maxWidth: 600, alignment: .leading)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 22)
+                .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 10)
-            .padding(.top, 16)
-
-            Spacer(minLength: 20)
-
-            Rectangle()
-                .fill(PondDesign.ripple.opacity(0.16))
-                .frame(height: 1)
-                .padding(.horizontal, 14)
-
-            if appState.isEnabled && !appState.canMonitorTyping {
-                Button {
-                    destination = .privacy
-                } label: {
-                    sidebarStatus
-                }
-                .buttonStyle(.plain)
-                .help("Open Privacy settings")
-                .accessibilityHint("Opens MojiPond Privacy settings")
-            } else {
-                sidebarStatus
-            }
+            .scrollContentBackground(.hidden)
         }
-        .frame(width: 176)
-        .frame(maxHeight: .infinity)
-        .background(PondDesign.sidebarSurface.opacity(0.9))
-    }
-
-    @ViewBuilder
-    private var selectedPage: some View {
-        switch destination {
-        case .general:
-            general
-        case .shortcuts:
-            shortcuts
-        case .library:
-            library
-        case .privacy:
-            privacy
-        case .about:
-            about
+        .tabItem {
+            Label(item.rawValue, systemImage: item.icon)
         }
+        .tag(item)
     }
 
     private var general: some View {
         VStack(spacing: PondDesign.sectionSpacing) {
             SettingsCard {
+                runtimeStatus
+
+                SettingsDivider()
+
                 SettingsRow(
                     icon: "water.waves",
                     title: "Enable MojiPond",
@@ -282,6 +254,7 @@ struct SettingsRootView: View {
                     .labelsHidden()
                     .accessibilityLabel("Launch at login")
                     .toggleStyle(.switch)
+                    .controlSize(.mini)
                     .tint(PondDesign.lily)
                 }
 
@@ -314,6 +287,7 @@ struct SettingsRootView: View {
                         .labelsHidden()
                         .accessibilityLabel("Keep MojiPond up to date")
                         .toggleStyle(.switch)
+                        .controlSize(.mini)
                         .tint(PondDesign.lily)
                     }
 
@@ -355,6 +329,7 @@ struct SettingsRootView: View {
                     .labelsHidden()
                     .accessibilityLabel("Accept with Tab")
                     .toggleStyle(.switch)
+                    .controlSize(.mini)
                     .tint(PondDesign.lily)
                 }
 
@@ -372,6 +347,7 @@ struct SettingsRootView: View {
                     .labelsHidden()
                     .accessibilityLabel("Accept with Return")
                     .toggleStyle(.switch)
+                    .controlSize(.mini)
                     .tint(PondDesign.lily)
                 }
             }
@@ -421,6 +397,7 @@ struct SettingsRootView: View {
                         "Show suggestions on a bare trigger"
                     )
                     .toggleStyle(.switch)
+                    .controlSize(.mini)
                     .tint(PondDesign.lily)
                 }
 
@@ -443,6 +420,7 @@ struct SettingsRootView: View {
                         "Open the browser with \(triggerText)\(triggerText)"
                     )
                     .toggleStyle(.switch)
+                    .controlSize(.mini)
                     .tint(PondDesign.lily)
                 }
             }
@@ -467,6 +445,7 @@ struct SettingsRootView: View {
                         "Replace an exact closing token"
                     )
                     .toggleStyle(.switch)
+                    .controlSize(.mini)
                     .tint(PondDesign.lily)
                 }
 
@@ -519,7 +498,7 @@ struct SettingsRootView: View {
                     title: "Open library",
                     detail: "Browse, import, and manage emoji."
                 ) {
-                    Button("Open MojiPond Library") {
+                    Button("Open MojiPond Library…") {
                         NotificationCenter.default.post(
                             name: .mojiPondShowLibrary,
                             object: nil
@@ -535,7 +514,7 @@ struct SettingsRootView: View {
                     title: "Personal aliases",
                     detail: "Add another shortcode to any emoji."
                 ) {
-                    Button("Manage Aliases") {
+                    Button("Manage Aliases…") {
                         NotificationCenter.default.post(
                             name: .mojiPondShowAliases,
                             object: nil
@@ -692,8 +671,11 @@ struct SettingsRootView: View {
                                 removeApplicationExclusion(app.id)
                             } label: {
                                 Image(systemName: "minus.circle")
+                                    .frame(width: 28, height: 28)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .help("Remove \(app.displayName)")
                             .accessibilityLabel(
                                 "Remove \(app.displayName) exclusion"
                             )
@@ -740,8 +722,11 @@ struct SettingsRootView: View {
                             removeDomainExclusion(domain.id)
                         } label: {
                             Image(systemName: "minus.circle")
+                                .frame(width: 28, height: 28)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .help("Remove \(domain.domain)")
                         .accessibilityLabel(
                             "Remove \(domain.domain) exclusion"
                         )
@@ -755,23 +740,27 @@ struct SettingsRootView: View {
                 if !appState.preferences.exclusions.domains.isEmpty {
                     SettingsDivider()
                 }
-                HStack {
-                    TextField("example.com", text: $domainDraft)
-                        .accessibilityLabel("Website domain")
-                        .onSubmit(addDomainExclusion)
-                        .onChange(of: domainDraft) { _ in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Domain")
+                        .font(.callout.weight(.medium))
+                    HStack {
+                        TextField("example.com", text: $domainDraft)
+                            .accessibilityLabel("Website domain")
+                            .onSubmit(addDomainExclusion)
+                            .onChange(of: domainDraft) { _ in
+                                exclusionError = nil
+                            }
+                        Toggle(
+                            "Include subdomains",
+                            isOn: $domainIncludesSubdomains
+                        )
+                        .toggleStyle(.checkbox)
+                        .onChange(of: domainIncludesSubdomains) { _ in
                             exclusionError = nil
                         }
-                    Toggle(
-                        "Include subdomains",
-                        isOn: $domainIncludesSubdomains
-                    )
-                    .toggleStyle(.checkbox)
-                    .onChange(of: domainIncludesSubdomains) { _ in
-                        exclusionError = nil
+                        Button("Add", action: addDomainExclusion)
+                            .disabled(domainDraft.isEmpty)
                     }
-                    Button("Add", action: addDomainExclusion)
-                        .disabled(domainDraft.isEmpty)
                 }
                 if let exclusionError {
                     Text(exclusionError)
@@ -831,6 +820,34 @@ struct SettingsRootView: View {
                     + "save your messages or require an account."
             )
             .foregroundStyle(.secondary)
+
+            SettingsDivider()
+
+            SettingsActionRow(
+                icon: "doc.text",
+                title: "Acknowledgements",
+                detail: "Licenses for software included with MojiPond."
+            ) {
+                Button("Third-Party Notices…") {
+                    presentedNotice = .thirdPartyNotices
+                }
+                .accessibilityIdentifier(
+                    "settings.about.thirdPartyNotices"
+                )
+            }
+
+            SettingsDivider()
+
+            SettingsActionRow(
+                icon: "checkmark.seal",
+                title: "MojiPond license",
+                detail: "MojiPond is available under the MIT License."
+            ) {
+                Button("License…") {
+                    presentedNotice = .license
+                }
+                .accessibilityIdentifier("settings.about.license")
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -843,7 +860,7 @@ struct SettingsRootView: View {
         "\(triggerText)wave\(triggerText)"
     }
 
-    private var sidebarStatusColor: Color {
+    private var runtimeStatusColor: Color {
         switch appState.statusSummary {
         case "Ready":
             PondDesign.lily
@@ -858,7 +875,7 @@ struct SettingsRootView: View {
         }
     }
 
-    private var sidebarStatusDetail: String {
+    private var runtimeStatusDetail: String {
         guard appState.isEnabled else {
             return "Suggestions are off"
         }
@@ -870,55 +887,25 @@ struct SettingsRootView: View {
             : "Suggestions are not active"
     }
 
-    private var sidebarStatus: some View {
+    private var runtimeStatus: some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(sidebarStatusColor)
+                .fill(runtimeStatusColor)
                 .frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 1) {
                 Text(appState.statusSummary)
                     .font(.caption.weight(.semibold))
-                Text(sidebarStatusDetail)
+                Text(runtimeStatusDetail)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 
     private var userApplicationExclusions: [ApplicationExclusion] {
         appState.preferences.exclusions.userApplications
-    }
-
-    private func moveSettingsDestination(
-        _ direction: MoveCommandDirection
-    ) {
-        let destinations = SettingsDestination.allCases
-        guard let currentIndex = destinations.firstIndex(
-            of: focusedDestination ?? destination
-        ) else {
-            return
-        }
-        let nextIndex: Int
-        switch direction {
-        case .up:
-            nextIndex = max(destinations.startIndex, currentIndex - 1)
-        case .down:
-            nextIndex = min(
-                destinations.index(before: destinations.endIndex),
-                currentIndex + 1
-            )
-        default:
-            return
-        }
-        guard nextIndex != currentIndex else {
-            return
-        }
-        destination = destinations[nextIndex]
-        focusedDestination = destination
     }
 
     private func clearUsageResetNotice() {
@@ -1248,6 +1235,52 @@ private struct PermissionSettingsRow: View {
         case .granted:
             EmptyView()
         }
+    }
+}
+
+private struct SettingsNoticeDocumentView: View {
+    let document: SettingsNoticeDocument
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Text(document.title)
+                    .font(.headline)
+                Spacer()
+            }
+            .padding(12)
+
+            Divider()
+
+            ScrollView {
+                Text(document.contents)
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(20)
+                    .accessibilityIdentifier("settings.notice.text")
+            }
+
+            Divider()
+
+            HStack {
+                Spacer()
+                Button("Close", action: dismiss.callAsFunction)
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityIdentifier("settings.notice.close")
+            }
+            .padding(12)
+            .background(.bar)
+        }
+        .frame(
+            minWidth: 560,
+            idealWidth: 640,
+            minHeight: 400,
+            idealHeight: 500
+        )
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 }
 

@@ -6,6 +6,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 const title = "MojiPond — emoji shortcuts and custom packs for macOS";
 const description =
   "Type emoji shortcuts beside the cursor on macOS, then choose with the arrow keys and keep writing.";
+const downloadURL = import.meta.env.PUBLIC_DOWNLOAD_URL?.trim();
 ---
 
 <BaseLayout title={title} description={description}>
@@ -36,6 +37,17 @@ const description =
 
     <div class="hero-picker-shell">
       <HeroPicker />
+      {
+        downloadURL && (
+          <a
+            class="hero-download"
+            href={downloadURL}
+            aria-label="Download MojiPond for macOS"
+          >
+            Download for Mac
+          </a>
+        )
+      }
     </div>
   </section>
 </BaseLayout>
@@ -267,6 +279,35 @@ const description =
     margin: 30px auto 0;
   }
 
+  .hero-download {
+    display: flex;
+    width: max-content;
+    min-height: 46px;
+    padding: 9px 20px;
+    margin: 12px auto 0;
+    align-items: center;
+    justify-content: center;
+    color: var(--deep-water);
+    font-size: 0.95rem;
+    font-weight: 750;
+    text-decoration: none;
+    background: #f5fffd;
+    border: 1px solid rgb(245 255 253 / 70%);
+    border-radius: 999px;
+    box-shadow: 0 12px 34px rgb(0 20 28 / 28%);
+  }
+
+  .hero-download:hover {
+    color: var(--deep-water);
+    background: #fff;
+    border-color: #fff;
+    transform: translateY(-1px);
+  }
+
+  .hero-download:active {
+    transform: translateY(0) scale(0.98);
+  }
+
   @media (max-width: 820px) {
     .hero h1 {
       font-size: 3.75rem;
@@ -313,6 +354,13 @@ const description =
       width: 100%;
       margin-top: 24px;
     }
+
+    .hero-download {
+      min-height: 42px;
+      padding: 8px 17px;
+      margin-top: 12px;
+      font-size: 0.9rem;
+    }
   }
 
   @media (max-height: 980px) and (min-width: 521px) {
@@ -327,6 +375,12 @@ const description =
 
     .hero-picker-shell {
       margin-top: 24px;
+    }
+  }
+
+  @media (max-height: 1050px) and (min-width: 521px) {
+    .hero {
+      padding-top: 52px;
     }
   }
 
@@ -376,6 +430,12 @@ const description =
     }
   }
 
+  @media (max-height: 520px) and (min-width: 650px) {
+    .hero-download {
+      margin-top: 4px;
+    }
+  }
+
   @media (max-width: 520px) and (max-height: 740px) {
     .hero {
       padding: 68px 8px 8px;
@@ -393,6 +453,13 @@ const description =
 
     .hero-picker-shell {
       margin-top: 10px;
+    }
+
+    .hero-download {
+      min-height: 38px;
+      padding: 6px 15px;
+      margin-top: 8px;
+      font-size: 0.82rem;
     }
   }
 </style>

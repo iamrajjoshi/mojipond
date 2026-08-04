@@ -63,11 +63,10 @@ final class MojiPondUITests: XCTestCase {
             matching: .any
         )["onboarding.crashReportsToggle"]
         XCTAssertTrue(crashReportsToggle.waitForExistence(timeout: 2))
-        let setupScrollView = application.scrollViews.firstMatch
-        for _ in 0..<3 where !crashReportsToggle.isHittable {
-            setupScrollView.swipeUp()
-        }
-        XCTAssertTrue(crashReportsToggle.isHittable)
+        XCTAssertTrue(
+            crashReportsToggle.isHittable,
+            "Crash reporting should stay visible above setup completion"
+        )
         XCTAssertEqual(
             String(describing: crashReportsToggle.value ?? ""),
             "1"
@@ -147,7 +146,7 @@ final class MojiPondUITests: XCTestCase {
         let libraryWindow = application.windows["MojiPond"]
         XCTAssertTrue(libraryWindow.waitForExistence(timeout: 5))
         XCTAssertTrue(
-            application.buttons["Import ZIP"].waitForExistence(timeout: 5)
+            application.buttons["Import ZIP…"].waitForExistence(timeout: 5)
         )
         XCTAssertFalse(application.buttons["New Empty Pack…"].exists)
 
@@ -159,7 +158,7 @@ final class MojiPondUITests: XCTestCase {
         ).firstMatch
         XCTAssertTrue(packButton.waitForExistence(timeout: 3))
         packButton.click()
-        let packDetailsButton = application.buttons["Pack Details"]
+        let packDetailsButton = application.buttons["Pack Details…"]
         XCTAssertTrue(packDetailsButton.waitForExistence(timeout: 2))
         XCTAssertTrue(packDetailsButton.isHittable)
         packDetailsButton.click()
@@ -169,7 +168,7 @@ final class MojiPondUITests: XCTestCase {
             detailsSheet.buttons["Export Pack…"]
                 .waitForExistence(timeout: 2)
         )
-        XCTAssertTrue(detailsSheet.buttons["Show Pack Files"].exists)
+        XCTAssertTrue(detailsSheet.buttons["Show Pack Files…"].exists)
         XCTAssertTrue(detailsSheet.buttons["Replace from ZIP…"].exists)
         XCTAssertTrue(detailsSheet.staticTexts["ZIP · pond-pack.zip"].exists)
         XCTAssertFalse(detailsSheet.buttons["Done"].exists)
@@ -188,7 +187,7 @@ final class MojiPondUITests: XCTestCase {
 
         packButton.rightClick()
         XCTAssertTrue(
-            application.menuItems["Pack Details…"]
+            application.menuItems["Pack Details"]
                 .waitForExistence(timeout: 2)
         )
         XCTAssertFalse(application.buttons["Add Unicode Emoji…"].exists)
@@ -356,6 +355,7 @@ final class MojiPondUITests: XCTestCase {
 
         let domainField = application.textFields["Website domain"]
         XCTAssertTrue(domainField.exists)
+        XCTAssertTrue(application.staticTexts["Domain"].exists)
         domainField.click()
         domainField.typeText("example.com")
         application.buttons["Add"].click()
@@ -389,6 +389,24 @@ final class MojiPondUITests: XCTestCase {
             ).firstMatch.exists
         )
 
+        let thirdPartyNotices = application.buttons[
+            "settings.about.thirdPartyNotices"
+        ]
+        XCTAssertTrue(thirdPartyNotices.waitForExistence(timeout: 2))
+        thirdPartyNotices.click()
+        let noticesSheet = settingsWindow.sheets.firstMatch
+        XCTAssertTrue(noticesSheet.waitForExistence(timeout: 2))
+        XCTAssertTrue(
+            noticesSheet.staticTexts["Third-Party Notices"]
+                .waitForExistence(timeout: 2)
+        )
+        XCTAssertTrue(
+            noticesSheet.descendants(matching: .any)[
+                "settings.notice.text"
+            ].waitForExistence(timeout: 2)
+        )
+        noticesSheet.buttons["settings.notice.close"].click()
+
         application.descendants(matching: .any)["Library"].click()
         let resetButton = application.buttons["Reset learned ordering…"]
         XCTAssertTrue(resetButton.waitForExistence(timeout: 2))
@@ -413,7 +431,7 @@ final class MojiPondUITests: XCTestCase {
             ].waitForExistence(timeout: 2)
         )
 
-        application.buttons["Open MojiPond Library"].click()
+        application.buttons["Open MojiPond Library…"].click()
         XCTAssertTrue(
             application.windows[
                 "MojiPond"
@@ -472,7 +490,7 @@ final class MojiPondUITests: XCTestCase {
         let settingsWindow = application.windows["MojiPond Settings"]
         XCTAssertTrue(settingsWindow.waitForExistence(timeout: 5))
 
-        application.buttons["Shortcuts"].click()
+        application.descendants(matching: .any)["Shortcuts"].click()
         XCTAssertTrue(
             application.staticTexts["Acceptance"]
                 .waitForExistence(timeout: 2)
@@ -484,7 +502,7 @@ final class MojiPondUITests: XCTestCase {
             element: settingsWindow
         )
 
-        application.buttons["Privacy"].click()
+        application.descendants(matching: .any)["Privacy"].click()
         XCTAssertTrue(
             application.staticTexts["Always disabled"]
                 .waitForExistence(timeout: 2)
@@ -495,8 +513,8 @@ final class MojiPondUITests: XCTestCase {
             element: settingsWindow
         )
 
-        application.buttons["Library"].click()
-        let manageAliases = application.buttons["Manage Aliases"]
+        application.descendants(matching: .any)["Library"].click()
+        let manageAliases = application.buttons["Manage Aliases…"]
         XCTAssertTrue(manageAliases.waitForExistence(timeout: 2))
         manageAliases.click()
 
@@ -570,7 +588,7 @@ final class MojiPondUITests: XCTestCase {
                 "library.personalAliasesSaved"
             ].exists
         )
-        application.buttons["Done"].click()
+        application.buttons["Close"].click()
         XCTAssertTrue(
             application.staticTexts[
                 "Discard unsaved alias changes?"
@@ -578,7 +596,7 @@ final class MojiPondUITests: XCTestCase {
         )
         libraryWindow.sheets.buttons["Keep Editing"].firstMatch.click()
         XCTAssertTrue(aliasesField.exists)
-        application.buttons["Done"].click()
+        application.buttons["Close"].click()
         let discardChangesButton = libraryWindow.sheets.buttons[
             "Discard Changes"
         ].firstMatch
@@ -610,17 +628,17 @@ final class MojiPondUITests: XCTestCase {
 
         assertLibraryIsReady(application)
         let importZIPButtons = application.buttons.matching(
-            NSPredicate(format: "label == %@", "Import ZIP")
+            NSPredicate(format: "label == %@", "Import ZIP…")
         )
         let importZIPButton = importZIPButtons.firstMatch
         XCTAssertTrue(
             importZIPButton.waitForExistence(timeout: 2),
-            "Expected Import ZIP to be available"
+            "Expected Import ZIP… to be available"
         )
         XCTAssertEqual(
             importZIPButtons.count,
             1,
-            "Expected exactly one accessible Import ZIP button"
+            "Expected exactly one accessible Import ZIP… button"
         )
         for removedControl in [
             "Choose Images…",
@@ -775,7 +793,7 @@ final class MojiPondUITests: XCTestCase {
         )
         XCTAssertTrue(
             application.buttons[
-                "Import ZIP"
+                "Import ZIP…"
             ].firstMatch.waitForExistence(timeout: 5)
         )
         XCTAssertTrue(

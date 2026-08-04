@@ -91,7 +91,7 @@ final class AppState: ObservableObject {
 
     var statusSummary: String {
         guard isEnabled else {
-            return "Paused"
+            return "Disabled"
         }
         if case .failed = runtimeState {
             return "Needs attention"
