@@ -167,6 +167,8 @@ Before creating the draft it:
 - uploads dSYMs to Sentry using `--no-sources`;
 - notarizes the ZIP, staples the app, rebuilds the public ZIP, then notarizes
   and staples the DMG;
+- prints Apple's status and issue log, and retains the JSON diagnostics for
+  seven days, when either notarization submission is rejected;
 - builds the DMG with a Retina background, fixed Finder layout, and an
   `/Applications` drag target, then verifies those presentation records
   headlessly;
