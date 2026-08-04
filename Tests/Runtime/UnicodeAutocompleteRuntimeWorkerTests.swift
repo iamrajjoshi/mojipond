@@ -794,6 +794,42 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
         XCTAssertTrue(inserted)
     }
 
+    func testSuggestionRefinementSelectsNewTopResultBeforeUserNavigation()
+        async throws
+    {
+        let harness = try makeHarness(
+            items: [
+                emoji(
+                    shortcode: "frog",
+                    value: "🐸",
+                    name: "Fancy frog"
+                ),
+                emoji(shortcode: "fable", value: "📖")
+            ],
+            targetText: ":fa"
+        )
+        harness.worker.setCaptureEnabled(true)
+        type(":f", into: harness.worker)
+
+        let initialTopResult = await eventually {
+            harness.presenter.latestShown?.selectedRow?.shortcode == "frog"
+        }
+        XCTAssertTrue(initialTopResult)
+
+        harness.worker.enqueue(
+            keySnapshot(keyCode: 0, characters: "a")
+        )
+
+        let refinedTopResult = await eventually {
+            harness.presenter.latestShown?.rows.map(\.shortcode)
+                == ["fable", "frog"]
+                && harness.presenter.latestShown?.selectedIndex == 0
+                && harness.presenter.latestShown?.selectedRow?.shortcode
+                    == "fable"
+        }
+        XCTAssertTrue(refinedTopResult)
+    }
+
     func testSuggestionRefinementPreservesSelectedItemWhenItStillMatches()
         async throws
     {
@@ -2917,12 +2953,13 @@ final class UnicodeAutocompleteRuntimeWorkerTests: XCTestCase {
 
     private func emoji(
         shortcode: String,
-        value: String
+        value: String,
+        name: String? = nil
     ) -> EmojiItem {
         EmojiItem(
             id: "test.\(shortcode)",
             shortcode: Shortcode(rawValue: shortcode)!,
-            name: shortcode,
+            name: name ?? shortcode,
             category: "test",
             content: .unicode(UnicodeEmojiContent(value: value)),
             packID: "test"
