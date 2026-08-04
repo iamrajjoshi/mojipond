@@ -341,15 +341,12 @@ jobs:
           public_dmg="${public_directory}/MojiPond.dmg"
           mkdir -m 0700 "${public_directory}"
 
-          /usr/bin/xcrun notarytool submit "${source_zip}" \
-            --key "${NOTARY_KEY_PATH}" \
-            --key-id "${APPLE_NOTARY_KEY_ID}" \
-            --issuer "${APPLE_NOTARY_ISSUER_ID}" \
-            --wait \
-            --output-format json \
-            > "${RUNNER_TEMP}/zip-notary.json"
-          /usr/bin/jq -e '.status == "Accepted"' \
-            "${RUNNER_TEMP}/zip-notary.json" >/dev/null
+          ./scripts/notarize-artifact.sh \
+            "${source_zip}" \
+            "${RUNNER_TEMP}/zip-notary.json" \
+            "${NOTARY_KEY_PATH}" \
+            "${APPLE_NOTARY_KEY_ID}" \
+            "${APPLE_NOTARY_ISSUER_ID}"
 
           /usr/bin/xcrun stapler staple "${app_path}"
           /usr/bin/xcrun stapler validate "${app_path}"
@@ -370,15 +367,12 @@ jobs:
             --timestamp \
             "${public_dmg}"
 
-          /usr/bin/xcrun notarytool submit "${public_dmg}" \
-            --key "${NOTARY_KEY_PATH}" \
-            --key-id "${APPLE_NOTARY_KEY_ID}" \
-            --issuer "${APPLE_NOTARY_ISSUER_ID}" \
-            --wait \
-            --output-format json \
-            > "${RUNNER_TEMP}/dmg-notary.json"
-          /usr/bin/jq -e '.status == "Accepted"' \
-            "${RUNNER_TEMP}/dmg-notary.json" >/dev/null
+          ./scripts/notarize-artifact.sh \
+            "${public_dmg}" \
+            "${RUNNER_TEMP}/dmg-notary.json" \
+            "${NOTARY_KEY_PATH}" \
+            "${APPLE_NOTARY_KEY_ID}" \
+            "${APPLE_NOTARY_ISSUER_ID}"
           /usr/bin/xcrun stapler staple "${public_dmg}"
           /usr/bin/xcrun stapler validate "${public_dmg}"
 
@@ -392,6 +386,19 @@ jobs:
               > SHA256SUMS.txt
             /usr/bin/shasum -a 256 -c SHA256SUMS.txt
           )
+
+      - name: Keep notarization diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mojipond-notarization-diagnostics-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/zip-notary.json
+            ${{ runner.temp }}/zip-notary-log.json
+            ${{ runner.temp }}/dmg-notary.json
+            ${{ runner.temp }}/dmg-notary-log.json
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Assess extracted release artifacts
         shell: zsh {0}
