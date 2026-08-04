@@ -175,6 +175,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         var results: [EmojiSearchResult]
         var presentationRows: [RuntimeSuggestionRow]
         var selectedIndex: Int
+        var selectionWasExplicit: Bool
         var visibleMode: RuntimeInterceptionMode
         var browserQuery: String
         var captureGeneration: UInt64
@@ -549,6 +550,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         let selectionChanged =
             transaction.selectedIndex != selectedIndex
         transaction.selectedIndex = selectedIndex
+        transaction.selectionWasExplicit = true
         transaction.presentationInteractionRevision = interactionRevision
         armShortcodeInactivityTimeout(for: &transaction)
         activeTransaction = transaction
@@ -902,6 +904,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             results: [],
             presentationRows: [],
             selectedIndex: -1,
+            selectionWasExplicit: false,
             visibleMode: .hidden,
             browserQuery: "",
             captureGeneration: 0,
@@ -1013,6 +1016,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
                 processingInteractionRevision
         }
         transaction.browserQuery = ""
+        transaction.selectionWasExplicit = false
         setResults(
             Array(
                 searchIndex.search(
@@ -1091,6 +1095,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         } else {
             transaction.selectedIndex = 0
         }
+        transaction.selectionWasExplicit = true
         if let processingInteractionRevision {
             transaction.presentationInteractionRevision =
                 processingInteractionRevision
@@ -2410,9 +2415,10 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         _ results: [EmojiSearchResult],
         in transaction: inout ActiveTransaction
     ) {
-        let selectedItemID = transaction.results.indices.contains(
-            transaction.selectedIndex
-        ) ? transaction.results[transaction.selectedIndex].item.id : nil
+        let selectedItemID = transaction.selectionWasExplicit
+            && transaction.results.indices.contains(transaction.selectedIndex)
+            ? transaction.results[transaction.selectedIndex].item.id
+            : nil
         transaction.results = results
         transaction.presentationRows = results.map { result in
             let artworkURLs = displayArtworkURLs(for: result.item)
@@ -2430,6 +2436,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
         }
         if results.isEmpty {
             transaction.selectedIndex = -1
+            transaction.selectionWasExplicit = false
         } else if let selectedItemID,
                   let preservedIndex = results.firstIndex(where: {
                       $0.item.id == selectedItemID
@@ -2437,6 +2444,7 @@ final class UnicodeAutocompleteRuntimeWorker: @unchecked Sendable {
             transaction.selectedIndex = preservedIndex
         } else {
             transaction.selectedIndex = 0
+            transaction.selectionWasExplicit = false
         }
     }
 
