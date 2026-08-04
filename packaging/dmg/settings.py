@@ -38,7 +38,6 @@ show_icon_preview = False
 include_icon_view_settings = "auto"
 include_list_view_settings = "auto"
 
-hide_extensions = ["MojiPond.app"]
 icon_locations = {
     "MojiPond.app": (170, 225),
     "Applications": (490, 225),
