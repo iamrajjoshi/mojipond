@@ -253,6 +253,16 @@ if ! /usr/bin/grep -q "Karl Stenerud" "${SENTRY_NOTICE_PATH}" \
   exit 65
 fi
 
+if [[ "${SIGNING_CLASS}" == "developer-id" ]]; then
+  "${SOURCE_SNAPSHOT_DIRECTORY}/scripts/sign-app-for-distribution.sh" \
+    "${APPLICATION_PATH}" \
+    "${SIGNING_IDENTITY}" \
+    "${SOURCE_SNAPSHOT_DIRECTORY}/Resources/MojiPond.entitlements"
+  "${SOURCE_SNAPSHOT_DIRECTORY}/scripts/verify-app-distribution-signature.sh" \
+    "${APPLICATION_PATH}" \
+    "${SIGNING_IDENTITY}"
+fi
+
 /usr/bin/ditto \
   -c \
   -k \

@@ -272,6 +272,19 @@ jobs:
           fi
           ./scripts/package-local.sh
 
+      - name: Verify Developer ID package
+        shell: zsh {0}
+        run: |
+          set -euo pipefail
+          package_directories=("${PWD}"/Artifacts/releases/MojiPond-*(N))
+          if (( ${#package_directories[@]} != 1 )); then
+            echo "Expected exactly one package directory." >&2
+            exit 1
+          fi
+          ./scripts/verify-release-package.sh \
+            "${package_directories[1]}" \
+            developer-id
+
       - name: Upload Sentry debug symbols
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
@@ -416,6 +429,7 @@ jobs:
             "${extracted_directory}"
           extracted_app="${extracted_directory}/MojiPond.app"
           /usr/bin/codesign --verify --deep --strict --verbose=2 "${extracted_app}"
+          ./scripts/verify-app-distribution-signature.sh "${extracted_app}"
           /usr/bin/xcrun stapler validate "${extracted_app}"
           /usr/sbin/spctl --assess --type execute --verbose=4 "${extracted_app}"
           ./scripts/verify-app-compatibility.sh "${extracted_app}"
