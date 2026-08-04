@@ -150,6 +150,56 @@ final class AppStateTests: XCTestCase {
             menu.items.first(where: { $0.title == "Ready" })
         )
     }
+
+    func testSettingsCommandUsesTheNativeApplicationMenuShortcut() throws {
+        let mainMenu = NSMenu()
+        let applicationMenuItem = NSMenuItem()
+        let applicationMenu = NSMenu()
+        applicationMenuItem.submenu = applicationMenu
+        mainMenu.addItem(applicationMenuItem)
+
+        let decoy = NSMenuItem(
+            title: "Custom Command",
+            action: nil,
+            keyEquivalent: ","
+        )
+        decoy.keyEquivalentModifierMask = [.shift]
+        applicationMenu.addItem(decoy)
+
+        let nativeSettings = NSMenuItem(
+            title: "Localized Settings Label",
+            action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
+            keyEquivalent: ","
+        )
+        nativeSettings.keyEquivalentModifierMask = [.command]
+        applicationMenu.addItem(nativeSettings)
+
+        let command = try XCTUnwrap(
+            SettingsMenuCommand.find(in: mainMenu)
+        )
+
+        XCTAssertTrue(command.menu === applicationMenu)
+        XCTAssertEqual(command.itemIndex, 1)
+        XCTAssertTrue(command.menu.item(at: 1) === nativeSettings)
+    }
+
+    func testSettingsCommandDoesNotDependOnAnEnglishTitle() {
+        let mainMenu = NSMenu()
+        let applicationMenuItem = NSMenuItem()
+        let applicationMenu = NSMenu()
+        applicationMenuItem.submenu = applicationMenu
+        mainMenu.addItem(applicationMenuItem)
+
+        let settings = NSMenuItem(
+            title: "Einstellungen…",
+            action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
+            keyEquivalent: ","
+        )
+        settings.keyEquivalentModifierMask = [.command]
+        applicationMenu.addItem(settings)
+
+        XCTAssertNotNil(SettingsMenuCommand.find(in: mainMenu))
+    }
 }
 
 private final class PreferencesStoreSpy: PreferencesPersisting {

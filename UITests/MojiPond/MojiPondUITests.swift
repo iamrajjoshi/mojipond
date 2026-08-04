@@ -266,7 +266,7 @@ final class MojiPondUITests: XCTestCase {
         captureDocumentationSurface(
             initialScreen: "settings",
             appearance: .light,
-            windowTitle: "MojiPond Settings",
+            windowTitle: "General",
             expectedText: "Enable MojiPond",
             expectsStaticText: true,
             screenshotName: "settings"
@@ -307,7 +307,9 @@ final class MojiPondUITests: XCTestCase {
             application.terminate()
         }
 
-        let settingsWindow = application.windows["MojiPond Settings"]
+        let settingsWindow = application.windows[
+            "com_apple_SwiftUI_Settings_window"
+        ]
         XCTAssertTrue(settingsWindow.waitForExistence(timeout: 5))
         XCTAssertFalse(
             application.checkBoxes["Keep MojiPond up to date"].exists
@@ -451,7 +453,7 @@ final class MojiPondUITests: XCTestCase {
         }
 
         XCTAssertTrue(
-            application.windows["MojiPond Settings"]
+            application.windows["com_apple_SwiftUI_Settings_window"]
                 .waitForExistence(timeout: 5)
         )
         let updateToggle = application.checkBoxes[
@@ -487,7 +489,9 @@ final class MojiPondUITests: XCTestCase {
             application.terminate()
         }
 
-        let settingsWindow = application.windows["MojiPond Settings"]
+        let settingsWindow = application.windows[
+            "com_apple_SwiftUI_Settings_window"
+        ]
         XCTAssertTrue(settingsWindow.waitForExistence(timeout: 5))
 
         application.descendants(matching: .any)["Shortcuts"].click()

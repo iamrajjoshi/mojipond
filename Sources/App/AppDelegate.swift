@@ -10,7 +10,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var onboardingWindow: NSWindow?
     private var libraryWindow: NSWindow?
-    private var settingsWindow: NSWindow?
     private var uiTestSurfaceWindow: NSWindow?
     private var uiTestSuggestionController:
         RuntimeSuggestionPanelController?
@@ -233,29 +232,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc
     private func showSettings() {
-        if let settingsWindow {
-            settingsWindow.deminiaturize(nil)
-            settingsWindow.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate(ignoringOtherApps: true)
+        guard
+            let command = SettingsMenuCommand.find(in: NSApp.mainMenu),
+            command.perform()
+        else {
+            appState.setRuntimeNotice("Settings could not be opened.")
             return
         }
-
-        let controller = NSHostingController(
-            rootView: SettingsRootView(appState: appState)
-        )
-        let window = NSWindow(contentViewController: controller)
-        window.title = "MojiPond Settings"
-        window.styleMask = [
-            .titled,
-            .closable
-        ]
-        window.setContentSize(NSSize(width: 740, height: 520))
-        window.center()
-        configureFrameAutosave(for: window, name: "MojiPond.Settings")
-        window.isReleasedWhenClosed = false
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        settingsWindow = window
     }
 
     private func configureFrameAutosave(
@@ -831,6 +815,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             FileHandle.standardOutput.write(data)
             FileHandle.standardOutput.write(Data([0x0A]))
         }
+        return true
+    }
+}
+
+@MainActor
+struct SettingsMenuCommand {
+    let menu: NSMenu
+    let itemIndex: Int
+
+    static func find(in mainMenu: NSMenu?) -> SettingsMenuCommand? {
+        guard let applicationMenu = mainMenu?.items.first?.submenu else {
+            return nil
+        }
+        guard let itemIndex = applicationMenu.items.firstIndex(where: {
+            $0.keyEquivalent == ","
+                && $0.keyEquivalentModifierMask.contains(.command)
+        }) else {
+            return nil
+        }
+        return SettingsMenuCommand(
+            menu: applicationMenu,
+            itemIndex: itemIndex
+        )
+    }
+
+    @discardableResult
+    func perform() -> Bool {
+        menu.update()
+        guard
+            let item = menu.item(at: itemIndex),
+            !item.isHidden,
+            item.isEnabled,
+            item.action != nil
+        else {
+            return false
+        }
+        menu.performActionForItem(at: itemIndex)
         return true
     }
 }
