@@ -495,7 +495,15 @@ test("source links stay minimal and point to GitHub", async ({
     "href",
     "https://github.com/iamrajjoshi/mojipond/releases/latest/download/MojiPond.dmg",
   );
-  await expect(sourceLinks.getByRole("link")).toHaveCount(2);
+  await expect(sourceLinks.getByRole("link")).toHaveCount(1);
+
+  const demoBox = await page.locator("[data-hero-demo]").boundingBox();
+  const downloadBox = await downloadLink.boundingBox();
+  expect(demoBox).not.toBeNull();
+  expect(downloadBox).not.toBeNull();
+  expect(downloadBox?.y ?? 0).toBeGreaterThanOrEqual(
+    (demoBox?.y ?? 0) + (demoBox?.height ?? 0),
+  );
 
   const sourceLink = page.locator(".site-revision");
   await expect(sourceLink).toHaveAttribute(
