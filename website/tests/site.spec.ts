@@ -489,7 +489,7 @@ test("source links stay minimal and point to GitHub", async ({
     "https://github.com/iamrajjoshi/mojipond",
   );
   const downloadLink = page.getByRole("link", {
-    name: "Download MojiPond for macOS",
+    name: "Download for Mac — MojiPond",
   });
   await expect(downloadLink).toHaveAttribute(
     "href",

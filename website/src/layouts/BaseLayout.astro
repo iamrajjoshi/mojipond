@@ -52,7 +52,9 @@ const socialImageURL = new URL(socialImage.src, Astro.site);
     <title>{title}</title>
   </head>
   <body class:list={{ "home-page": isHome }}>
-    <a class="skip-link" href="#main-content">Skip to content</a>
+    <a class="skip-link" href="#main-content">
+      Skip to content
+    </a>
     <SiteHeader inverse={isHome} showRepositoryLink={isHome} />
     <main id="main-content">
       <slot />

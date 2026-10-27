@@ -15,7 +15,9 @@ const downloadURL = import.meta.env.PUBLIC_DOWNLOAD_URL?.trim();
     <div class="hero-copy">
       <h1 id="hero-title" aria-label="Type :wave: Get 👋">
         <span class="hero-heading-final" aria-hidden="true" data-heading-final>
-          <span>Type <span class="shortcode">:wave:</span></span>
+          <span>
+            Type <span class="shortcode">:wave:</span>
+          </span>
           <span>Get 👋</span>
         </span>
         <span class="hero-heading-demo" aria-hidden="true" data-heading-demo>
@@ -37,17 +39,15 @@ const downloadURL = import.meta.env.PUBLIC_DOWNLOAD_URL?.trim();
 
     <div class="hero-picker-shell">
       <HeroPicker />
-      {
-        downloadURL && (
-          <a
-            class="hero-download"
-            href={downloadURL}
-            aria-label="Download MojiPond for macOS"
-          >
-            Download for Mac
-          </a>
-        )
-      }
+      {downloadURL && (
+        <a
+          class="hero-download"
+          href={downloadURL}
+          aria-label="Download for Mac — MojiPond"
+        >
+          Download for Mac
+        </a>
+      )}
     </div>
   </section>
 </BaseLayout>

@@ -19,7 +19,11 @@ import { emojiOptions, waveSuggestions } from "../lib/emojiOptions";
     data-phase="picker"
   >
     <div class="window-bar" aria-hidden="true">
-      <span class="traffic-lights"><i></i><i></i><i></i></span>
+      <span class="traffic-lights">
+        <i></i>
+        <i></i>
+        <i></i>
+      </span>
       <strong>Messages</strong>
       <span class="window-balance"></span>
     </div>
@@ -52,44 +56,48 @@ import { emojiOptions, waveSuggestions } from "../lib/emojiOptions";
           aria-label="Emoji suggestions"
           data-shortcode-suggestions
         >
-          {
-            waveSuggestions.map((option, index) => (
-              <button
-                id={`hero-option-${option.shortcode}`}
-                class:list={["suggestion", { selected: index === 0 }]}
-                type="button"
-                role="option"
-                aria-selected={index === 0 ? "true" : "false"}
-                tabindex="-1"
-                data-option={option.shortcode}
-              >
-                <span class="emoji" aria-hidden="true">
-                  {option.emoji}
-                </span>
-                <span class="suggestion-copy">
-                  <strong>:{option.shortcode}:</strong>
-                  <small>{option.name}</small>
-                </span>
-                <span class="selected-mark" aria-hidden="true">
-                  ✓
-                </span>
-              </button>
-            ))
-          }
+          {waveSuggestions.map((option, index) => (
+            <button
+              id={`hero-option-${option.shortcode}`}
+              class:list={["suggestion", { selected: index === 0 }]}
+              type="button"
+              role="option"
+              aria-selected={index === 0 ? "true" : "false"}
+              tabindex="-1"
+              data-option={option.shortcode}
+            >
+              <span class="emoji" aria-hidden="true">
+                {option.emoji}
+              </span>
+              <span class="suggestion-copy">
+                <strong>:{option.shortcode}:</strong>
+                <small>{option.name}</small>
+              </span>
+              <span class="selected-mark" aria-hidden="true">
+                ✓
+              </span>
+            </button>
+          ))}
         </div>
 
         <div class="picker-keys" aria-hidden="true">
-          <span><kbd>↑</kbd><kbd>↓</kbd> choose</span>
-          <span class="accept-cue"
-            ><kbd>Tab</kbd> or <kbd class="return-key">Return</kbd> insert</span
-          >
-          <span><kbd>Esc</kbd> close</span>
+          <span>
+            <kbd>↑</kbd>
+            <kbd>↓</kbd> choose
+          </span>
+          <span class="accept-cue">
+            <kbd>Tab</kbd> or <kbd class="return-key">Return</kbd> insert
+          </span>
+          <span>
+            <kbd>Esc</kbd> close
+          </span>
         </div>
       </div>
 
       <form class="composer-row" data-composer>
-        <label class="composer-label" for="hero-message-input">Try it now</label
-        >
+        <label class="composer-label" for="hero-message-input">
+          Try it now
+        </label>
         <div class="composer-field">
           <input
             id="hero-message-input"
